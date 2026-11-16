@@ -194,6 +194,7 @@ export function createGhostErrandRunner(deps: GhostErrandRunnerDeps): GhostErran
     } catch (error) {
       return failure('SESSION_UNAVAILABLE', error instanceof Error ? error.message : String(error));
     }
+    if (execution.agentKind === 'agy') return failure('SESSION_UNAVAILABLE', 'Native Antigravity plugin tasks are not supported');
     if (sessionId && (!row || !sessionMatchesConfig(row, execution, permissionMode, effectiveDir))) sessionId = null;
     if (!sessionId) {
       const ghostName = deps.getGhostName(request.ghostId);
