@@ -647,17 +647,22 @@ export function resolveModelSelectorAgentIdentity(
   runtimeAgentKind: AgentKind | null | undefined,
   pendingTarget: AgentKind | null | undefined,
 ): ModelSelectorAgentIdentity | undefined {
-  const toVendorKey = (kind: AgentKind): 'cc' | 'codex' | 'pi' =>
-    kind === 'codex' ? 'codex' : kind === 'pi' ? 'pi' : 'cc';
-  if (pendingTarget) {
+  // agy(Antigravity)只作历史会话身份保留,没有对应的引擎小标:返回 null 表示不画标,
+  // 不能落到 'cc' 让输入框显示 Claude 图标(cindy#2)。
+  const toVendorKey = (kind: AgentKind): 'cc' | 'codex' | 'pi' | null =>
+    kind === 'agy' ? null : kind === 'codex' ? 'codex' : kind === 'pi' ? 'pi' : 'cc';
+  const pendingKey = pendingTarget ? toVendorKey(pendingTarget) : null;
+  if (pendingKey) {
     return {
-      vendorKey: toVendorKey(pendingTarget),
+      vendorKey: pendingKey,
       state: 'pending',
     };
   }
   if (!runtimeAgentKind) return undefined;
+  const currentKey = toVendorKey(runtimeAgentKind);
+  if (!currentKey) return undefined;
   return {
-    vendorKey: toVendorKey(runtimeAgentKind),
+    vendorKey: currentKey,
     state: 'current',
   };
 }
