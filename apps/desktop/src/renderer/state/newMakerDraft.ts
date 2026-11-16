@@ -27,14 +27,15 @@ import { isDataOwnerPushStampCurrent } from '@/contexts/dataOwnerGeneration';
 import { sameModelRoute, type AppDefaultModelSelection } from '../../shared/appDefaultModelSelection';
 import type { BotModelRoute } from '../../shared/botModelChain';
 
-import type { MakerVendor } from '@/lib/ccAgent.types';
-import { isSelectableVendor } from '@/lib/agentVendors';
+import { isSelectableVendor, type SelectableVendor } from '@/lib/agentVendors';
 import type { Effort, PermissionMode } from '@/lib/userPreferences.types';
 import { getDefaultModelForVendor } from '@/lib/modelDefinitions';
 import { isKnownProductDefaultTupleIdentity } from '@/lib/newMakerDefaultTuple';
 import type { OrcaWorkerPermissionMode } from '../../shared/orca-worker-permission-mode';
 import { normalizeWorkingDirForStorage } from '../../shared/workingDir';
 import { getManagedWorktreeBasePath } from '../../shared/managedWorktreePaths';
+
+type DraftVendor = SelectableVendor | 'orca';
 
 const STORAGE_KEY = 'xdt:newMakerDraft:v1';
 let activeDataOwnerId: string | null = null;
@@ -111,7 +112,7 @@ export interface CollabDraft {
 
 export interface NewMakerDraft {
   /** 当前选中的 vendor。默认 'cc',用户切换后写回 + 持久化。 */
-  vendor: MakerVendor;
+  vendor: DraftVendor;
   /** 选中的 workingDir;初次 null,Project 行内 + 会预填到此。 */
   workingDir: string | null;
   /** 用户明确选过「对话（不在项目中）」；本次草稿不得再由默认目录回填。 */
@@ -177,7 +178,7 @@ export interface NewMakerDraft {
   /** 单次草稿内用户明确授予的附加可读写目录；不跨重启。 */
   writableDirs: string[];
   /** 每个 vendor 的"上次使用配置"——切回该 vendor 时自动恢复。 */
-  lastByVendor: Record<MakerVendor, VendorPrefs>;
+  lastByVendor: Record<DraftVendor, VendorPrefs>;
   /**
    * 用户是否**显式**选过该 vendor 的模型（新建页 picker，或已有任务里换模）。
    * lastByVendor 整个快照随任意 draft 写入落盘,model 即使从没被用户碰过也会带上
@@ -188,7 +189,7 @@ export interface NewMakerDraft {
    * 的会话回写走 patchVendorPrefsPreservingModelChoice：不得打标、不得清标，
    * 也不得在已打标后改写 lastByVendor.model / providerId / effort。
    */
-  modelChosenByVendor: Partial<Record<MakerVendor, boolean>>;
+  modelChosenByVendor: Partial<Record<DraftVendor, boolean>>;
   /**
    * 用户是否明确改过新任务的模型组合（Harness / 来源 / 模型 / 思考深度 / Fast）。
    * false 才允许连接态为新任务下放产品默认；目录热更与登录变化不得覆盖 true。
@@ -219,7 +220,7 @@ export interface NewMakerDraft {
  * 这里曾写死 codex → 'gpt-5.4',与 modelDefinitions 里写死的 'gpt-5.5' 漂移成两个值,而两者
  * 在目录里都是默认隐藏的模型 —— 种子默认模型压根不在用户看到的清单里。
  */
-function defaultVendorPrefs(vendor: MakerVendor): VendorPrefs {
+function defaultVendorPrefs(vendor: DraftVendor): VendorPrefs {
   if (vendor === 'pi') {
     return {
       // pi 走 XD 网关(anthropic-messages 可达面),默认给网关中档模型;
@@ -321,7 +322,7 @@ function sanitize(raw: unknown): NewMakerDraft {
   // 每上线一个引擎都得手工补一次;漏补则用户选中新引擎、重启后被静默重置回 Claude。
   // F-COLLAB (2026-05): 'orca' 不在表内,历史 localStorage 残留会走同一条回退路径
   // 迁到 'cc'(它已被 ChatInput 底部的协同 toggle 取代),避免空白入口。
-  const vendor: MakerVendor = isSelectableVendor(r.vendor) ? r.vendor : def.vendor;
+  const vendor: DraftVendor = isSelectableVendor(r.vendor) ? r.vendor : def.vendor;
   const workingDir = normalizeDraftWorkingDir(r.workingDir);
   const remoteHostId =
     typeof r.remoteHostId === 'string' && r.remoteHostId.trim().length > 0
@@ -397,7 +398,7 @@ function sanitize(raw: unknown): NewMakerDraft {
   const newChatDefaultPermissionMode =
     r.newChatDefaultPermissionMode === 'auto' || r.newChatDefaultPermissionMode === 'bypassPermissions'
       ? r.newChatDefaultPermissionMode : null;
-  const sanitizeVendorPrefs = (p: Partial<VendorPrefs> | undefined, v: MakerVendor): VendorPrefs => {
+  const sanitizeVendorPrefs = (p: Partial<VendorPrefs> | undefined, v: DraftVendor): VendorPrefs => {
     const fallback = { ...defaultVendorPrefs(v), permissionMode: newChatDefaultPermissionMode ?? 'auto' };
     const permissionModeCustomized = p?.permissionModeCustomized === true ||
       (p?.permissionModeCustomized === undefined && typeof p?.permissionMode === 'string' &&
@@ -426,7 +427,7 @@ function sanitize(raw: unknown): NewMakerDraft {
     r.modelChosenByVendor && typeof r.modelChosenByVendor === 'object'
       ? (r.modelChosenByVendor as Record<string, unknown>)
       : {};
-  const modelChosenByVendor: Partial<Record<MakerVendor, boolean>> = {};
+  const modelChosenByVendor: Partial<Record<DraftVendor, boolean>> = {};
   for (const v of ['cc', 'orca', 'codex', 'pi'] as const) {
     if (modelChosenRaw[v] === true) modelChosenByVendor[v] = true;
   }
@@ -438,7 +439,7 @@ function sanitize(raw: unknown): NewMakerDraft {
   // 已经随旧版完整草稿自然落盘过的 cc seed。它们不是用户选择，不能因为新版目录换了
   // seed 就反过来把系统快照认成自定义；这里只服务一次性迁移，不参与新会话默认决策。
   const legacyCcSeedModels = new Set([def.lastByVendor.cc.model, 'claude-sonnet-4-6']);
-  const isKnownProductTuple = (slotVendor: MakerVendor, prefs: Partial<VendorPrefs>): boolean =>
+  const isKnownProductTuple = (slotVendor: DraftVendor, prefs: Partial<VendorPrefs>): boolean =>
     typeof prefs.providerId === 'string' &&
     prefs.providerId.length > 0 &&
     typeof prefs.model === 'string' &&
@@ -1022,7 +1023,7 @@ export function patchCollab(patch: Partial<CollabDraft>): void {
  *   2. 切到新 vendor
  * NewMakerDraftRoute 的 VendorSegmentedSwitcher 切换时调本函数;切回某 vendor 时 ChatInput 通过 lastByVendor[vendor] 取上次值。
  */
-export function switchVendor(next: MakerVendor, options?: { remoteFollow?: boolean; userSelected?: boolean }): void {
+export function switchVendor(next: DraftVendor, options?: { remoteFollow?: boolean; userSelected?: boolean }): void {
   if (options?.userSelected) markRemoteDraftEngineManuallySelected();
   if (!options?.remoteFollow) {
     rebaseStoredDefaultTuplePreference();
@@ -1077,7 +1078,7 @@ export function applyAppDefaultModelSelection(selection: AppDefaultModelSelectio
  * 使用 React 上一轮 closure 的 cc/currentPrefs,会把 xAI→Pi 又覆盖成 Codex。系统回退不标记
  * defaultTupleCustomized,因为它不是用户选择。
  */
-export function fallbackUnavailableVendor(availableVendors: ReadonlySet<MakerVendor>): boolean {
+export function fallbackUnavailableVendor(availableVendors: ReadonlySet<DraftVendor>): boolean {
   rebaseStoredDefaultTuplePreference();
   const currentVendor = currentDraft.vendor;
   if (availableVendors.has(currentVendor)) return false;
@@ -1090,7 +1091,7 @@ export function fallbackUnavailableVendor(availableVendors: ReadonlySet<MakerVen
 }
 
 export interface SuggestedDefaultTuple {
-  vendor: Extract<MakerVendor, 'cc' | 'codex' | 'pi'>;
+  vendor: Extract<DraftVendor, 'cc' | 'codex' | 'pi'>;
   providerId: string;
   model: string;
   effort?: Effort | null;
@@ -1193,7 +1194,7 @@ export function clearDefaultTupleTuningCustomization(args: {
  * 未生效前的 lastByVendor, 会把 model 改动覆盖掉。
  */
 function patchVendorPrefsInternal(
-  vendor: MakerVendor,
+  vendor: DraftVendor,
   patch: Partial<VendorPrefs>,
   opts: { markModelChoice: boolean },
 ): void {
@@ -1243,7 +1244,7 @@ function patchVendorPrefsInternal(
   emit();
 }
 
-export function patchVendorPrefs(vendor: MakerVendor, patch: Partial<VendorPrefs>): void {
+export function patchVendorPrefs(vendor: DraftVendor, patch: Partial<VendorPrefs>): void {
   patchVendorPrefsInternal(vendor, patch, { markModelChoice: true });
 }
 
@@ -1255,7 +1256,7 @@ export function patchVendorPrefs(vendor: MakerVendor, patch: Partial<VendorPrefs
  * 本机已有任务里换模型应走 patchVendorPrefs。
  */
 export function patchVendorPrefsPreservingModelChoice(
-  vendor: MakerVendor,
+  vendor: DraftVendor,
   patch: Partial<VendorPrefs>,
 ): void {
   patchVendorPrefsInternal(vendor, patch, { markModelChoice: false });
@@ -1273,7 +1274,7 @@ export function patchVendorPrefsPreservingModelChoice(
  * 路由(providerId=null)的新建默认解析生效来源。返回是否写入。
  */
 export function patchVendorPrefsFromTaskModelSwitch(
-  vendor: MakerVendor,
+  vendor: DraftVendor,
   patch: Pick<VendorPrefs, 'model' | 'providerId'> & { effort?: Effort },
   taskProviderId: string | null,
   resolveDraftProviderId?: (prefs: VendorPrefs) => string | null,
@@ -1384,7 +1385,7 @@ export function getCurrentVendorPrefs(): VendorPrefs {
  * 区分:没显式选过的用户应落到按供应商清单校准后的新建任务默认,而不是未经校准的
  * 种子默认。读 raw localStorage 而非 getDraft(),解析失败 → ''。
  */
-export function getPersistedVendorModel(vendor: MakerVendor): string {
+export function getPersistedVendorModel(vendor: DraftVendor): string {
   if (typeof window === 'undefined') return '';
   try {
     const raw = window.localStorage.getItem(storageKey());

@@ -20,4 +20,8 @@ describe('agentKindToVendor', () => {
     expect(agentKindToVendor(null)).toBe('cc');
     expect(agentKindToVendor(undefined)).toBe('cc');
   });
+
+  it('keeps agy (Antigravity) sessions out of the Claude mark', () => {
+    expect(agentKindToVendor('agy')).toBe('agy');
+  });
 });

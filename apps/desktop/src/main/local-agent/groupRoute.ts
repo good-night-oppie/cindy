@@ -58,6 +58,7 @@ export function createLocalAgentGroupRouteResolver(deps: {
 }): LocalAgentRouteResolver {
   return async ({ sessionId, agentKind, model, ...route }) => {
     deps.assertCurrent();
+    if (agentKind === 'agy') throw new Error('Native Antigravity provider groups are not supported');
     // Shared providers are assigned by their owner; they cannot use the
     // same-account group management channel.
     if (route.agentDeviceId && isProviderShareAgentDeviceId(route.agentDeviceId)) return route;

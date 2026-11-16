@@ -1,3 +1,4 @@
+import type { DbAgentKind } from '../../shared/agentKindConversion.js';
 /**
  * chatHistoryReader.ts —— 给 cindy_helper 的 history 类 MCP 工具用的纯查询层。
  *
@@ -39,7 +40,7 @@ function remoteOrcaHistoryIdentity(raw: unknown): { orcaRemoteLead?: OrcaRemoteL
 // ── Types ───────────────────────────────────────────────────────────────────
 
 export type HistoryOrder = 'asc' | 'desc';
-export type HistoryAgentKind = 'cc' | 'codex' | 'pi';
+export type HistoryAgentKind = DbAgentKind;
 
 export interface HistoryCursor {
   createdAt: number; // unix ms

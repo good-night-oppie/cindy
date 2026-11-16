@@ -120,6 +120,7 @@ export function toMakerAgentKind(dbKind: string): AgentKind {
 export function agentEngineLabel(dbKind: DbAgentKind): string {
   if (dbKind === 'codex') return 'Codex';
   if (dbKind === 'pi') return 'Pi';
+  if (dbKind === 'agy') return 'Antigravity';
   return 'Claude Code';
 }
 
@@ -577,6 +578,7 @@ export async function relocateForFreshStart(
   if (!row.model) throwIpcError('PRECONDITION_FAILED', `Session ${sessionId} has no model to relocate`);
   const model = row.model;
   const dbKind = normalizeDbAgentKind(row.agentKind);
+  if (dbKind === 'agy') throwIpcError('UNSUPPORTED_CAPABILITY', 'Native Antigravity history relocation is not supported');
   const handoffGeneration = deps.readPendingHandoffGeneration?.(sessionId);
   const fullHandoff = buildHandoffText(await deps.listMessagesForHandoff(sessionId), {
     fromLabel: `${agentEngineLabel(dbKind)} (on a different computer)`,

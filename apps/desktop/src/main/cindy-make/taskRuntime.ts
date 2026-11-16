@@ -268,8 +268,10 @@ export async function startCindyMakeTask(raw: unknown, sender: number): Promise<
     ? getSessionRuntimeControlSnapshot(origin.id).effectiveOverride
     : undefined;
   const preferences = origin ?? input.createOptions ?? {};
+  const taskAgentKind = normalizeDbAgentKind(effective?.agentKind ?? preferences.agentKind);
+  if (taskAgentKind === 'agy') throw new Error('Native Antigravity Cindy Make tasks are not supported');
   const taskOptions: CindyMakeTaskOptions = {
-    agentKind: normalizeDbAgentKind(effective?.agentKind ?? preferences.agentKind),
+    agentKind: taskAgentKind,
     model: effective?.model ?? preferences.model ?? undefined,
     effort: effective ? (effective.effort ?? '') : preferences.effort,
     providerId: effective ? effective.providerId : preferences.providerId,

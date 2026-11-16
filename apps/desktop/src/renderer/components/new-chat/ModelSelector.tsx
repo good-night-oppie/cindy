@@ -4041,7 +4041,8 @@ function ModelSelectorContentView({
           <VendorSegmentedSwitcher
             value={browseVendor}
             onChange={(next) => {
-              if (next !== 'orca') void handleBrowseVendorChange(next);
+              // agy 不是可切换引擎,分段里也不应出现;防御性忽略。
+              if (next !== 'orca' && next !== 'agy') void handleBrowseVendorChange(next);
             }}
             dense
             width={304}

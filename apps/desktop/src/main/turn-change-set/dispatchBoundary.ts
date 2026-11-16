@@ -15,6 +15,7 @@ export async function beginTurnChangeSetAtDispatch(
   session: TurnChangeSetDispatchSession,
   anchorClientId: string,
 ): Promise<void> {
+  if (session.agentKind === 'agy') throw new Error('Native Antigravity file capture is not integrated');
   await waitForTurnChangeSetSeal(session.id);
   await finalizeTurnChangeSet(session.id, null, 'partial');
   await waitForTurnChangeSetSeal(session.id);

@@ -28,8 +28,10 @@ vi.mock('@/features/cc-agent/CCAgentSessionView', () => ({
       agentKind: 'codex', model: session.model, providerId: session.providerId ?? null,
       effort: session.effort, fastMode: session.fastMode,
     }, effective: session.runtimeEffective, pending: session.runtimePending });
+    const agentKind = selection.display.agentKind;
+    if (agentKind === 'agy') return <div>agy-unsupported</div>;
     return <button onClick={() => void makerApiFor(session.id).send(session.id, 'next turn', {
-      ...selection.display, effort: selection.display.effort ?? undefined,
+      ...selection.display, agentKind, effort: selection.display.effort ?? undefined,
       workingDir: '/remote/workspace',
     })}>{selection.display.model}</button>;
   },

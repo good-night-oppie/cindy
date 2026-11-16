@@ -30,7 +30,7 @@ import { commitContextRebuild, createMessage } from '../localDb/ipc/messages.js'
 import { getMaker } from '../maker-host/index.js';
 import { inferProviderIdForModel } from '../maker-host/provider-route.js';
 import { createBusinessSessionId } from '../sessionIds.js';
-import { dbToMakerAgentKind, normalizeDbAgentKind } from '../../shared/agentKindConversion.js';
+import { dbToMakerAgentKind, normalizeDbAgentKind, type DbAgentKind } from '../../shared/agentKindConversion.js';
 import { copySessionContextWindowBudget, pruneSessionContextWindowBudget } from '../maker-host/session-context-budget-store.js';
 import { readBoundClaudeConfigDir } from '../subscription-accounts/store.js';
 import type { AgentMeta, Session } from '../../renderer/lib/ccAgent.types';
@@ -105,7 +105,7 @@ function normalizePositiveInt(value: unknown): number {
 
 const messageRowid = sql<number>`rowid`;
 
-type DbAgentKind = 'cc' | 'codex' | 'pi';
+
 
 interface MessagePosition {
   createdAt: number;
@@ -1020,6 +1020,7 @@ export async function forkSessionAtMessage(
       remoteHostId: source.remoteHostId ?? null,
     };
     const forkRemote = async () => {
+      if (agentKind === 'agy') throw new Error('Native Antigravity remote forks are not supported');
       const ownerRoute = forkSource.agentDeviceId!;
       const location = await authorizeSharedTaskHistory(ownerRoute, sourceSessionId, agentKind, forkSource.model);
       let childGeneration: string | undefined;

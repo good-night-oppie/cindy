@@ -1,3 +1,4 @@
+import type { DbAgentKind } from '../../shared/agentKindConversion.js';
 import type { ContextRebuildArgs } from './client/tx/types.js';
 
 export interface ContextRebuildPersistencePorts {
@@ -18,7 +19,7 @@ export async function commitContextRebuildWithPorts(
       | 'native-session-recovery'
       | 'idle-gap';
     sourceUserClientId: string | null;
-    sourceAgentKind?: 'cc' | 'codex' | 'pi';
+    sourceAgentKind?: DbAgentKind;
     sourceModel?: string | null;
     sourceProviderId?: string | null;
     expectedClearedAt?: number | null;

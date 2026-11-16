@@ -33,6 +33,7 @@ import {
   type ImDefaultSettings,
   type ImDefaultAgentKind,
   isUnconditionalTurnPolicyChannel,
+  isImDefaultAgentKind,
 } from '../../shared/imDefaultSettings.js';
 import { createLogger } from '../logger';
 import { getMaker } from '../maker-host';
@@ -217,11 +218,11 @@ export async function resolveDefaultProviderIdForModel(
 }
 
 function pickModel(
-  requestedAgent: AgentKind,
+  requestedAgent: ImDefaultAgentKind,
   settings: ImDefaultAgentSettings,
   config: ImOrchestratorConfig,
   providers: ProviderView[] | null,
-): { agentKind: AgentKind; modelId: string } {
+): { agentKind: ImDefaultAgentKind; modelId: string } {
   if (hasModel(requestedAgent, settings.model, providers)) {
     return { agentKind: requestedAgent, modelId: settings.model };
   }
@@ -246,7 +247,7 @@ function pickModel(
     return { agentKind: requestedAgent, modelId: firstForRequestedAgent };
   }
 
-  if (hasModel(config.agentKind, config.defaultModel, providers)) {
+  if (isImDefaultAgentKind(config.agentKind) && hasModel(config.agentKind, config.defaultModel, providers)) {
     log.warn('im default agent has no models; falling back to channel config', {
       requestedAgent,
       fallbackAgent: config.agentKind,

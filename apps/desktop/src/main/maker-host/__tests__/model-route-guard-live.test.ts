@@ -168,3 +168,10 @@ describe('scheduled selection uses the live source copy', () => {
     expect(selection).toMatchObject({ effort: 'ultra', fastMode: true });
   });
 });
+
+// Unit boundary: unsupported native scheduling must not discover providers.
+it('rejects native Antigravity schedule defaults before provider discovery', async () => {
+  h.listProviders.mockClear();
+  expect(await resolveDefaultScheduleRoute('agy', null, 'gpt-oss-120b-medium')).toBeNull();
+  expect(h.listProviders).not.toHaveBeenCalled();
+});

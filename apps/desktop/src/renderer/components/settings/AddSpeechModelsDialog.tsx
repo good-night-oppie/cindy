@@ -79,13 +79,15 @@ export function AddSpeechModelsDialog({
     void (async () => {
       if (!target) return;
       const runtime = config.runtimes[target.agent];
-      if (!runtime) return;
+      const agent = target.agent;
+      // agy 没有自定义供应商运行时,不拉语音模型。
+      if (!runtime || agent === 'agy') return;
       try {
         const apiKey = await readCustomProviderKey(config.id, target.agent);
         if (cancelled) return;
         const result = await window.electronAPI.maker.fetchProviderModels({
           savedProviderId: config.id,
-          agent: target.agent,
+          agent,
           authMethod: 'apiKey',
           baseUrl: runtime.baseUrl,
           wireProtocol: runtime.wireProtocol,

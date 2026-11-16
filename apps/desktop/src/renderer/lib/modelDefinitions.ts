@@ -1,3 +1,4 @@
+import type { MakerAgentKindWire } from '../../shared/agentKindConversion';
 /**
  * 兼容层 —— 历史代码用 `getModelById` / `getDefaultModelForVendor` 同步查模型,
  * 数据现在的 SSoT 在 maker-core (通过 useAgentCapabilities hook 异步拉取并缓存)。
@@ -29,7 +30,7 @@ export interface ModelDefinition {
    * 解耦)。缺省 = 不作为默认。getDefaultModelForVendor / newSessionDefaultModelId 据它选默认;
    * Pi 只接受自己的 v3 标记，不借用其它 Agent 的默认策略。
    */
-  newSessionDefault?: ('claude-code' | 'codex' | 'pi')[];
+  newSessionDefault?: MakerAgentKindWire[];
 }
 
 function toLegacy(m: ModelDescriptor, vendorKey: 'cc' | 'codex' | 'pi'): ModelDefinition {
