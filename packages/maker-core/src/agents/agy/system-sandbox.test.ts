@@ -241,6 +241,25 @@ describe('probeAgySystemSandbox', () => {
     expect(pickUpstreamDns([null, '# c\nnameserver 127.0.0.53\n'])).toBe('127.0.0.53');
     expect(pickUpstreamDns([null, null])).toBeNull();
   });
+  it('reports missing iproute2 (the private-range rules cannot be installed)', () => {
+    const run = (_c: string, a: readonly string[]) => a[0] === '--version'
+      ? { status: 0, stdout: 'bubblewrap 0.9.0\n', stderr: '' } : { status: 0, stdout: '', stderr: '' };
+    expect(probeAgySystemSandbox({ platform: 'linux', exists: p => !p.endsWith('/ip'), run }))
+      .toMatchObject({ ok: false, reason: 'network-isolation-missing', detail: 'iproute2 (ip) not installed' });
+  });
+  it('trial-runs the network rules inside pasta and fails closed if they cannot be installed', () => {
+    const calls: string[][] = [];
+    const run = (c: string, a: readonly string[]) => {
+      calls.push([c, ...a]);
+      if (a[0] === '--version') return { status: 0, stdout: 'bubblewrap 0.9.0\n', stderr: '' };
+      if (c.endsWith('pasta')) return { status: 2, stdout: '', stderr: 'RTNETLINK answers: Operation not permitted' };
+      return { status: 0, stdout: '', stderr: '' };
+    };
+    expect(probeAgySystemSandbox({ platform: 'linux', exists: () => true, run }))
+      .toMatchObject({ ok: false, reason: 'network-isolation-missing' });
+    const pastaCall = calls.find(c => c[0]!.endsWith('pasta'))!;
+    expect(pastaCall).toEqual(expect.arrayContaining(['agy-net-guard', '/usr/sbin/ip', '/bin/true']));
+  });
   it('reports a missing bubblewrap', () => {
     expect(probeAgySystemSandbox({ platform: 'linux', exists: () => false })).toMatchObject({ ok: false, reason: 'bwrap-missing' });
   });
@@ -297,6 +316,16 @@ describe('scanTaskDirForHardlinks', () => {
     expect((await scanTaskDirForHardlinks(task)).hardlinked).toBe(path.join(task, 'sub', 'innocent.txt'));
     expect(await scanTaskDirForHardlinks(task, 0)).toMatchObject({ truncated: true });
   });
+  it('refuses to start when the task dir has more files than the scan limit (cindy#3 review item 2)', async () => {
+    const task = path.join(root, 'big');
+    mkdirSync(task, { recursive: true });
+    for (const n of ['1', '2', '3']) writeFileSync(path.join(task, n), n);
+    const okProbe = { ok: true as const, bwrapPath: '/usr/bin/bwrap', pastaPath: '/usr/bin/pasta', ipPath: '/usr/sbin/ip',
+      version: '0.9.0', supportsDisableUserns: true };
+    await expect(prepareAgySandboxedLaunch({ binaryPath: '/bin/true', args: [], taskDir: task, homeDir: os.homedir(),
+      env: {}, probe: okProbe, hardlinkScanLimit: 2 })).rejects.toMatchObject({ reason: 'task-dir-unsafe',
+      detail: expect.stringContaining('more than 2 files') });
+  });
 });
 
 // Real bubblewrap on Linux hosts that allow it (runs on arena; skipped elsewhere).
@@ -317,6 +346,11 @@ describe.runIf(probe.ok)('real bubblewrap decoy check', () => {
     await new Promise<void>(res => hostSrv.listen(0, '127.0.0.1', () => res()));
     const port = (hostSrv.address() as net.AddressInfo).port;
     const abstractName = `agy-sbx-test-${Math.random().toString(36).slice(2)}`;
+    const anySrv = net.createServer(s => s.destroy());
+    await new Promise<void>(res => anySrv.listen(0, '0.0.0.0', () => res()));
+    const anyPort = (anySrv.address() as net.AddressInfo).port;
+    const hostIps = Object.values(os.networkInterfaces()).flat()
+      .filter(i => i && i.family === 'IPv4' && !i.internal).map(i => i!.address);
     const absSrv = net.createServer(s => s.destroy());
     await new Promise<void>(res => absSrv.listen('\0' + abstractName, () => res()));
     const egress = process.env.AGY_SANDBOX_TEST_EGRESS === '1';
@@ -340,6 +374,9 @@ describe.runIf(probe.ok)('real bubblewrap decoy check', () => {
       (async () => {
         r.hostLoopback = await tryc({ host: '127.0.0.1', port: ${port} });
         r.hostAbstract = await tryc({ path: ${JSON.stringify('\0' + abstractName)} });
+        r.metadata = await tryc({ host: '169.254.169.254', port: 80 });
+        r.hostIfs = {};
+        for (const ip of ${JSON.stringify(hostIps)}) r.hostIfs[ip] = await tryc({ host: ip, port: ${anyPort} });
         if (${egress}) { try { const resp = await fetch('https://api.github.com/zen'); r.egress = 'HTTP ' + resp.status; } catch (e) { r.egress = String((e.cause && e.cause.code) || e); } }
         process.stdout.write(JSON.stringify(r));
       })();`;
@@ -352,9 +389,10 @@ describe.runIf(probe.ok)('real bubblewrap decoy check', () => {
       passEnvKeys: ['DBUS_SESSION_BUS_ADDRESS'] });
     const res = spawnSync(launch.command, launch.args, { cwd: task, env: launch.env, encoding: 'utf8' });
     hostSrv.close();
+    anySrv.close();
     absSrv.close();
     expect(res.stderr).toBe('');
-    const r = JSON.parse(res.stdout) as Record<string, string>;
+    const r = JSON.parse(res.stdout) as Record<string, string> & { hostIfs: Record<string, string> };
     expect(r.readDecoy).not.toBe('ok');
     expect(r.writeDecoy).not.toBe('ok');
     expect(r.newOutside).not.toBe('ok');
@@ -363,6 +401,9 @@ describe.runIf(probe.ok)('real bubblewrap decoy check', () => {
     expect(r.writeInside).toBe('ok');
     expect(r.hostLoopback).not.toBe('CONNECTED');
     expect(r.hostAbstract).not.toBe('CONNECTED');
+    expect(r.metadata).not.toBe('CONNECTED');
+    expect(Object.keys(r.hostIfs)).toEqual(hostIps);
+    for (const ip of hostIps) expect(r.hostIfs[ip], ip).not.toBe('CONNECTED');
     if (egress) expect(r.egress).toBe('HTTP 200');
     expect(r.busVisible).not.toBe('ok');
     expect(r.dbusEnv).toBe('');
