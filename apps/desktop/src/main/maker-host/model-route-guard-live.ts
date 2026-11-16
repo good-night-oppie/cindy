@@ -81,6 +81,7 @@ export async function resolveDefaultScheduleRoute(
   preferredProviderId?: string | null,
   modelId?: string,
 ): Promise<{ model: string; providerId: string | null; catalogKnown?: boolean } | null> {
+  if (agent === 'agy') return null;
   const views = await listTrustedDefaultRouteProviders();
   const preferredModelId = modelId?.trim();
   if (preferredModelId) {
@@ -119,6 +120,7 @@ export async function resolveNewTaskDefaultModelRoute(
   agent: AgentKind,
   requiredProviderId?: string | null,
 ): Promise<{ model: string; providerId: string } | null> {
+  if (agent === 'agy') return null;
   return resolveNewTaskDefaultRoute({
     providers: await listTrustedDefaultRouteProviders(),
     agent,
