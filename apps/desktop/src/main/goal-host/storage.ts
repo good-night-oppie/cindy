@@ -45,6 +45,7 @@ function rowToState(row: GoalRow): GoalState {
 }
 
 function stateToInsert(state: GoalState): GoalInsert {
+  if (state.agentKind === 'agy') throw new Error('Native Antigravity goals are not supported');
   return {
     sessionId: state.sessionId,
     objective: state.objective,
