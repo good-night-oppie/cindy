@@ -397,7 +397,7 @@ async function writeSandboxResolvConf(): Promise<string> {
  * unconfined launch.
  */
 export async function prepareAgySandboxedLaunch(
-  input: Omit<AgySandboxLaunchInput, 'bwrapPath' | 'supportsDisableUserns'> & {
+  input: Omit<AgySandboxLaunchInput, 'bwrapPath' | 'supportsDisableUserns' | 'pastaPath' | 'dnsHost' | 'resolvConfPath'> & {
     probe?: AgySandboxProbe;
     /** agy's private state root (outside the task dir); mapped to ~/.gemini and ~/.config/antigravity. */
     stateRoot?: string;
