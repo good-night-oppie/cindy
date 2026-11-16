@@ -20,7 +20,7 @@
 
 import { spawnSync } from 'node:child_process';
 import { existsSync, lstatSync, readlinkSync, realpathSync } from 'node:fs';
-import { opendir, lstat } from 'node:fs/promises';
+import { chmod, mkdir, opendir, lstat } from 'node:fs/promises';
 import os from 'node:os';
 import path from 'node:path';
 
@@ -198,6 +198,8 @@ export interface AgySandboxLaunchInput {
   env: NodeJS.ProcessEnv;
   /** Env keys that must pass through (e.g. the keys returned by the auth env provider). */
   passEnvKeys?: readonly string[];
+  /** How agy logs in inside the sandbox; see `AgySandboxLogin`. Defaults to private state. */
+  login?: AgySandboxLogin;
   fs?: AgySandboxFsView;
 }
 
@@ -215,6 +217,13 @@ const ENV_ALLOW = new Set(['LANG', 'LANGUAGE', 'TERM', 'COLORTERM', 'TZ', 'NO_CO
   'HTTP_PROXY', 'HTTPS_PROXY', 'NO_PROXY', 'ALL_PROXY', 'http_proxy', 'https_proxy', 'no_proxy', 'all_proxy',
   'SSL_CERT_FILE', 'SSL_CERT_DIR', 'NODE_EXTRA_CA_CERTS']);
 const ENV_ALLOW_PREFIX = ['LC_', 'AGY_', 'ANTIGRAVITY_'];
+/**
+ * Never enter the sandbox, even if a caller lists them in passEnvKeys: the
+ * session bus would hand agy the whole system keyring, the agent sockets
+ * would hand it SSH/GPG keys, and display variables point at the desktop.
+ */
+const ENV_DENY = new Set(['DBUS_SESSION_BUS_ADDRESS', 'DBUS_SYSTEM_BUS_ADDRESS', 'XDG_RUNTIME_DIR',
+  'SSH_AUTH_SOCK', 'SSH_AGENT_PID', 'GPG_AGENT_INFO', 'DISPLAY', 'WAYLAND_DISPLAY', 'XAUTHORITY']);
 const SANDBOX_PATH = '/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin';
 
 export function filterAgySandboxEnv(env: NodeJS.ProcessEnv, homeDir: string, taskDir: string,
@@ -222,7 +231,7 @@ export function filterAgySandboxEnv(env: NodeJS.ProcessEnv, homeDir: string, tas
   const pass = new Set(passEnvKeys);
   const out: NodeJS.ProcessEnv = {};
   for (const [k, v] of Object.entries(env)) {
-    if (v === undefined) continue;
+    if (v === undefined || ENV_DENY.has(k)) continue;
     if (pass.has(k) || ENV_ALLOW.has(k) || ENV_ALLOW_PREFIX.some(p => k.startsWith(p))) out[k] = v;
   }
   const user = env.USER ?? env.LOGNAME ?? (() => { try { return os.userInfo().username; } catch { return 'user'; } })();
@@ -239,7 +248,7 @@ export function buildAgySandboxLaunch(input: AgySandboxLaunchInput): AgySandboxL
   const homeDir = fs.realpath(input.homeDir);
   const binary = fs.realpath(input.binaryPath);
   const writable = (input.writableDirs ?? []).map(w => ({ source: fs.realpath(w.source), target: w.target ?? fs.realpath(w.source) }));
-  assertAgyTaskDirPaths(taskDir, homeDir, writable.map(w => w.target));
+  assertAgyTaskDirPaths(taskDir, homeDir, writable.flatMap(w => [w.source, w.target]));
 
   const a: string[] = ['--unshare-all', '--share-net', '--die-with-parent', '--new-session',
     '--cap-drop', 'ALL', '--hostname', 'agy-sandbox'];
@@ -272,11 +281,54 @@ export function buildAgySandboxLaunch(input: AgySandboxLaunchInput): AgySandboxL
   a.push('--bind', taskDir, taskDir, '--chdir', taskDir);
   a.push('--', binary, ...input.args);
 
+  const login = input.login ?? { kind: 'private-state' };
+  const loginEnv = login.kind === 'api-key' ? login.env : {};
   return {
     command: input.bwrapPath,
     args: a,
-    env: filterAgySandboxEnv(input.env, homeDir, taskDir, input.passEnvKeys),
+    env: filterAgySandboxEnv({ ...input.env, ...loginEnv }, homeDir, taskDir,
+      [...(input.passEnvKeys ?? []), ...Object.keys(loginEnv)]),
   };
+}
+
+// ---------------------------------------------------------------------------
+// agy private state & login (cindy#1 6908586833 / 6908683429)
+// ---------------------------------------------------------------------------
+
+/**
+ * How agy logs in inside the sandbox. The D-Bus session bus is deliberately
+ * NOT an option: exposing it would give agy every secret in the system keyring.
+ * - 'private-state' (option b): the owner logs in once inside the sandbox;
+ *   with no session bus agy falls back to file-based token storage in its app
+ *   data dir, which lives in the private state root and survives relaunches.
+ * - 'api-key' (option c, needs the owner's approval): Cindy passes the key via
+ *   the environment on every launch; agy does not persist it.
+ */
+export type AgySandboxLogin =
+  | { kind: 'private-state' }
+  | { kind: 'api-key'; env: Readonly<Record<string, string>> };
+
+/**
+ * agy writes outside its app data dir too: plugin config under ~/.gemini/config
+ * and plugin secrets under ~/.config/antigravity. Both are mapped from one
+ * private state root so nothing lands in (or is read from) the real home.
+ */
+export const AGY_PRIVATE_STATE_DIRS = [
+  { name: 'gemini', homeRelative: '.gemini' },
+  { name: 'config-antigravity', homeRelative: path.join('.config', 'antigravity') },
+] as const;
+
+export function agyPrivateStateMounts(stateRoot: string, homeDir: string): { source: string; target: string }[] {
+  return AGY_PRIVATE_STATE_DIRS.map(d => ({ source: path.join(stateRoot, d.name), target: path.join(homeDir, d.homeRelative) }));
+}
+
+/** Create the private state root (0700) and its sub-dirs; returns the mounts. */
+export async function ensureAgyPrivateState(stateRoot: string, homeDir: string): Promise<{ source: string; target: string }[]> {
+  await mkdir(stateRoot, { recursive: true, mode: 0o700 });
+  await chmod(stateRoot, 0o700);
+  const mounts = agyPrivateStateMounts(stateRoot, homeDir);
+  for (const m of mounts) await mkdir(m.source, { recursive: true, mode: 0o700 });
+  return mounts;
 }
 
 /**
@@ -285,7 +337,11 @@ export function buildAgySandboxLaunch(input: AgySandboxLaunchInput): AgySandboxL
  * unconfined launch.
  */
 export async function prepareAgySandboxedLaunch(
-  input: Omit<AgySandboxLaunchInput, 'bwrapPath' | 'supportsDisableUserns'> & { probe?: AgySandboxProbe },
+  input: Omit<AgySandboxLaunchInput, 'bwrapPath' | 'supportsDisableUserns'> & {
+    probe?: AgySandboxProbe;
+    /** agy's private state root (outside the task dir); mapped to ~/.gemini and ~/.config/antigravity. */
+    stateRoot?: string;
+  },
 ): Promise<AgySandboxLaunch & { hardlinkScan: HardlinkScanResult }> {
   const probe = input.probe ?? probeAgySystemSandbox();
   if (!probe.ok) throw new AgySandboxUnavailableError(probe.reason, probe.detail);
@@ -293,7 +349,12 @@ export async function prepareAgySandboxedLaunch(
   if (hardlinkScan.hardlinked) {
     throw new AgySandboxUnavailableError('task-dir-unsafe', `hard-linked file in task dir: ${hardlinkScan.hardlinked}`);
   }
-  const launch = buildAgySandboxLaunch({ ...input, bwrapPath: probe.bwrapPath, supportsDisableUserns: probe.supportsDisableUserns });
+  if (input.stateRoot && isInside(path.resolve(input.stateRoot), path.resolve(input.taskDir))) {
+    throw new AgySandboxUnavailableError('task-dir-unsafe', 'agy state root must not be inside the task dir');
+  }
+  const stateMounts = input.stateRoot ? await ensureAgyPrivateState(input.stateRoot, input.homeDir) : [];
+  const launch = buildAgySandboxLaunch({ ...input, writableDirs: [...stateMounts, ...(input.writableDirs ?? [])],
+    bwrapPath: probe.bwrapPath, supportsDisableUserns: probe.supportsDisableUserns });
   return { ...launch, hardlinkScan };
 }
 
