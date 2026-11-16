@@ -5,6 +5,7 @@ import path from 'node:path';
 import { afterAll, describe, expect, it } from 'vitest';
 import {
   AgySandboxUnavailableError,
+  agyPrivateStateMounts,
   agySandboxDenialModelNote,
   assertAgyTaskDirPaths,
   buildAgySandboxLaunch,
@@ -93,6 +94,30 @@ describe('buildAgySandboxLaunch', () => {
       expect(() => buildAgySandboxLaunch({ ...base, taskDir })).toThrow(AgySandboxUnavailableError);
     }
     expect(() => buildAgySandboxLaunch({ ...base, writableDirs: [{ source: '/home/u/work/task-1/.state' }] })).toThrow(/overlaps/);
+  });
+});
+
+describe('login and private state', () => {
+  it('never passes the session bus, agent sockets or display, even when asked', () => {
+    const env = buildAgySandboxLaunch({ ...base,
+      env: { ...base.env, DBUS_SESSION_BUS_ADDRESS: 'unix:path=/run/user/1000/bus', XDG_RUNTIME_DIR: '/run/user/1000', SSH_AUTH_SOCK: '/tmp/s', DISPLAY: ':1' },
+      passEnvKeys: ['DBUS_SESSION_BUS_ADDRESS', 'XDG_RUNTIME_DIR', 'SSH_AUTH_SOCK', 'DISPLAY'] }).env;
+    for (const k of ['DBUS_SESSION_BUS_ADDRESS', 'XDG_RUNTIME_DIR', 'SSH_AUTH_SOCK', 'DISPLAY']) expect(env[k]).toBeUndefined();
+  });
+  it('passes an API key only when the api-key login is chosen', () => {
+    expect(buildAgySandboxLaunch(base).env.GEMINI_API_KEY).toBeUndefined();
+    const env = buildAgySandboxLaunch({ ...base, login: { kind: 'api-key', env: { GEMINI_API_KEY: 'k1' } } }).env;
+    expect(env.GEMINI_API_KEY).toBe('k1');
+  });
+  it('maps one private state root to ~/.gemini and ~/.config/antigravity', () => {
+    expect(agyPrivateStateMounts('/home/u/.cindy/agy/state', '/home/u')).toEqual([
+      { source: '/home/u/.cindy/agy/state/gemini', target: '/home/u/.gemini' },
+      { source: '/home/u/.cindy/agy/state/config-antigravity', target: '/home/u/.config/antigravity' },
+    ]);
+  });
+  it('refuses a writable dir whose source is inside the task dir', () => {
+    expect(() => buildAgySandboxLaunch({ ...base, writableDirs: [{ source: '/home/u/work/task-1/state', target: '/home/u/.gemini' }] }))
+      .toThrow(/overlaps/);
   });
 });
 
@@ -199,11 +224,19 @@ describe.runIf(probe.ok)('real bubblewrap decoy check', () => {
       t('symlinkRead', () => { fs.symlinkSync(${JSON.stringify(decoy)}, 'link'); r.leak2 = fs.readFileSync('link', 'utf8'); });
       t('sshVisible', () => fs.statSync(require('os').homedir() + '/.ssh'));
       t('writeInside', () => fs.writeFileSync('out.txt', 'hello'));
+      t('busVisible', () => fs.statSync('/run/user/' + process.getuid() + '/bus'));
+      r.dbusEnv = process.env.DBUS_SESSION_BUS_ADDRESS || '';
+      const home = require('os').homedir();
+      t('stateWrite', () => { fs.writeFileSync(home + '/.gemini/token-probe', 't');
+        fs.writeFileSync(home + '/.config/antigravity/plugin-probe', 'p'); });
       process.stdout.write(JSON.stringify(r));`;
     writeFileSync(path.join(task, 'probe.cjs'), script);
     const node = realpathSync(process.execPath);
+    const stateRoot = path.join(root, 'agy-state');
     const launch = await prepareAgySandboxedLaunch({ binaryPath: node, args: ['probe.cjs'], taskDir: task,
-      homeDir: os.homedir(), env: process.env, probe });
+      homeDir: os.homedir(), stateRoot, probe,
+      env: { ...process.env, DBUS_SESSION_BUS_ADDRESS: `unix:path=/run/user/${process.getuid?.()}/bus` },
+      passEnvKeys: ['DBUS_SESSION_BUS_ADDRESS'] });
     const res = spawnSync(launch.command, launch.args, { cwd: task, env: launch.env, encoding: 'utf8' });
     expect(res.stderr).toBe('');
     const r = JSON.parse(res.stdout) as Record<string, string>;
@@ -213,6 +246,12 @@ describe.runIf(probe.ok)('real bubblewrap decoy check', () => {
     expect(r.symlinkRead).not.toBe('ok');
     expect(r.sshVisible).not.toBe('ok');
     expect(r.writeInside).toBe('ok');
+    expect(r.busVisible).not.toBe('ok');
+    expect(r.dbusEnv).toBe('');
+    expect(r.stateWrite).toBe('ok');
+    expect(readFileSync(path.join(stateRoot, 'gemini', 'token-probe'), 'utf8')).toBe('t');
+    expect(readFileSync(path.join(stateRoot, 'config-antigravity', 'plugin-probe'), 'utf8')).toBe('p');
+    expect(statSync(stateRoot).mode & 0o777).toBe(0o700);
     expect(res.stdout).not.toContain(canary);
     expect(readFileSync(decoy, 'utf8')).toBe(canary);
     const after = statSync(decoy);
