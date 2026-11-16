@@ -5,7 +5,8 @@
  * 把 agy 进程树关进一个新的挂载命名空间：只有当前任务目录（以及调用方显式给出的
  * 可写目录，例如 agy 自己的状态目录）可写，运行必需的系统目录只读，家目录是空的，
  * 宿主进程不可见。网络放在单独的网络命名空间里，由 pasta 只放外网：宿主的本机回环
- * （Cindy 的 MCP 端口、Review Inbox）和 X11 等抽象 Unix 套接字都连不上（cindy#1 6909268027）。
+ * （Cindy 的 MCP 端口、Review Inbox）和 X11 等抽象 Unix 套接字都连不上（cindy#1 6909268027）；
+ * 云元数据、内网、宿主其他网卡和 tailnet 地址也连不上（cindy#3 QQ 复审，见 agyNetGuardCommand）。
  *
  * 失败策略：fail closed。探测不到可用的 bubblewrap、或任务目录不安全时抛
  * `AgySandboxUnavailableError`，调用方不得退回无隔离启动。
@@ -21,7 +22,7 @@
 
 import { spawnSync } from 'node:child_process';
 import { existsSync, lstatSync, readFileSync, readlinkSync, realpathSync } from 'node:fs';
-import { chmod, mkdir, opendir, lstat, writeFile } from 'node:fs/promises';
+import { chmod, mkdir, mkdtemp, opendir, lstat, writeFile } from 'node:fs/promises';
 import os from 'node:os';
 import path from 'node:path';
 
@@ -59,6 +60,8 @@ export interface AgySandboxProbeOk {
   supportsDisableUserns: boolean;
   /** pasta (passt project): gives the sandbox its own network namespace with outbound-only access. */
   pastaPath: string;
+  /** iproute2 `ip`, run inside pasta's namespace to install the private-range rules. */
+  ipPath: string;
 }
 export interface AgySandboxProbeFailed {
   ok: false;
@@ -71,12 +74,14 @@ export interface AgySandboxProbeDeps {
   platform?: NodeJS.Platform;
   bwrapCandidates?: readonly string[];
   pastaCandidates?: readonly string[];
+  ipCandidates?: readonly string[];
   exists?: (p: string) => boolean;
   run?: (cmd: string, args: readonly string[]) => { status: number | null; stdout: string; stderr: string };
 }
 
 const DEFAULT_BWRAP_CANDIDATES = ['/usr/bin/bwrap', '/bin/bwrap', '/usr/local/bin/bwrap'];
 const DEFAULT_PASTA_CANDIDATES = ['/usr/bin/pasta', '/usr/local/bin/pasta', '/bin/pasta'];
+const DEFAULT_IP_CANDIDATES = ['/usr/sbin/ip', '/sbin/ip', '/usr/bin/ip', '/bin/ip'];
 
 /**
  * pasta options: own network namespace with a tap device for outbound traffic
