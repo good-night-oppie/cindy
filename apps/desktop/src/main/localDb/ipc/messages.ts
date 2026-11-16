@@ -1,3 +1,4 @@
+import type { DbAgentKind } from '../../../shared/agentKindConversion.js';
 import { commitContextRebuildWithPorts } from '../contextRebuildPersistence.js';
 import { parseAgentMetaRecord, patchMessageAgentMetaWithResultRow, findVisibleToolUseMessageByAliasesRow,
   writeMessageContentRow, rollbackAssistantMessageRow, readVisiblePiUserEntry } from '../messageMutations.js';
@@ -1215,7 +1216,7 @@ export function commitContextRebuild(
       | 'native-session-recovery'
       | 'idle-gap';
     sourceUserClientId: string | null;
-    sourceAgentKind?: 'cc' | 'codex' | 'pi';
+    sourceAgentKind?: DbAgentKind;
     sourceModel?: string | null;
     sourceProviderId?: string | null;
     expectedClearedAt?: number | null;
@@ -1529,7 +1530,7 @@ export async function createMessage(
      * agentMeta 需要它;main 侧 SDK 事件落库路径必传,renderer pending echo 等
      * 无 SDK 元信息的行留空(null 回落 session.agentKind)。
      */
-    agentKind?: 'cc' | 'codex' | 'pi' | null;
+    agentKind?: DbAgentKind | null;
     createdAt?: number;
   },
   opts?: {
