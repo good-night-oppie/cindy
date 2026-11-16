@@ -16,7 +16,9 @@
  *   - Missing / too-old binaries and sign-in failures are explicit errors; there is no
  *     fallback to another runtime.
  */
+import { realpathSync } from 'node:fs';
 import { open } from 'node:fs/promises';
+import os from 'node:os';
 import path from 'node:path';
 import { pathToFileURL } from 'node:url';
 import { randomUUID } from 'node:crypto';
@@ -52,6 +54,10 @@ import { AgyStallWatchdog, resolveAgyStallTimeoutMs } from './watchdog.js';
 import { assertAgyModelAllowed } from './models.js';
 import { agyRpcDiagnostic, type AgyRpcDiagnostic } from './diagnostics.js';
 import { assertAgyBinaryUsable, AgyBinaryUnavailableError, type AgyVersionReader } from './version.js';
+import {
+  AGY_SANDBOX_USER_COPY_DRAFT, AgySandboxUnavailableError, agyPrivateStateMounts, prepareAgySandboxedLaunch,
+  type AgySandboxProbe,
+} from './system-sandbox.js';
 
 export { AGY_MIN_VERSION, AgyBinaryUnavailableError, parseAgyVersion } from './version.js';
 export { AGY_DEFAULT_STALL_TIMEOUT_MS, AGY_STALL_TIMEOUT_ENV, resolveAgyStallTimeoutMs } from './watchdog.js';
@@ -63,7 +69,8 @@ export const AGY_ACP_ARGS = ['acp', '--disable-telemetry'] as const;
 
 const yes = { supported: true } as const;
 const no = { supported: false, reason: 'not-implemented' } as const;
-const NATIVE_PERMISSION_DESCRIPTION = 'Antigravity follows its own permission settings in its default mode. Cindy answers only the approval requests agy sends (typically shell commands); agy may edit files in the workspace without asking.';
+// Wording pending JJ (cindy#1 6908586833 item 4): say exactly what the isolation does and does not do.
+const NATIVE_PERMISSION_DESCRIPTION = 'Antigravity runs inside Cindy\'s file isolation: it can only read and change files in this task\'s folder, and it may change files there without asking. Cindy answers the approval requests agy sends (typically shell commands).';
 const CONTROL_TIMEOUT = 30_000;
 const CANCEL_TIMEOUT = 10_000;
 const PROMPT_REQUEST_TIMEOUT = 24 * 60 * 60 * 1000;
@@ -82,6 +89,11 @@ export interface AgyAgentDeps extends AgentDeps {
   skipAgyBinaryPreflight?: boolean;
   /** Host default for the no-event stall limit; per-session `vendorOptions.agyStallTimeoutMs` wins. */
   agyStallTimeoutMs?: number;
+  /**
+   * System-level isolation (cindy#1 6908586833): always applied to the real spawn. With an injected
+   * transport (tests) it is applied only when set. stateRoot defaults to ~/.cindy/agy-sandbox/state.
+   */
+  agySandbox?: { stateRoot?: string; probe?: AgySandboxProbe };
 }
 
 export class AgyAgent extends BaseAgent {
@@ -204,7 +216,14 @@ export class AgyAgent extends BaseAgent {
     const emit = (event: AgentEvent) => {
       if (!closed) queue.push({ ...event, source: 'agy', turnAttemptToken: turnOptions?.turnAttemptToken });
     };
-    const translator = new AgyTranslator(emit);
+    const useSandbox = !this.deps.createAgyTransport || this.deps.agySandbox !== undefined;
+    const sandboxStateRoot = this.deps.agySandbox?.stateRoot ?? path.join(os.homedir(), '.cindy', 'agy-sandbox', 'state');
+    // agy sees the task folder by its real path inside the sandbox; a symlinked workingDir does not exist there.
+    const agyWorkingDir = useSandbox ? realpathOr(opts.workingDir) : opts.workingDir;
+    const translator = new AgyTranslator(emit, useSandbox ? {
+      taskDir: agyWorkingDir, homeDir: os.homedir(),
+      visibleDirs: agyPrivateStateMounts(sandboxStateRoot, os.homedir()).map(mount => mount.target),
+    } : undefined);
     const emitReviewNotice = (message: string) => emit({ type: 'error', data: { message, isTerminal: false } });
     const reviewUnavailable = createAutoReviewUnavailableNotice(emitReviewNotice);
     const confirmUndelivered = createAutoReviewConfirmUndeliveredNotice(emitReviewNotice);
@@ -227,7 +246,7 @@ export class AgyAgent extends BaseAgent {
       const generation = permissionGeneration;
       const request = { sessionId: opts.sessionId, agentKind: 'agy' as const, providerId: opts.providerId,
         model, userIntent: intent, precedingBlockedActions: actionContext.precedingBlockedActions,
-        action, workspaceRoots: [opts.workingDir], writableRoots: [opts.workingDir], platform: process.platform };
+        action, workspaceRoots: [agyWorkingDir], writableRoots: [agyWorkingDir], platform: process.platform };
       const decision = await withAutoReviewContext(request, this.deps.reviewAutoPermissionAction,
         prepared => resolveAutoReviewDecision(prepared, this.deps.reviewAutoPermissionAction));
       if (closed || fenced || cancelled || !running || intent !== userIntent
@@ -309,7 +328,7 @@ export class AgyAgent extends BaseAgent {
         toolUseId: typeof tool.toolCallId === 'string' ? tool.toolCallId : undefined,
         toolName: agyToolName(tool), input: agyToolInput(tool),
         title: typeof tool.title === 'string' ? tool.title : undefined,
-      }, agyReviewAction(tool, opts.workingDir));
+      }, agyReviewAction(tool, agyWorkingDir));
       if (!decision || cancelled || closed) return cancelledResult;
       const allow = decision.kind === 'permission' && decision.behavior === 'allow';
       const options = Array.isArray(params.options) ? params.options.map(record) : [];
@@ -462,7 +481,8 @@ export class AgyAgent extends BaseAgent {
         const version = await assertAgyBinaryUsable(this.deps.binaryPath, this.deps.readAgyVersion);
         this.deps.logger.debug('agy binary accepted', { version });
       }
-      const env = { ...process.env, ...await this.deps.auth.getAuthEnv() };
+      const authEnv = await this.deps.auth.getAuthEnv();
+      const env = { ...process.env, ...authEnv };
       const memoryEnabled = (opts.makerMemoryEnabled ?? this.deps.runtimeConfig.makerMemoryEnabled) === true;
       if (firstPrompt) {
         const scope = await resolveMemoryScopeKey(opts.makerMemoryScopeKey ?? opts.workingDir);
@@ -472,7 +492,14 @@ export class AgyAgent extends BaseAgent {
         context = [opts.botProfilePrompt, opts.botProfileContextPrompt, memory, opts.userPrompt].filter(Boolean).join('\n\n');
       }
       assertCurrent();
-      const transport = (this.deps.createAgyTransport ?? spawnAcpTransport)({ binaryPath: this.deps.binaryPath, args: AGY_ACP_ARGS, cwd: opts.workingDir, env });
+      // System-level isolation: agy only touches the task folder and its private state; no host
+      // loopback, no session bus (cindy#1 6908586833, 6909268027). Fails closed, never runs bare.
+      const launch = useSandbox
+        ? await prepareAgySandboxedLaunch({ binaryPath: this.deps.binaryPath, args: AGY_ACP_ARGS, taskDir: agyWorkingDir,
+          homeDir: os.homedir(), stateRoot: sandboxStateRoot, env, passEnvKeys: Object.keys(authEnv), probe: this.deps.agySandbox?.probe })
+        : { command: this.deps.binaryPath, args: [...AGY_ACP_ARGS], env };
+      assertCurrent();
+      const transport = (this.deps.createAgyTransport ?? spawnAcpTransport)({ binaryPath: launch.command, args: launch.args, cwd: agyWorkingDir, env: launch.env });
       client = new AcpClient(transport, {
         requestTimeoutMs: CONTROL_TIMEOUT, onRequest,
         onNotification: (method, raw) => {
@@ -513,14 +540,14 @@ export class AgyAgent extends BaseAgent {
         const sessionCaps = record(capabilities.sessionCapabilities);
         // Prefer resume (no history replay); session/load replays history, which is suppressed while loading.
         if (sessionCaps.resume !== undefined) {
-          updateCatalog(await request('session/resume', { sessionId, cwd: opts.workingDir, mcpServers: [] }, { signal: startup.signal }));
+          updateCatalog(await request('session/resume', { sessionId, cwd: agyWorkingDir, mcpServers: [] }, { signal: startup.signal }));
         } else if (capabilities.loadSession === true) {
-          updateCatalog(await request('session/load', { sessionId, cwd: opts.workingDir, mcpServers: [] }, { signal: startup.signal }));
+          updateCatalog(await request('session/load', { sessionId, cwd: agyWorkingDir, mcpServers: [] }, { signal: startup.signal }));
         } else throw new Error('This agy version cannot resume saved tasks');
       } else {
         // HTTP MCP is not integrated in this launch mode; the official CLI guide
         // requires --process-per-session. See protocol-compatibility/antigravity-native-acp.md.
-        const result = record(await request('session/new', { cwd: opts.workingDir, mcpServers: [] }, { signal: startup.signal }));
+        const result = record(await request('session/new', { cwd: agyWorkingDir, mcpServers: [] }, { signal: startup.signal }));
         sessionId = validateSessionId(result.sessionId);
         updateCatalog(result);
       }
@@ -689,6 +716,7 @@ export class AgyAgent extends BaseAgent {
       if (error instanceof AgentNotAuthenticatedError) throw error;
       if (isAuthError(error)) throw new AgentNotAuthenticatedError('agy', AGY_SIGN_IN_MESSAGE);
       if (error instanceof AgyBinaryUnavailableError) throw new AgentStartupStoppedError(error);
+      if (error instanceof AgySandboxUnavailableError) throw new AgentStartupStoppedError(new Error(agySandboxUnavailableText(error)));
       if (!(error instanceof AcpRpcError) && !(error instanceof NotSupportedError) && client) {
         const hint = stderrHint(client);
         if (hint) throw new AgentStartupStoppedError(new Error(`${error instanceof Error ? error.message : String(error)}${hint}`));
@@ -696,6 +724,16 @@ export class AgyAgent extends BaseAgent {
       throw new AgentStartupStoppedError(error instanceof AcpRpcError ? new AcpRpcError(error.code, safeError(error)) : error);
     }
   }
+}
+
+function realpathOr(dir: string): string {
+  try { return realpathSync(dir); } catch { return dir; }
+}
+
+/** `[agy_sandbox_unavailable]` code + English fallback; zh/en wording pending JJ (cindy#1). */
+function agySandboxUnavailableText(error: AgySandboxUnavailableError): string {
+  const copy = AGY_SANDBOX_USER_COPY_DRAFT.unavailable;
+  return `[agy_sandbox_unavailable] ${copy.en.replace('{reason}', copy.reason[error.reason].en)} (${error.detail})`;
 }
 
 const AGY_SIGN_IN_MESSAGE = 'The Antigravity ACP session requires authentication. Check the CLI authentication environment; this does not establish that the local login has expired.';
