@@ -1,9 +1,10 @@
+import type { DbAgentKind } from './agentKindConversion.js';
 import type { TaskTag } from '@cindy/maker-shared';
 import { projectDraftSessionTitle } from '@cindy/maker-shared/session-title';
 
 import type { SessionSource } from './sessionSource';
 
-export type ConversationSearchAgentKind = 'cc' | 'codex' | 'pi';
+export type ConversationSearchAgentKind = DbAgentKind;
 export type ConversationSearchWorkspaceKind = 'project' | 'dialogue';
 export type ConversationSearchSessionStatus = 'active' | 'archived' | 'deleted';
 export type ConversationSearchOrcaRole = 'lead' | 'worker';
