@@ -21,6 +21,7 @@ export function createRemoteSessionExecutionResolver(deps: {
     const defaults = deps.readDefault();
     const agentKind = input.agentKind ?? defaults?.agentKind;
     if (!agentKind) throw new Error('Select an agent for the remote provider');
+    if (agentKind === 'agy') throw new Error('Native Antigravity remote task creation is not supported');
     let routing: Awaited<ReturnType<typeof deps.readRemoteRouting>>;
     try { routing = await deps.readRemoteRouting(deviceId, agentKind); }
     catch (error) {
@@ -33,8 +34,10 @@ export function createRemoteSessionExecutionResolver(deps: {
       availableAgents: [agentKind], availableModels: routing.remoteCodexModels ?? [], providerRouting: routing,
       hasCindyAiApiKey: true, locationChanged: true,
     });
+    const selectedAgentKind = selected.agentKind;
+    if (selectedAgentKind === 'agy') throw new Error('Native Antigravity remote task creation is not supported');
     // Keep the destination's resolved provider explicit when execution moves computers.
-    return { ...selected, providerId: selected.providerId ?? routing.resolveDefaultProviderIdForModel(agentKind, selected.model),
+    return { ...selected, agentKind: selectedAgentKind, providerId: selected.providerId ?? routing.resolveDefaultProviderIdForModel(agentKind, selected.model),
       agentDeviceId: deviceId };
   };
 }
