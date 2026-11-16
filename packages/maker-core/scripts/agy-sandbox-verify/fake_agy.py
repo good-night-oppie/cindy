@@ -118,6 +118,18 @@ rec("Q-host-loopback", "host 127.0.0.1 known port", "127.0.0.1:%d" % plan["probe
 rec("Q-x11", "X11 abstract socket", "@/tmp/.X11-unix/X1", lambda: abstract("/tmp/.X11-unix/X1"))
 for port in plan.get("cindy_ports", []):
     rec("Q-cindy-mcp-%d" % port, "Cindy MCP port on host loopback", "127.0.0.1:%d" % port, lambda port=port: tcp("127.0.0.1", port))
+# cindy#3 review item 1: pasta relays through host sockets, so these must be closed by the guard rules
+for ip in plan.get("host_if_ips", []):
+    kind = "tailnet IP" if ip.startswith("100.") else "host interface IP"
+    rec("Q-host-if-" + ip, kind + ", 0.0.0.0 listener", "%s:%d" % (ip, plan["any_port"]),
+        lambda ip=ip: tcp(ip, plan["any_port"]))
+rec("Q-metadata", "cloud metadata service (TCP connect only)", "169.254.169.254:80", lambda: tcp("169.254.169.254", 80))
+rec("Q-rule-del", "remove the private-range rules", "ip rule del pref 200",
+    lambda: (lambda r: (r.returncode == 0, (r.stderr or r.stdout or "rc=0")[:200]))(
+        subprocess.run(["ip", "rule", "del", "pref", "200"], capture_output=True, text=True)))
+rec("Q-rule-del-userns", "new user namespace, then remove the rules", "unshare -r ip rule del pref 200",
+    lambda: (lambda r: (r.returncode == 0, (r.stderr or r.stdout or "rc=0")[:200]))(
+        subprocess.run(["unshare", "-r", "ip", "rule", "del", "pref", "200"], capture_output=True, text=True)))
 def egress():
     import urllib.request
     with urllib.request.urlopen("https://api.github.com/zen", timeout=10) as r: return r.status == 200, "HTTP %d" % r.status
