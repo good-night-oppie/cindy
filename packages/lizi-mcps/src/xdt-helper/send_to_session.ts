@@ -19,6 +19,9 @@ import { errorPayload, okPayload } from "./_payload.js";
  * 注册,归 handoff 类目)。注:`ControlDispatchOutcome` 仍留在原文件——它被
  * create_worker / orca server 引用,与本工具无关,不随迁。
  */
+/** Receipt identity is broader than the engines callers may request for creation. */
+type SessionReceiptAgent = ControlWorkerAgent | 'agy';
+
 export type SendToSessionCallback = (params: {
   targetSessionId?: string;
   /** Create on this Cindy computer; omitted/local keeps existing local behavior. */
@@ -48,7 +51,7 @@ export type SendToSessionCallback = (params: {
       targetDeviceId?: string;
       responsibilityRecorded?: false;
       targetSessionId: string;
-      agentKind: ControlWorkerAgent;
+      agentKind: SessionReceiptAgent;
       wakeKind: "resumed" | "already-active" | "created" | "queued";
       targetTitle: string | null;
       targetLastUserSendAt: string | null;
@@ -99,7 +102,7 @@ export type SendToRemoteSessionCallback = (params: {
 }) => Promise<
   ControlResult<
     {
-      agentKind: ControlWorkerAgent;
+      agentKind: SessionReceiptAgent;
       wakeKind: "resumed" | "already-active" | "queued";
       targetTitle: string | null;
       targetLastUserSendAt: string | null;
