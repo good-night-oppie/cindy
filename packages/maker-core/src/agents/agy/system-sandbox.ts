@@ -292,6 +292,8 @@ export interface AgySandboxLaunchInput {
   bwrapPath: string;
   supportsDisableUserns: boolean;
   pastaPath: string;
+  /** iproute2 `ip` (see agyNetGuardCommand). */
+  ipPath: string;
   /** Upstream DNS server pasta forwards to (see pickUpstreamDns); null = no DNS. */
   dnsHost: string | null;
   /** File mounted as the sandbox's /etc/resolv.conf (points at AGY_SANDBOX_DNS_ADDR). */
@@ -306,8 +308,10 @@ export interface AgySandboxLaunchInput {
   homeDir: string;
   /** Extra read-write dirs (e.g. agy's own state dir). `target` defaults to `source`. */
   writableDirs?: readonly { source: string; target?: string }[];
-  /** Extra read-only paths bound at the same path (e.g. agy install resources). */
+  /** Extra read-only paths bound at the same path (e.g. agy install resources). Never in the home dir. */
   readOnlyPaths?: readonly string[];
+  /** agy's private state root; writable dirs inside the home dir are allowed only inside it. */
+  stateRoot?: string;
   /** Environment of the would-be agy process; filtered before entering the sandbox. */
   env: NodeJS.ProcessEnv;
   /** Env keys that must pass through (e.g. the keys returned by the auth env provider). */
@@ -363,6 +367,9 @@ export function buildAgySandboxLaunch(input: AgySandboxLaunchInput): AgySandboxL
   const binary = fs.realpath(input.binaryPath);
   const writable = (input.writableDirs ?? []).map(w => ({ source: fs.realpath(w.source), target: w.target ?? fs.realpath(w.source) }));
   assertAgyTaskDirPaths(taskDir, homeDir, writable.flatMap(w => [w.source, w.target]));
+  const readOnly = (input.readOnlyPaths ?? []).filter(p => fs.exists(p)).map(p => fs.realpath(p));
+  assertAgyMountSources([...writable.map(w => w.source), ...readOnly], homeDir,
+    input.stateRoot ? fs.realpath(input.stateRoot) : null);
 
   // --share-net shares pasta's isolated namespace (the outer process), never the host's.
   const a: string[] = ['--unshare-all', '--share-net', '--die-with-parent', '--new-session',
@@ -390,9 +397,7 @@ export function buildAgySandboxLaunch(input: AgySandboxLaunchInput): AgySandboxL
   a.push('--dir', homeDir);
   for (const w of writable) a.push('--bind', w.source, w.target);
   if (!isInside(binary, '/usr')) a.push('--ro-bind', binary, binary);
-  for (const p of input.readOnlyPaths ?? []) {
-    if (!fs.exists(p)) continue;
-    const r = fs.realpath(p);
+  for (const r of readOnly) {
     if (isInside(taskDir, r)) continue; // never re-cover the writable task dir
     a.push('--ro-bind', r, r);
   }
@@ -403,7 +408,7 @@ export function buildAgySandboxLaunch(input: AgySandboxLaunchInput): AgySandboxL
   const loginEnv = login.kind === 'api-key' ? login.env : {};
   return {
     command: input.pastaPath,
-    args: [...pastaNetArgs(input.dnsHost), '--', input.bwrapPath, ...a],
+    args: [...pastaNetArgs(input.dnsHost), '--', ...agyNetGuardCommand(input.ipPath), input.bwrapPath, ...a],
     env: filterAgySandboxEnv({ ...input.env, ...loginEnv }, homeDir, taskDir,
       [...(input.passEnvKeys ?? []), ...Object.keys(loginEnv)]),
   };
@@ -443,6 +448,11 @@ export function agyPrivateStateMounts(stateRoot: string, homeDir: string): { sou
 /** Create the private state root (0700) and its sub-dirs; returns the mounts. */
 export async function ensureAgyPrivateState(stateRoot: string, homeDir: string): Promise<{ source: string; target: string }[]> {
   await mkdir(stateRoot, { recursive: true, mode: 0o700 });
+  const st = await lstat(stateRoot);
+  const uid = process.getuid?.();
+  if (!st.isDirectory() || (uid !== undefined && st.uid !== uid)) {
+    throw new AgySandboxUnavailableError('task-dir-unsafe', `agy state root is not a directory owned by this user: ${stateRoot}`);
+  }
   await chmod(stateRoot, 0o700);
   const mounts = agyPrivateStateMounts(stateRoot, homeDir);
   for (const m of mounts) await mkdir(m.source, { recursive: true, mode: 0o700 });
