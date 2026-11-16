@@ -650,3 +650,16 @@ describe('send_to_session → 另一台电脑上的任务', () => {
     expect(description).toContain('DELIVERY_UNKNOWN');
   });
 });
+
+// Unit contract: report an existing engine truthfully without enabling create requests.
+it('preserves an agy receipt while rejecting agy creation input', async () => {
+  const { registry, sendToSession } = setup({ result: {
+    ok: true, targetSessionId: 'existing', agentKind: 'agy', wakeKind: 'queued',
+    targetTitle: null, targetLastUserSendAt: null,
+  } });
+  expect(parse(await registry.call('send_to_session', { target_session_id: 'existing', message: 'Continue' })))
+    .toMatchObject({ ok: true, agent_kind: 'agy' });
+  expect(parse(await registry.call('send_to_session', { message: 'Create', agent_kind: 'agy' })))
+    .toMatchObject({ ok: false, errorCode: 'INVALID_ARGS' });
+  expect(sendToSession).toHaveBeenCalledOnce();
+});
