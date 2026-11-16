@@ -463,10 +463,14 @@ function readText(p: string): string | null {
   try { return readFileSync(p, 'utf8'); } catch { return null; }
 }
 
-/** The sandbox's resolv.conf: a single nameserver, the in-sandbox address pasta forwards. */
-async function writeSandboxResolvConf(): Promise<string> {
-  const dir = path.join(os.tmpdir(), `cindy-agy-sandbox-${process.getuid?.() ?? 'u'}`);
-  await mkdir(dir, { recursive: true, mode: 0o700 });
+/**
+ * The sandbox's resolv.conf: a single nameserver, the in-sandbox address pasta forwards.
+ * Written into the private state root (0700, owner checked, not itself mounted into the
+ * sandbox). Without a state root it goes into a fresh mkdtemp dir, which another user
+ * cannot create or replace with a symlink in advance (cindy#3 review, item 4).
+ */
+async function writeSandboxResolvConf(stateRoot: string | undefined): Promise<string> {
+  const dir = stateRoot ?? await mkdtemp(path.join(os.tmpdir(), 'cindy-agy-sandbox-'));
   const file = path.join(dir, 'resolv.conf');
   await writeFile(file, `nameserver ${AGY_SANDBOX_DNS_ADDR}\n`, { mode: 0o644 });
   return file;
@@ -478,27 +482,33 @@ async function writeSandboxResolvConf(): Promise<string> {
  * unconfined launch.
  */
 export async function prepareAgySandboxedLaunch(
-  input: Omit<AgySandboxLaunchInput, 'bwrapPath' | 'supportsDisableUserns' | 'pastaPath' | 'dnsHost' | 'resolvConfPath'> & {
+  input: Omit<AgySandboxLaunchInput, 'bwrapPath' | 'supportsDisableUserns' | 'pastaPath' | 'ipPath' | 'dnsHost' | 'resolvConfPath'> & {
     probe?: AgySandboxProbe;
     /** agy's private state root (outside the task dir); mapped to ~/.gemini and ~/.config/antigravity. */
     stateRoot?: string;
+    /** Max files the hard-link scan checks; a bigger task dir is refused, not waved through. */
+    hardlinkScanLimit?: number;
   },
 ): Promise<AgySandboxLaunch & { hardlinkScan: HardlinkScanResult }> {
   const probe = input.probe ?? probeAgySystemSandbox();
   if (!probe.ok) throw new AgySandboxUnavailableError(probe.reason, probe.detail);
-  const hardlinkScan = await scanTaskDirForHardlinks(input.taskDir);
+  const hardlinkScan = await scanTaskDirForHardlinks(input.taskDir, input.hardlinkScanLimit);
   if (hardlinkScan.hardlinked) {
     throw new AgySandboxUnavailableError('task-dir-unsafe', `hard-linked file in task dir: ${hardlinkScan.hardlinked}`);
+  }
+  if (hardlinkScan.truncated) {
+    throw new AgySandboxUnavailableError('task-dir-unsafe',
+      `task dir has more than ${hardlinkScan.scanned} files; could not check all of them for hard links`);
   }
   if (input.stateRoot && isInside(path.resolve(input.stateRoot), path.resolve(input.taskDir))) {
     throw new AgySandboxUnavailableError('task-dir-unsafe', 'agy state root must not be inside the task dir');
   }
   const stateMounts = input.stateRoot ? await ensureAgyPrivateState(input.stateRoot, input.homeDir) : [];
   const dnsHost = pickUpstreamDns([readText('/run/systemd/resolve/resolv.conf'), readText('/etc/resolv.conf')]);
-  const resolvConfPath = dnsHost ? await writeSandboxResolvConf() : undefined;
+  const resolvConfPath = dnsHost ? await writeSandboxResolvConf(input.stateRoot) : undefined;
   const launch = buildAgySandboxLaunch({ ...input, writableDirs: [...stateMounts, ...(input.writableDirs ?? [])],
-    bwrapPath: probe.bwrapPath, pastaPath: probe.pastaPath, supportsDisableUserns: probe.supportsDisableUserns,
-    dnsHost, resolvConfPath });
+    bwrapPath: probe.bwrapPath, pastaPath: probe.pastaPath, ipPath: probe.ipPath,
+    supportsDisableUserns: probe.supportsDisableUserns, dnsHost, resolvConfPath });
   return { ...launch, hardlinkScan };
 }
 
@@ -560,7 +570,7 @@ export const AGY_SANDBOX_USER_COPY_DRAFT = {
       'unsupported-platform': { 'zh-CN': '这个系统暂不支持', en: 'not supported on this system yet' },
       'bwrap-missing': { 'zh-CN': '没有安装 bubblewrap', en: 'bubblewrap is not installed' },
       'bwrap-blocked': { 'zh-CN': '系统不允许创建隔离环境', en: 'the system does not allow creating the isolated environment' },
-      'network-isolation-missing': { 'zh-CN': '没有安装 pasta，无法隔离网络', en: 'pasta is not installed, so the network cannot be isolated' },
+      'network-isolation-missing': { 'zh-CN': '没有安装 pasta 或 iproute2，无法隔离网络', en: 'pasta or iproute2 is not installed, so the network cannot be isolated' },
       'task-dir-unsafe': { 'zh-CN': '任务文件夹不能被安全隔离', en: 'the task folder cannot be isolated safely' },
     },
   },
