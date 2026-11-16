@@ -1,3 +1,4 @@
+import type { DbAgentKind } from '../../../shared/agentKindConversion';
 /**
  * 已建立任务实际在用的订阅账号(subscription-account-pools.md「任务的账号」，2026-11-11 用户要求)。
  * 账号池里的任务固定在一个账号上：输入框下方的用量、模型列表里这个供应商(含供应商组那一项)的账号名与
@@ -111,12 +112,12 @@ const Context = createContext<ContextValue | null>(null);
  * Claude Code 显式选 Anthropic，或三种引擎显式选 OpenAI；SSH 远程与默认路由不进账号池。
  */
 export function sessionSubscriptionPoolProvider(
-  agent: 'cc' | 'codex' | 'pi',
+  agent: DbAgentKind,
   providerId: string | null | undefined,
   remoteHostId?: string | null,
   provider?: ProviderView,
 ): SubscriptionProvider | null {
-  if (remoteHostId) return null;
+  if (agent === 'agy' || remoteHostId) return null;
   const kind = provider && provider.id === providerId
     ? provider.subscriptionAccountPool ?? provider.subscriptionPool ?? providerId : providerId;
   if (kind === 'anthropic') return agent === 'cc' ? kind : null;
