@@ -100,9 +100,10 @@ export async function ensureUpstreamMergeSession(
       .where(eq(sessions.id, state.feature.taskSessionId))
       .limit(1);
     check();
+    if (origin?.agentKind === 'agy') throw new Error('Native Antigravity merge tasks are not supported');
     if (origin?.source === 'cindy-make' && !origin.remoteHostId)
       options = {
-        agentKind: normalizeDbAgentKind(origin.agentKind),
+        agentKind: origin.agentKind === 'codex' ? 'codex' : origin.agentKind === 'pi' ? 'pi' : 'cc',
         model: origin.model ?? undefined,
         providerId: origin.providerId,
         effort: origin.effort ?? undefined,

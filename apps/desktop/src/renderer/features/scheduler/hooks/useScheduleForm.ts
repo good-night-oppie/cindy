@@ -492,6 +492,8 @@ export function useScheduleForm(initial: Schedule | null = null): UseScheduleFor
         // remembered 保留旧快照 —— 用户切走再切回还能还原上一个真实绑定。
         return { ...f, targetSessionId: PENDING_SESSION_ID };
       }
+      // 定时任务不支持 agy:不绑定,保持原状态(不回落成 Claude)。
+      if (session.agentKind === 'agy') return f;
       const next: ScheduleFormState = {
         ...f,
         targetSessionId: session.id,

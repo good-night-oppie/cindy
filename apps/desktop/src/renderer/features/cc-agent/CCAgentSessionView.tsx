@@ -55,7 +55,7 @@ import { CindyMakeSessionGate } from './CindyMakeSessionGate';
 import { SessionRouteOriginGate } from './SessionRouteOriginGate';
 import { usePluginSkillSetup } from './pluginSkillSetup';
 import { useBotIslandVisibleSession } from '@/features/bots/useBotIslandVisibleSession';
-import { dbToMakerAgentKind, normalizeDbAgentKind } from '../../../shared/agentKindConversion';
+import { dbToMakerAgentKind, isLaunchableDbAgentKind, normalizeDbAgentKind } from '../../../shared/agentKindConversion';
 import { isPluginEngineEffort, isPluginEngineKind, pluginEngineKeyFromProviderId } from '../../../shared/pluginEngines';
 import { isProviderShareAgentDeviceId } from '../../../shared/providerShare';
 import {
@@ -2273,6 +2273,9 @@ function CCAgentSessionContent({
   ]);
   // 展示引擎可乐观跟随 intent；真实 event reducer 仍只读 store.agentKind。
   const displayAgentKind = agentSwitchIntent?.target ?? dbToMakerAgentKind(session?.agentKind);
+  // agy 不沿用 Claude/Codex/Pi 的模型目录与价格:容量环、花费、输入框引擎键对 agy 为空。
+  const displayVendorKey = normalizeDbAgentKind(displayAgentKind);
+  const launchableVendorKey = isLaunchableDbAgentKind(displayVendorKey) ? displayVendorKey : null;
   // 真实会话 agentKind(pending switch intent 不影响)——压缩分流必须用它,
   // 否则 intent 乐观切到 pi 但真实会话仍在跑 claude-code 时会错调 compact-session(#1933 review)。
   const realAgentKind = dbToMakerAgentKind(session?.agentKind);
@@ -5169,11 +5172,11 @@ function CCAgentSessionContent({
       const contextWindow = resolveDisplayContextWindow({
         sdkContextWindow: agentStatus.contextWindow,
         verifiedContextWindow: resolveSessionContextWindow({ providers }, sourceSession),
-        modelContextWindow: getModelContextWindow(
-          sourceSession.model,
-          sourceSession.agentKind ?? 'cc',
-          remoteDeviceId,
-        ),
+        // agy 没有本地模型目录,上下文窗口只用 SDK/已核实值,不套 Claude 的。
+        modelContextWindow: ((kind) =>
+          isLaunchableDbAgentKind(kind)
+            ? getModelContextWindow(sourceSession.model, kind, remoteDeviceId)
+            : undefined)(sourceSession.agentKind ?? 'cc'),
       });
       const used = Math.min(agentStatus.contextTokens, contextWindow || Infinity);
       const pct = contextWindow > 0 ? Math.round((used / contextWindow) * 100) : 0;
@@ -6939,7 +6942,7 @@ function CCAgentSessionContent({
                   draftKey={composerDraftKey}
                   externalDragOver={isDragOver}
                   onComposerDropHandled={resetFullAreaDragState}
-                  vendorKey={normalizeDbAgentKind(displayAgentKind)}
+                  vendorKey={launchableVendorKey ?? undefined}
                   extraDirs={session?.extraDirs ?? []}
                   // 插件引擎只拿到任务工作目录(docs/plans/acp-plugin-bridge.md)：不给附加目录入口。
                   onExtraDirsChange={pluginEngineTask ? undefined : handleExtraDirsChange}
@@ -7130,9 +7133,9 @@ function CCAgentSessionContent({
                         engineKey={pluginUsageKey} name={usageEngine?.name} deviceId={taskAccountDeviceId}
                         running={agentStatus.isRunning} />
                     )}
-                    {!pluginUsageKey && (!pluginEngineTask || agentSwitchIntent) && (
+                    {launchableVendorKey && !pluginUsageKey && (!pluginEngineTask || agentSwitchIntent) && (
                       <TodaySpendChip
-                        vendorKey={normalizeDbAgentKind(displayAgentKind)}
+                        vendorKey={launchableVendorKey}
                         modelId={agentSwitchIntent?.model ?? session?.model ?? null}
                         providerId={usageChipProviderId}
                         sessionId={sessionId}
@@ -7145,6 +7148,7 @@ function CCAgentSessionContent({
                         usageAccount={usageAccount}
                       />
                     )}
+                    {launchableVendorKey && (
                     <ContextCapacityRing
                       reportedOnly={pluginEngineTask}
                       isRunning={agentStatus.isRunning}
@@ -7154,13 +7158,13 @@ function CCAgentSessionContent({
                       disabled={readOnly || !session}
                       contextTokens={agentStatus.contextTokens}
                       model={agentSwitchIntent?.model ?? session?.model ?? ''}
-                      vendorKey={normalizeDbAgentKind(displayAgentKind)}
+                      vendorKey={launchableVendorKey}
                       sdkContextWindow={agentStatus.contextWindow}
                       // 插件引擎的上下文窗口只来自它上报的用量(sdkContextWindow)，不查内置目录。
                       verifiedContextWindow={pluginEngineTask ? undefined : resolveSessionContextWindow(
                         { providers },
                         {
-                          agentKind: normalizeDbAgentKind(displayAgentKind),
+                          agentKind: launchableVendorKey,
                           model: agentSwitchIntent?.model ?? session?.model,
                           providerId: agentSwitchIntent
                             ? agentSwitchIntent.providerId
@@ -7187,6 +7191,7 @@ function CCAgentSessionContent({
                           : undefined
                       }
                     />
+                    )}
                   </div>
                 </div>
               ) : (

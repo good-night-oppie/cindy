@@ -1028,7 +1028,9 @@ export function ScheduleFormDialog({
                                       null,
                                       boundSessionReference?.agentKind === 'cc'
                                         ? 'claude-code'
-                                        : boundSessionReference?.agentKind,
+                                        : boundSessionReference?.agentKind === 'agy'
+                                          ? undefined
+                                          : boundSessionReference?.agentKind,
                                     )
                                   }
                                   agentKind={form.agentKind}

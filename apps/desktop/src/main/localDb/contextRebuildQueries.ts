@@ -1,3 +1,4 @@
+import type { DbAgentKind } from '../../shared/agentKindConversion.js';
 import { and, desc, eq, gt, isNull, sql } from 'drizzle-orm';
 import { isSyntheticTriggerText } from '../../shared/interruptedTurn.js';
 import { getDbClient } from './client/current.js';
@@ -13,7 +14,7 @@ const messageRowid = sql<number>`rowid`;
 export async function findLatestContextRebuildMeta(sessionId: string): Promise<{
   reason?: string;
   sourceUserClientId?: string | null;
-  sourceAgentKind?: 'cc' | 'codex' | 'pi';
+  sourceAgentKind?: DbAgentKind;
   sourceModel?: string | null;
   sourceProviderId?: string | null;
 } | null> {
@@ -39,7 +40,8 @@ export async function findLatestContextRebuildMeta(sessionId: string): Promise<{
         typeof parsed.sourceUserClientId === 'string' ? parsed.sourceUserClientId : null,
       ...(parsed.sourceAgentKind === 'cc' ||
       parsed.sourceAgentKind === 'codex' ||
-      parsed.sourceAgentKind === 'pi'
+      parsed.sourceAgentKind === 'pi' ||
+      parsed.sourceAgentKind === 'agy'
         ? { sourceAgentKind: parsed.sourceAgentKind }
         : {}),
       ...(typeof parsed.sourceModel === 'string' ? { sourceModel: parsed.sourceModel } : {}),

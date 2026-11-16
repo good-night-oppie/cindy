@@ -145,8 +145,16 @@ async function searchRemoteIndexed(
   request: ConversationSearchRequest,
   invokeRemote: ConversationSearchFanoutDeps['invokeRemote'],
 ): Promise<ConversationSearchResponse> {
-  const response = await invokeRemote(deviceId, 'local-db:conversations:search', [remoteConversationSearchRequest(request)]);
-  return response as ConversationSearchResponse;
+  const filters = request.filters;
+  // 远端协议的引擎筛选没有 agy:按 agy 筛选时不对远端发筛选(旧版本不认),
+  // 取全部后在本地只留 agy 结果;其余筛选原样透传。
+  const agyOnly = filters?.agentKind === 'agy';
+  const remoteAgentFilter = filters?.agentKind === 'agy' ? 'all' : filters?.agentKind;
+  const remoteRequest = filters ? { ...request, filters: { ...filters, agentKind: remoteAgentFilter } } : { ...request, filters: undefined };
+  const response = await invokeRemote(deviceId, 'local-db:conversations:search', [remoteConversationSearchRequest(remoteRequest)]);
+  const typed = response as ConversationSearchResponse;
+  if (!agyOnly) return typed;
+  return { ...typed, results: typed.results.filter((item) => item.session.agentKind === 'agy') };
 }
 
 async function searchRemoteLegacyByTitle(

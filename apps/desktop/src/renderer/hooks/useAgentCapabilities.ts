@@ -1,3 +1,4 @@
+import type { MakerAgentKindWire } from '../../shared/agentKindConversion.js';
 /**
  * useAgentCapabilities — 按需拉取 maker-core 暴露的 agent capabilities。
  *
@@ -20,7 +21,7 @@ import type { Effort, PermissionMode } from '@/lib/userPreferences.types';
 
 const log = createLogger('useAgentCapabilities');
 
-export type AgentKind = 'claude-code' | 'codex' | 'pi';
+export type AgentKind = MakerAgentKindWire;
 
 // capability 生命周期(预取 / 驱逐通知 / 本地快照刷新 / 启动预载)必须覆盖全部 agent，
 // 少一个就会让该 agent 的远程会话在断链或 provider revision 后收不到 loading 事件、
@@ -61,7 +62,7 @@ export interface ModelDescriptor {
    * 解耦;生产环境 XD 网关由服务端按区域下发)。消费点见 modelDefinitions.newSessionDefaultModelId
    * 与 draftModelCalibration:被标记且可用的模型优先作新对话默认。
    */
-  newSessionDefault?: ('claude-code' | 'codex' | 'pi')[];
+  newSessionDefault?: AgentKind[];
 }
 
 export interface EffortDescriptor {
@@ -456,6 +457,8 @@ async function fetchCapabilities(
   agentKind: AgentKind,
   deviceId?: string,
 ): Promise<AgentCapabilities | null> {
+  // Native engine integration is not advertised until its safety checks pass.
+  if (agentKind === 'agy') return null;
   const key = cacheKey(agentKind, deviceId);
   const cached = expiry.valid(key) ? cache.get(key) : undefined;
   if (cached) return cached;

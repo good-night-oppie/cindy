@@ -292,7 +292,8 @@ function WorkdirBrowseContent({ requestedDeviceId }: { requestedDeviceId: string
   // 用 doc 模式当前打开的目录(忽略 draft.workingDir)。新 session 创建后
   // workingDir 命中,会通过 sortedWorkdirSessions memo 自然出现在 tab 列表里。
   const handleCreateNewSession = useCallback(async (agentKind: AgentKind) => {
-    if (!browsableWorkdir) return;
+    // 新建任务只列原三种引擎;agy 不作为新建目标。
+    if (!browsableWorkdir || agentKind === 'agy') return;
     // device-link 远程视图:控制端无法替被控端创建会话,本地新建只会得到一个
     // 指向远端路径的坏会话(+ 按钮已隐藏,这里是防御性短路)。
     if (deviceId) return;

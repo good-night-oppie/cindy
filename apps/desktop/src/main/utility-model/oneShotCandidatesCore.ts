@@ -1013,7 +1013,7 @@ async function requestExplicitProviderText(
       ? 'codex-responses'
       : 'litellm-chat-completions';
 
-  if (!provider || !agentKind || !provider.agents.includes(agentKind)) {
+  if (!provider || !agentKind || agentKind === 'agy' || !provider.agents.includes(agentKind)) {
     return {
       ok: false,
       reason: 'no_candidate',
@@ -1331,6 +1331,7 @@ async function requestBuiltinProviderText(
     missingCredentialMessage: 'The selected provider is not authenticated.',
   };
   if (input.signal?.aborted) return cancelledUtilityTextResult(profile);
+  if (input.agentKind === 'agy') return { ok: false, reason: 'no_candidate', attempts: [skippedAttempt(profile, 'agent_unavailable')] };
   const routing = input.provider.routing[input.agentKind];
   if (!routing) {
     return { ok: false, reason: 'no_candidate', attempts: [skippedAttempt(profile, 'agent_unavailable')] };
@@ -2265,6 +2266,7 @@ function utilityRequestPlan(input: {
   /** Some coding-specialized models reject their wire's reasoning field. */
   supportsReasoning?: boolean;
 }): Pick<Parameters<typeof requestProviderHttpText>[0], 'steps' | 'memoryKey' | 'compat'> {
+  if (input.agentKind === 'agy') throw new Error('Native Antigravity does not support HTTP utility requests');
   const harness: CompatibilityHarness = input.agentKind;
   let mode: UtilityReasoningMode;
   if (input.disableReasoning) {

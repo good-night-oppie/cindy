@@ -336,6 +336,7 @@ import type { Effort, PermissionMode } from '@/lib/userPreferences.types';
 import { getAppShortcutCombos } from '@/lib/appShortcutStore';
 import { getNextPermissionMode } from '@/lib/permissionModeCycle';
 import { matchesKeyboardEvent } from '../../../shared/appShortcuts';
+import { isLaunchableMakerAgentKind, makerToDbAgentKind } from '../../../shared/agentKindConversion';
 import {
   getComposerSendShortcutPreference,
   getComposerSendShortcutLabel,
@@ -1087,14 +1088,14 @@ function rememberCatalogModelPrefs(
 }
 
 /** 统一模型选择器联合列表的候选引擎全集(与 SELECTABLE_VENDORS 同一顺序)。 */
-const UNIFIED_AGENT_KINDS: readonly AgentKind[] = ['claude-code', 'codex', 'pi'];
+const UNIFIED_AGENT_KINDS = ['claude-code', 'codex', 'pi'] as const;
 
 /** AgentKind → NewMaker vendor(useAvailableAgents 用 vendor 口径)。 */
-function agentKindToVendor(kind: AgentKind): 'cc' | 'codex' | 'pi' {
+function agentKindToVendor(kind: Exclude<AgentKind, 'agy'>): 'cc' | 'codex' | 'pi' {
   return kind === 'codex' ? 'codex' : kind === 'pi' ? 'pi' : 'cc';
 }
 
-function vendorKeyToAgentKind(v?: 'cc' | 'codex' | 'pi'): AgentKind | null {
+function vendorKeyToAgentKind(v?: 'cc' | 'codex' | 'pi'): Exclude<AgentKind, 'agy'> | null {
   if (v === 'cc') return 'claude-code';
   if (v === 'codex') return 'codex';
   if (v === 'pi') return 'pi';
@@ -5956,7 +5957,7 @@ export function ChatInput({
             createOptions: {
               // Home needs only a chat container; a project task could bootstrap Git.
               workspaceKind: 'dialogue',
-              agentKind: currentModelAgentKind === 'claude-code' ? 'cc' : currentModelAgentKind ?? undefined,
+              agentKind: isLaunchableMakerAgentKind(currentModelAgentKind) ? makerToDbAgentKind(currentModelAgentKind) : undefined,
               model: activeModel,
               effort: selectedEffort,
               permissionMode: activePermissionMode,
@@ -7906,6 +7907,7 @@ export function ChatInput({
         fast?: boolean | 'ultrafast';
         favoriteUid?: string | null;
       }): Promise<boolean> => {
+        if (!isLaunchableMakerAgentKind(targetAgent)) return false;
         // ★ 必须 await 并**透传事务的真实结果**(2026-08-17 review)。此前这里 fire-and-forget
         // 之后立即 return true —— 那个 true 只表示「确认框过了」,不表示切换登记成功。
         // 面板侧把「成功才做」的清理(恢复推荐清 override / 删除选中收藏)挂在这个提前
@@ -7993,6 +7995,7 @@ export function ChatInput({
         ? { readProviderGroup: () => readSessionProviderGroup(sessionId, deviceLinkDeviceId || undefined) }
         : {}),
       onRelocate: async (selection) => {
+        if (!isLaunchableMakerAgentKind(selection.agent)) return false;
         const recovery = makerChatStore.getSnapshot(sessionId).inputRecovery;
         const retryClientId = hostSupportsQueueHeadRetry && selection.retryQueuedSend && recovery?.kind === 'queue-head'
           ? recovery.clientId : undefined;
@@ -8180,7 +8183,9 @@ export function ChatInput({
       if (sessionId && sessionAgentSwitchSupported && !remoteHostId && runtimeAgentKind &&
           expectedAgentSwitchRevision === undefined) {
         const intent = builtinAgentSwitchIntent(makerChatStore.getAgentSwitchIntent(sessionId));
-        return performAgentSwitch(intent?.target ?? runtimeAgentKind, newModelId,
+        const switchTarget = intent?.target ?? runtimeAgentKind;
+        if (!isLaunchableMakerAgentKind(switchTarget)) return false;
+        return performAgentSwitch(switchTarget, newModelId,
           intent ? intent.providerId : effectiveSourceId ?? null);
       }
       const sourceSessionId = sessionId;
@@ -8791,7 +8796,9 @@ export function ChatInput({
       if (sessionId && sessionAgentSwitchSupported && !remoteHostId && runtimeAgentKind &&
           expectedAgentSwitchRevision === undefined) {
         const intent = builtinAgentSwitchIntent(makerChatStore.getAgentSwitchIntent(sessionId));
-        return performAgentSwitch(intent?.target ?? runtimeAgentKind,
+        const switchTarget = intent?.target ?? runtimeAgentKind;
+        if (!isLaunchableMakerAgentKind(switchTarget)) return false;
+        return performAgentSwitch(switchTarget,
           reconciledModelId ?? intent?.model ?? activeModel, newProviderId, {
             effort: reconciledEffort,
             fastMode: reconciledFast,
@@ -9338,10 +9345,10 @@ export function ChatInput({
     recommendation,
     canPredict:
       recommendationComposerReady && !!editor && !editor.isDestroyed &&
-      deviceLinkDeviceId !== undefined && runtimeAgentKind != null &&
+      deviceLinkDeviceId !== undefined && isLaunchableMakerAgentKind(runtimeAgentKind) &&
       hasPredictionMessages && !remoteHostId,
     predict: async (revision, isCurrent) => {
-      if (!sessionId || runtimeAgentKind == null) return null;
+      if (!sessionId || !isLaunchableMakerAgentKind(runtimeAgentKind)) return null;
       // 素材仍由 Main 从 DB 读取；远程任务经 sticky 路由交给被控电脑。
       const result = await predictPromptUntilDisabled(makerApiForSticky(sessionId), {
         sessionId,

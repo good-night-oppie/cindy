@@ -251,7 +251,11 @@ export async function fetchCustomProviderModelsForRefresh(
   })) return null;
   // Prepare every stored key before network work; slow key reads must not turn
   // this back into disjoint requests. Main isolates unequal saved headers/keys.
-  const requests = await Promise.all(provider.agents.map(async agent => {
+  // agy 没有自定义供应商运行时,不参与模型列表刷新。
+  const fetchableAgents = provider.agents.filter(
+    <A extends string>(agent: A): agent is Exclude<A, 'agy'> => agent !== 'agy',
+  );
+  const requests = await Promise.all(fetchableAgents.map(async agent => {
     const rt = config.runtimes[agent]!;
     return {
       agent, baseUrl: rt.baseUrl, authMethod: 'apiKey' as const,

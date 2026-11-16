@@ -23,6 +23,7 @@ export function sshCodexWorkerRoutingContext(views: ProviderView[]): OrcaWorkerP
   return {
     remoteCodexModels: models,
     availability: {
+      agy: [],
       'claude-code': [], pi: [],
       codex: models.length ? [{
         id: 'openai', name: views[0]!.name, models: models.map((model) => model.id),
@@ -47,6 +48,7 @@ export function sshCodexWorkerRoutingContext(views: ProviderView[]): OrcaWorkerP
  * 那台的第一个可选模型、来源交给那台的默认路由。
  */
 export function deviceWorkerRoutingContext(views: ProviderView[], agent: AgentKind): OrcaWorkerProviderRoutingContext {
+  if (agent === 'agy') throw new Error('Native Antigravity remote workers are not supported');
   const availabilityFor = (kind: AgentKind) =>
     connectedProvidersForAgent(views, kind).map((provider) => {
       const models = routableModels(provider, kind);
@@ -62,6 +64,7 @@ export function deviceWorkerRoutingContext(views: ProviderView[], agent: AgentKi
       };
     });
   const availability = {
+    agy: [],
     'claude-code': availabilityFor('claude-code'),
     codex: availabilityFor('codex'),
     pi: availabilityFor('pi'),
@@ -190,7 +193,7 @@ export function buildLocalProviderRoutingContext(views: ProviderView[], modelReg
     (provider.models[agent] ?? []).filter((model) =>
       isModelSelectableForNewRoute(model, { userProvider: provider.source === 'user' }),
     );
-  const availabilityFor = (agent: AgentKind) =>
+  const availabilityFor = (agent: Exclude<AgentKind, 'agy'>) =>
     connectedProvidersForAgent(views, agent).map((provider) => {
       const models = routableModels(provider, agent);
       const registryIdentityByModel = Object.fromEntries(
@@ -234,6 +237,7 @@ export function buildLocalProviderRoutingContext(views: ProviderView[], modelReg
 
   return {
     availability: {
+      agy: [],
       'claude-code': availabilityFor('claude-code'),
       codex: availabilityFor('codex'),
       pi: availabilityFor('pi'),

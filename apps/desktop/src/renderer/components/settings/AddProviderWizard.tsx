@@ -114,6 +114,7 @@ const AGENT_LABEL: Record<AgentKind, string> = {
   'claude-code': 'Claude Code',
   codex: 'Codex',
   pi: 'Pi',
+  agy: 'Antigravity',
 };
 
 function presetRuntimeBaseUrl(
@@ -1073,7 +1074,8 @@ export function AddProviderWizard({
       agents.flatMap((agent) => {
         const originalRuntime = preset.runtimes[agent];
         const rt = originalRuntime ? bindProviderPresetRuntime(originalRuntime, presetRuntimeBaseUrl(preset, agent, presetBaseUrls)) : undefined;
-        if (!rt) {
+        // agy 没有自定义供应商运行时,不拉模型列表。
+        if (!rt || agent === 'agy') {
           return [];
         }
         const runtimeBaseUrl = presetRuntimeBaseUrl(preset, agent, presetBaseUrls);

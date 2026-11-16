@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import { buildUserProvider } from '../user-provider.js';
-import { alignModelApiRoute, providerInterfaceModelRoute } from '../providerInterfaceRoutes.js';
+import { alignModelApiRoute, availableModelInterfaces, providerInterfaceDefaultRoute, providerInterfaceModelRoute } from '../providerInterfaceRoutes.js';
 import { bindDetectedProvider } from '../providerDetection.js';
 import { BUNDLED_CATALOG, parseCatalog } from '../catalog.js';
 
@@ -352,5 +352,17 @@ describe('V6 remote interface bindings', () => {
     expect(buildUserProvider(input, { modelRegistry: BUNDLED_CATALOG.modelRegistry }).models.codex![0].selectedInterface).toBeUndefined();
     const custom = connection({ route: { baseUrl: 'https://api.kimi.com/coding/v1', wireProtocol: 'openai-chat', requestPath: '/private/chat' } });
     expect(buildUserProvider(custom).models.codex![0].route?.requestPath).toBe('/private/chat');
+  });
+});
+
+// Unit regression: native ACP identity must not acquire an HTTP API route.
+describe('native ACP interface boundary', () => {
+  it('leaves native models untouched even when a supplier has HTTP interfaces', () => {
+    const model = { id: 'claude-fable-5-2', name: 'Native model', interfaceId: 'auto' };
+    const baseUrl = 'https://opencode.ai/zen/v1';
+    const registry = BUNDLED_CATALOG.modelRegistry;
+    expect(availableModelInterfaces(registry, 'opencode', model.id, baseUrl, 'agy')).toEqual([]);
+    expect(providerInterfaceDefaultRoute('opencode', 'agy', baseUrl, registry)).toBeUndefined();
+    expect(providerInterfaceModelRoute(model, 'agy', 'opencode', baseUrl, true, registry)).toBe(model);
   });
 });

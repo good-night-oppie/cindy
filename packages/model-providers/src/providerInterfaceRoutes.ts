@@ -62,7 +62,8 @@ export function availableModelInterfaces(
   registry: ModelRegistry | undefined, presetId: string, modelId: string,
   baseUrl: string, agent: AgentKind, capabilities: readonly string[] = MODEL_INTERFACE_CAPABILITIES,
 ): ModelInterfaceSnapshot[] {
-  if (!registry || registry.schemaVersion < 6) return [];
+  // Native ACP does not select an HTTP provider interface.
+  if (agent === 'agy' || !registry || registry.schemaVersion < 6) return [];
   const matches = registry.models.flatMap(entry => entry.routes
     .filter(route => route.providerId === presetId && route.modelId === modelId)
     .map(route => ({ entry, route })));
@@ -98,6 +99,7 @@ export function availableModelInterfaces(
 }
 
 export function providerInterfaceDefaultRoute(presetId: string, agent: AgentKind, baseUrl: string, registry: ModelRegistry = bundledRegistry) {
+  if (agent === 'agy') return undefined;
   const profiles = (registry.interfaceProfiles ?? []).filter(p => p.providerId === presetId &&
     !p.retired && !p.modelIds &&
     [...p.inputBaseUrls, p.baseUrl].some(input => clean(input) === clean(baseUrl)));
@@ -119,7 +121,7 @@ export function providerInterfaceModelRoute<T extends ProviderRuntimeModelConfig
   model: T, agent: AgentKind, presetId: string | undefined, baseUrl: string, managed = false,
   registry: ModelRegistry = bundledRegistry,
 ): T {
-  if (!presetId || model.route?.requestPath) return model;
+  if (agent === 'agy' || !presetId || model.route?.requestPath) return model;
   const choices = availableModelInterfaces(registry, presetId, model.id, baseUrl, agent);
   const declared = registry.models.some(e => e.routes.some(r => r.providerId === presetId && r.modelId === model.id && r.interfaces !== undefined));
   if (!choices.length) {

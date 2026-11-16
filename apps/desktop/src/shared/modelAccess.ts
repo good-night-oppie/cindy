@@ -1,3 +1,4 @@
+import type { MakerAgentKindWire } from './agentKindConversion';
 import type { ModelDisplayPricing } from '@cindy/model-providers';
 /**
  * modelAccess.ts — 网关凭据自动下发(model-access-server)的 main / renderer 共享类型。
@@ -204,7 +205,7 @@ export interface ModelAccessGatewayModel extends ModelGroupPricing {
    */
   currency?: 'USD' | 'CNY';
   /** 进哪些 runtime tab；Desktop 固定使用 v3，本字段由服务端明确下发。 */
-  agents?: ('claude-code' | 'codex' | 'pi')[];
+  agents?: MakerAgentKindWire[];
   name?: string;
   group?: string;
   description?: string;

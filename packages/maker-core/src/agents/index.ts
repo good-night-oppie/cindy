@@ -181,3 +181,8 @@ export {
 } from './claude-code/claude-projects-fs.js';
 
 export type { PiCacheCompatibility } from './pi/cache-compatibility.js';
+export {
+  AgyAgent, AGY_DEFAULT_MODEL, AGY_MIN_VERSION, AGY_ACP_ARGS, AgyBinaryUnavailableError,
+  AGY_DEFAULT_STALL_TIMEOUT_MS, AGY_STALL_TIMEOUT_ENV, resolveAgyStallTimeoutMs, parseAgyVersion,
+  type AgyAgentDeps,
+} from './agy/index.js';

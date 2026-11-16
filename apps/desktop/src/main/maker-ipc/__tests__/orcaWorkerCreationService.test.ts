@@ -515,9 +515,9 @@ describe('providerRouteRequiresExplicitSelection', () => {
 });
 
 function providerRoutingContext(
-  partial: Partial<Record<AgentKind, OrcaWorkerProviderSnapshot[]>>,
+  partial: Partial<OrcaWorkerProviderRoutingContext['availability']>,
 ): OrcaWorkerProviderRoutingContext {
-  const availability: Record<AgentKind, OrcaWorkerProviderSnapshot[]> = {
+  const availability: OrcaWorkerProviderRoutingContext['availability'] = {
     'claude-code': partial['claude-code'] ?? [],
     codex: partial.codex ?? [],
     pi: partial.pi ?? [],
@@ -525,7 +525,7 @@ function providerRoutingContext(
   return {
     availability,
     resolveDefaultProviderIdForModel: (agent, model) => (
-      availability[agent].find((provider) => provider.models.includes(model))?.id ?? null
+      availability[agent]?.find((provider) => provider.models.includes(model))?.id ?? null
     ),
   };
 }
@@ -2438,7 +2438,7 @@ describe('OrcaWorkerCreationService', () => {
         { id: 'xd', name: 'XD Gateway', models: ['gpt-5.4'] },
       ],
       pi: [],
-    } satisfies Record<AgentKind, OrcaWorkerProviderSnapshot[]>;
+    } satisfies OrcaWorkerProviderRoutingContext['availability'];
     const { deps, service } = createDeps({
       getWorkerDefaults: vi.fn(() => ({ model: 'gpt-5.5', providerId: 'custom-codex' })),
       getProviderRoutingContext: vi.fn(async () => providerRoutingContext(availability)),
@@ -3554,4 +3554,9 @@ describe('Worker tool defaults follow the submitted panel route atomically', () 
       expect(getCreationSelection).not.toHaveBeenCalled();
     }
   });
+});
+
+// Unit boundary: sparse legacy catalogs remain valid; native remote workers stay disabled.
+it('rejects native Antigravity worker routing before enumerating models', () => {
+  expect(() => deviceWorkerRoutingContext([], 'agy')).toThrow('Native Antigravity remote workers are not supported');
 });

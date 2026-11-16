@@ -113,7 +113,7 @@ export function RunHistoryPane({
       const referenceAgent = sessionReferences.get(run.sessionId)?.agentKind;
       return (
         sessionAgentMap.get(run.sessionId) ||
-        (referenceAgent === 'cc' ? 'claude-code' : referenceAgent) ||
+        (referenceAgent === 'cc' ? 'claude-code' : referenceAgent === 'agy' ? undefined : referenceAgent) ||
         s.agentKind
       );
     },

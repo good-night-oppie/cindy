@@ -1,3 +1,4 @@
+import type { DbEngineKind } from '../shared/agentKindConversion.js';
 import type { materializeToolProcessMedia } from './cindy-media/toolProcessMedia.js';
 import {
   withToolProcessMedia,
@@ -112,7 +113,7 @@ export interface MessagePersistencePorts {
 export interface DeferredTurnErrorRow {
   content: Record<string, unknown>;
   agentMeta: AgentMeta | null;
-  agentKind: 'cc' | 'codex' | 'pi' | 'acp' | undefined;
+  agentKind: DbEngineKind | undefined;
   turnStartedAt: number;
   occurredAt: number;
 }
@@ -447,10 +448,9 @@ export function createMessagePersistence(deps: MessagePersistencePorts) {
    * session.agent_kind 只代表"当前引擎",历史行的 agent_meta 必须按写入时引擎解析。
    * clearSessionPersistState 时清理。
    */
-  // 'acp' = plugin engine task (docs/plans/acp-plugin-bridge.md); its rows carry no vendor meta.
-  const dbAgentKindBySession = new Map<string, 'cc' | 'codex' | 'pi' | 'acp'>();
+  const dbAgentKindBySession = new Map<string, DbEngineKind>();
 
-  function noteSessionAgentKind(sessionId: string, dbAgentKind: 'cc' | 'codex' | 'pi' | 'acp'): void {
+  function noteSessionAgentKind(sessionId: string, dbAgentKind: DbEngineKind): void {
     // Called once per newly bound Session instance; beginBinding filters repeat wiring.
     // A replacement can have the same business id AND agent kind, but owns no old items.
     if (dbAgentKindBySession.get(sessionId) === 'codex' || dbAgentKind === 'codex') {
@@ -467,7 +467,7 @@ export function createMessagePersistence(deps: MessagePersistencePorts) {
     dbAgentKindBySession.set(sessionId, dbAgentKind);
   }
 
-  function getSessionDbAgentKind(sessionId: string): 'cc' | 'codex' | 'pi' | 'acp' | null {
+  function getSessionDbAgentKind(sessionId: string): DbEngineKind | null {
     return dbAgentKindBySession.get(sessionId) ?? null;
   }
 
@@ -3247,7 +3247,7 @@ export function createMessagePersistence(deps: MessagePersistencePorts) {
     row: {
       content: Record<string, unknown>;
       agentMeta: AgentMeta | null;
-      agentKind: 'cc' | 'codex' | 'pi' | 'acp' | undefined;
+      agentKind: DbEngineKind | undefined;
       /** 行的排序时间上界(通常是错误到达的时刻)。 */
       orderedAt: number;
       turnStartedAt: number;

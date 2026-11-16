@@ -24,7 +24,7 @@ export interface NewMakerDefaultTuple {
 interface ProviderDefaultPolicy {
   providerId: 'openai' | 'anthropic' | 'xai' | 'xd';
   accessKind: 'subscription' | 'managed';
-  agents: readonly AgentKind[];
+  agents: readonly Exclude<AgentKind, 'agy'>[];
   modelIds: readonly string[];
   allowOtherModels?: boolean;
   /**
@@ -75,7 +75,7 @@ const DEFAULT_POLICIES: readonly ProviderDefaultPolicy[] = [
   },
 ];
 
-function vendorForAgent(agent: AgentKind): NewMakerDefaultTuple['vendor'] {
+function vendorForAgent(agent: Exclude<AgentKind, 'agy'>): NewMakerDefaultTuple['vendor'] {
   return agent === 'claude-code' ? 'cc' : agent;
 }
 

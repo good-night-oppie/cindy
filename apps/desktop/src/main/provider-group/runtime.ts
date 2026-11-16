@@ -588,7 +588,10 @@ export function getProviderGroupRemoteGroups(): ProviderGroupRemoteGroups {
     readSnapshotGroup: async (ownerDeviceId, providerId) => continuityClient!.readConfig(ownerDeviceId, providerId),
     pick: (ownerDeviceId, input) => continuityClient!.pick(ownerDeviceId, input),
     cool: (ownerDeviceId, input) => client.cool(ownerDeviceId, input),
-    view: (ownerDeviceId, providerId, model, agentKind) => client.view(ownerDeviceId, providerId, agentKind ? { model, agentKind } : model),
+    view: (ownerDeviceId, providerId, model, agentKind) => {
+      if (agentKind === 'agy') throw new Error('Native Antigravity provider groups are not supported');
+      return client.view(ownerDeviceId, providerId, agentKind ? { model, agentKind } : model);
+    },
     invalidate: (ownerDeviceId) => directoryFacade.invalidate(ownerDeviceId),
   };
 }

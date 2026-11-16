@@ -18,6 +18,7 @@ export function deviceOffersModel(
   providerId: string | null,
   modelId: string,
 ): boolean {
+  if (agent === 'agy') return false;
   return views.some(
     (view) =>
       (providerId === null || view.id === providerId) &&
@@ -47,6 +48,7 @@ export async function checkDeviceRoute(
   providerId: string | null,
   modelId: string,
 ): Promise<DeviceRouteRejection | null> {
+  if (agent === 'agy') return 'not-offered';
   let views: ProviderView[];
   try {
     views = await readViews();

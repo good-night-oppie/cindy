@@ -1,3 +1,4 @@
+import type { MakerAgentKindWire } from './agentKindConversion.js';
 import type { PiPackageCommandDiagnostic } from '@cindy/maker-core';
 import type { PiExtensionUiApi } from '@cindy/maker-core/pi-extension-ui';
 export type { PiExtensionUiApi } from '@cindy/maker-core/pi-extension-ui';
@@ -151,7 +152,7 @@ export function listPiRuntimePaletteCommands(
 
 /** Runtime-confirmed Pi package commands belong only to the Pi command palette. */
 export function mergePiPackageCommands(
-  agentKind: 'claude-code' | 'codex' | 'pi',
+  agentKind: MakerAgentKindWire,
   builtins: PiPackageSlashCommand[],
   packageCommands: Array<{ name: string; description: string }>,
 ): PiPackageSlashCommand[] {
@@ -169,11 +170,11 @@ export function mergePiPackageCommands(
 }
 
 export function shouldListPiPackageCommands(
-  requestedAgentKind: 'claude-code' | 'codex' | 'pi',
+  requestedAgentKind: MakerAgentKindWire,
   sessionIdProvided: boolean,
   session: {
     /** 'acp' is a plugin-engine task; it never lists Pi package commands. */
-    agentKind: 'claude-code' | 'codex' | 'pi' | 'acp';
+    agentKind: MakerAgentKindWire | 'acp';
     reviewMode?: true;
     remoteHostId?: string;
   } | null,

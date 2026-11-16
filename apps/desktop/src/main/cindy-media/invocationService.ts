@@ -1295,6 +1295,8 @@ async function prepareInvocation(
       const agent = sourceAgent ?? providerModel.sourceAgent ?? (candidates.length === 1 ? candidates[0] : undefined);
       if (!agent) return failure('CONNECTION_AMBIGUOUS', '这个型号有多个实际连接，请选择 source_agent 后再 prepare', false, { source_agents: candidates });
       if (!candidates.includes(agent)) return failure('CONNECTION_UNAVAILABLE', '指定引擎没有这个媒体型号的可用连接');
+      // agy 没有自定义供应商的媒体运行时；和上一行一样按「没有可用连接」拒绝。
+      if (agent === 'agy') return failure('CONNECTION_UNAVAILABLE', '指定引擎没有这个媒体型号的可用连接');
       const connection = await resolveProviderHttpConnection(model.providerId, resolvedModelId, capability, agent);
       assertAuthScope(scope);
       if (!connection) return failure('CONNECTION_UNAVAILABLE', '指定媒体连接的端点、鉴权或凭证未就绪；请通过模型连接工具处理');

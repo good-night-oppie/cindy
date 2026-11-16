@@ -36,6 +36,7 @@ import {
 
 /** Preserve plugin routing support; auxiliary HTTP admission is resolved separately. */
 const ONESHOT_ROUTE_AGENTS = ['codex', 'claude-code', 'pi'] as const;
+type OneshotAgentKind = (typeof ONESHOT_ROUTE_AGENTS)[number];
 
 /**
  * 执行侧(requestBuiltinProviderText)可执行的内置供应商。清单侧必须按同一集合过滤——
@@ -114,7 +115,7 @@ function isChatModel(model: CatalogModel, provider: Provider): boolean {
   return isModelSelectableForNewRoute(model, { userProvider: provider.source === 'user' });
 }
 
-const AGENT_LABEL: Record<AgentKind, string> = {
+const AGENT_LABEL: Record<OneshotAgentKind, string> = {
   codex: 'Codex',
   'claude-code': 'Claude Code',
   pi: 'Pi',
@@ -207,14 +208,14 @@ export function buildTextOneshotPinOptions(
   hasCredential?: OneshotCredentialProbe,
   purpose: 'plugin' | 'auxiliary' = 'plugin',
 ): TextOneshotPinOption[] {
-  const entries: { provider: Provider; agentKind: AgentKind; model: CatalogModel; direct: boolean }[] = [];
+  const entries: { provider: Provider; agentKind: OneshotAgentKind; model: CatalogModel; direct: boolean }[] = [];
   const seenRoutes = new Set<string>();
   for (const provider of orderedProviders(catalog, providerOrder)) {
     if (isProviderDisabled(overrides, provider.id)) continue;
     // Keep the configuration source in each pin: runtimes can have different
     // credentials or endpoints even when the provider and model ids match.
     const direct = purpose === 'auxiliary' && usesDirectTextRoute(provider);
-    const agents: readonly AgentKind[] = direct ? ['codex', 'claude-code', 'pi'] : ONESHOT_ROUTE_AGENTS;
+    const agents: readonly OneshotAgentKind[] = direct ? ['codex', 'claude-code', 'pi'] : ONESHOT_ROUTE_AGENTS;
     for (const agentKind of agents) {
       if (!direct && !isRoutableForOneshot(provider, agentKind)) continue;
       if (hasCredential && !hasCredential(provider, agentKind)) continue;

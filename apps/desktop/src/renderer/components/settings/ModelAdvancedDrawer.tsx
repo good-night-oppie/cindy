@@ -89,9 +89,11 @@ const AGENT_LABEL: Record<AgentKind, string> = {
   'claude-code': 'Claude Code',
   codex: 'Codex',
   pi: 'Pi',
+  agy: 'Antigravity',
 };
 
 const AGENT_MARK: Record<AgentKind, (size: number) => ReactNode> = {
+  agy: () => null,
   'claude-code': (size) => <ClaudeMark size={size} />,
   codex: (size) => <CodexMark size={size} />,
   pi: (size) => <PiMark size={size} />,

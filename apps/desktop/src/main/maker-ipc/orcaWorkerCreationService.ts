@@ -125,6 +125,9 @@ export function providerRouteRequiresExplicitSelection(
 }
 
 /** 同一次 provider registry 快照派生出的可用性与默认模型路由，避免两次读取产生竞态。 */
+type WorkerProviderAvailability = Record<Exclude<AgentKind, 'agy'>, OrcaWorkerProviderSnapshot[]>
+  & { agy?: OrcaWorkerProviderSnapshot[] };
+
 export interface OrcaWorkerProviderRoutingContext {
   /**
    * SSH catalogs own both admission and defaults; never mix controller capabilities.
@@ -133,7 +136,7 @@ export interface OrcaWorkerProviderRoutingContext {
   remoteCodexModels?: OrcaWorkerModelCapabilities[];
   /** 远端目录的 worker 默认值(缺省时沿用 SSH Codex 的默认规则)。 */
   remoteWorkerDefaults?: (lead: OrcaLeadSessionSnapshot, agent: AgentKind) => OrcaWorkerDefaultsSnapshot;
-  availability: Record<AgentKind, OrcaWorkerProviderSnapshot[]>;
+  availability: WorkerProviderAvailability;
   resolveDefaultProviderIdForModel(agent: AgentKind, model: string): string | null;
 }
 
@@ -704,10 +707,10 @@ function agentConsumesExplicitFast(agent: EngineKind): boolean {
  */
 export function buildNoProviderMessage(
   agent: AgentKind,
-  availability: Record<AgentKind, OrcaWorkerProviderSnapshot[]>,
+  availability: WorkerProviderAvailability,
 ): string {
   const base = `${agentDisplayName(agent)} 当前没有可用的模型供应商(provider)。请在「设置 → 模型供应商」连接一个支持 ${agentDisplayName(agent)} 的供应商后重试`;
-  const others = (['claude-code', 'codex', 'pi'] as AgentKind[]).filter(
+  const others = (['claude-code', 'codex', 'pi'] as const).filter(
     (a) => a !== agent && (availability[a]?.length ?? 0) > 0,
   );
   if (others.length === 0) return `${base}。`;

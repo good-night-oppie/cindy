@@ -49,8 +49,7 @@ export function readEffectiveCredentialSettings(sessionId: string, row: Credenti
 export interface PendingCredentialSwitchAccessPorts {
   pendingCredentialSwitchHolder: PendingCredentialSwitchService | null;
   agentInputCoordinatorHolder: Pick<AgentInputCoordinator, 'wakeSession'> | null;
-  /** 'acp' = plugin-engine task (docs/plans/acp-plugin-bridge.md); refused below, never mapped to a built-in. */
-  getSessionDbAgentKind: (sessionId: string) => 'cc' | 'codex' | 'pi' | 'acp' | null;
+  getSessionDbAgentKind: (sessionId: string) => import('../../shared/agentKindConversion.js').DbEngineKind | null;
   getMaker: () => Maker;
 }
 

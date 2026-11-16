@@ -3410,7 +3410,7 @@ export function stopPiIdleReleaseWatcher(): void {
   piIdleReleaseWatcher = null;
 }
 
-function requireAgentKind(value: unknown): AgentKind {
+function requireAgentKind(value: unknown): Exclude<AgentKind, 'agy'> {
   if (value === 'claude-code' || value === 'codex' || value === 'pi') return value;
   throwIpcError('INVALID_PARAMS', 'agentKind required');
 }
@@ -13376,7 +13376,12 @@ export function registerMakerIpc(maker: Maker, options: RegisterMakerIpcOptions)
       validateDirectory: validateHandoffWorkingDir,
       resolveExecution: createRemoteSessionExecutionResolver({
         isSelfDeviceId: id => id === getSelfDeviceId(),
-        resolveLocal: input => resolveSessionExecution({ agentKind: input.agentKind, model: input.model, effort: input.effort, fastMode: input.fast }),
+        resolveLocal: async input => {
+          const selected = await resolveSessionExecution({ agentKind: input.agentKind, model: input.model, effort: input.effort, fastMode: input.fast });
+          const agentKind = selected.agentKind;
+          if (agentKind === 'agy') throw new Error('Native Antigravity remote task creation is not supported');
+          return { ...selected, agentKind };
+        },
         readDefault: () => {
           const route = getSelectedNewMakerRoute(activeOwnerScopeKey());
           return route ? { agentKind: route.harness === 'claude' ? 'claude-code' : route.harness,
@@ -14303,7 +14308,7 @@ export function registerMakerIpc(maker: Maker, options: RegisterMakerIpcOptions)
         }
         execution ??= await resolveSessionExecution(selection, sourceSessionId);
         assertPlugin(pluginId);
-        if (!execution.providerId) return routeUnavailable();
+        if (execution.agentKind === 'agy' || !execution.providerId) return routeUnavailable();
         return { ...execution, agentKind: execution.agentKind === 'claude-code' ? 'cc' : execution.agentKind,
           providerId: execution.providerId, effort: execution.effort ?? '' };
       } catch (error) {
@@ -14522,6 +14527,7 @@ export function registerMakerIpc(maker: Maker, options: RegisterMakerIpcOptions)
         // A queued input will execute the accepted next-send route. Keep its
         // receipt stable as a deferred model/Harness switch reaches that boundary.
         const selected = runtime?.pendingMutation?.profile ?? runtime?.effective;
+        if (selected?.agentKind === 'agy') return null;
         let resolvedConfig: PluginTaskRoute = selected
           ? { agentKind: selected.agentKind === 'claude-code' ? 'cc' : selected.agentKind,
             ...(selected.agentDeviceId ? { agentDeviceId: selected.agentDeviceId } : {}),
@@ -15396,6 +15402,7 @@ export function registerMakerIpc(maker: Maker, options: RegisterMakerIpcOptions)
       const assertOwner = captureSessionOwner();
       const config = getPluginTaskDefaults(params.ghostId);
       const execution = await resolvePluginSavedExecution(config ?? {}, params.sourceSessionId);
+      if (execution.agentKind === 'agy') throw new Error('Native Antigravity plugin tasks are not supported');
       assertOwner();
       const sessionId = await createPluginDraftSession({
         ...params,
@@ -15470,6 +15477,7 @@ export function registerMakerIpc(maker: Maker, options: RegisterMakerIpcOptions)
       const writableDirs = await readSessionWritableDirsFromDb(sessionId).catch(() => []);
       if (writableDirs.length > 0) createOpts.writableDirs = writableDirs;
     }
+    if (createOpts.agentKind === 'agy') throw new Error('Native Antigravity input queue is not integrated');
     return {
       // 插件引擎任务(docs/plans/acp-plugin-bridge.md，例如插件引擎 Worker)的排队项与渲染端一样记成通用 reducer
       // 的 'claude-code'：排队快照只认内置引擎，真正启动时 sessionOptionsReconciler 按任务行恢复成插件引擎及其来源。
@@ -18041,6 +18049,7 @@ export function registerMakerIpc(maker: Maker, options: RegisterMakerIpcOptions)
     },
     listAvailableModels: async ({ agent, callerSessionId, executionDeviceId, agentDeviceId: requestedAgentDeviceId }) => {
       try {
+        if (agent === 'agy') throw new Error('Native Antigravity workers are not supported');
         if (executionDeviceId === 'local' || executionDeviceId === getSelfDeviceId()) {
           executionDeviceId = undefined;
           requestedAgentDeviceId ??= null;
@@ -18781,7 +18790,7 @@ export function registerMakerIpc(maker: Maker, options: RegisterMakerIpcOptions)
       get sessions() { return sessions; },
       eq: (left, right) => eq(left, right),
       buildCreateOptsWithStderr: (...args) => buildCreateOptsWithStderr(...args),
-      dbToMakerAgentKind: (...args) => dbToMakerAgentKind(...args),
+      dbToMakerAgentKind,
       readSessionExtraDirsFromDb: (...args) => readSessionExtraDirsFromDb(...args),
       directoryGrantsForRuntime: (...args) => directoryGrantsForRuntime(...args),
       log: { info: (...args) => log.info(...args), warn: (...args) => log.warn(...args) },
@@ -19942,7 +19951,11 @@ export function registerMakerIpc(maker: Maker, options: RegisterMakerIpcOptions)
       return reconcileSessionTurnIdle(sessionId, 'authoritative-idle');
     },
     hasPendingInteraction: hasPendingAgentInteractionForSession,
-    getAgentKind: (sessionId) => builtinAgentKindOrNull(getStableSessionForTurnBoundary(sessionId)?.agentKind),
+    getAgentKind: (sessionId) => {
+      const kind = getStableSessionForTurnBoundary(sessionId)?.agentKind;
+      if (kind === 'agy') throw new Error('Native Antigravity input queue is not integrated');
+      return builtinAgentKindOrNull(kind);
+    },
     getSdkSessionId: async (sessionId) => {
       const meta = await maker.getSessionMeta(sessionId).catch(() => null);
       return meta?.sdkSessionId;
@@ -20715,9 +20728,10 @@ export function registerMakerIpc(maker: Maker, options: RegisterMakerIpcOptions)
   async function readSharedTaskTaskCreateOpts(sid: string): Promise<AgentInputCreateOpts> {
     const [row] = await getDbClient().drizzle.select().from(sessions).where(eq(sessions.id, sid)).limit(1);
     if (!row || row.status !== 'active' || !row.workingDir) throwIpcError('NOT_FOUND', 'SharedTask task unavailable');
+    const agentKind = requireBuiltinAgentKind(dbToMakerEngineKind(row.agentKind), 'Shared tasks');
+    if (agentKind === 'agy') throwIpcError('UNSUPPORTED_CAPABILITY', 'Native Antigravity shared tasks are not supported');
     return {
-      // Shared tasks run on built-in engines only.
-      agentKind: requireBuiltinAgentKind(dbToMakerEngineKind(row.agentKind), 'Shared tasks'), workingDir: row.workingDir,
+      agentKind, workingDir: row.workingDir,
       model: row.model, providerId: row.providerId, effort: row.effort,
       permissionMode: row.permissionMode, fastMode: row.fastMode,
       planMode: row.planModeEnabled, remoteHostId: row.remoteHostId ?? undefined,

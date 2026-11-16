@@ -1,3 +1,4 @@
+import type { DbAgentKind } from '../../../shared/agentKindConversion';
 /**
  * 已建立任务实际在用的订阅账号(subscription-account-pools.md「任务的账号」，2026-11-11 用户要求)。
  * 账号池里的任务固定在一个账号上：输入框下方的用量、模型列表里这个供应商(含供应商组那一项)的账号名与
@@ -113,14 +114,14 @@ const Context = createContext<ContextValue | null>(null);
  * 旧 Codex 空来源可显式开启任务绑定探测，消费端仍须确认订阅形态，不能据此推断默认账号。
  */
 export function sessionSubscriptionPoolProvider(
-  agent: 'cc' | 'codex' | 'pi',
+  agent: DbAgentKind,
   providerId: string | null | undefined,
   remoteHostId?: string | null,
   provider?: ProviderView,
   probeImplicitCodex = false,
   implicitRoute?: { modelId?: string | null; providers: ProviderView[]; catalogReady: boolean },
 ): SubscriptionProvider | null {
-  if (remoteHostId) return null;
+  if (agent === 'agy' || remoteHostId) return null;
   // Old Codex tasks may retain a null display route after the executor bound an account.
   // This only enables a task-scoped query, not an OpenAI/default-account classification.
   if (probeImplicitCodex && agent === 'codex' && providerId == null) {

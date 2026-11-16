@@ -264,4 +264,18 @@ const STOP_REASONS: ReadonlySet<string> = new Set(['end_turn', 'max_tokens', 'ma
 export function normalizeStopReason(raw: unknown): AcpStopReason {
   const stopReason = asRecord(raw).stopReason;
   return typeof stopReason === 'string' && STOP_REASONS.has(stopReason) ? stopReason as AcpStopReason : 'end_turn';
+
+// Ported from makecindy/cindy#5611 (Cursor native ACP, by Ken / kenlinjie).
+export type AcpRpcId = string | number;
+export class AcpRpcError extends Error {
+  constructor(public readonly code: number, message: string, public readonly data?: unknown) {
+    super(message);
+    this.name = 'AcpRpcError';
+  }
+}
+export function isRecord(value: unknown): value is Record<string, unknown> {
+  return value !== null && typeof value === 'object' && !Array.isArray(value);
+}
+export function isRpcId(value: unknown): value is AcpRpcId {
+  return typeof value === 'string' || (typeof value === 'number' && Number.isFinite(value));
 }

@@ -5,17 +5,17 @@
  * 故意保持兼容以便 desktop adapter 层零代码翻译。
  */
 
-export type AgentKind = 'claude-code' | 'codex' | 'pi';
+export type AgentKind = 'claude-code' | 'codex' | 'pi' | 'agy';
 
 /**
- * Engines a local task can run on: the three built-in harnesses plus the
+ * Engines a local task can run on: the built-in harnesses plus the
  * plugin-provided ACP engine (docs/plans/acp-plugin-bridge.md). Only task
  * lifecycle paths accept `EngineKind`; everything that crosses devices, feeds
  * model-facing tool schemas or picks providers keeps the built-in `AgentKind`.
  */
 export type EngineKind = AgentKind | 'acp';
 
-const BUILTIN_AGENT_KINDS: ReadonlySet<string> = new Set<AgentKind>(['claude-code', 'codex', 'pi']);
+const BUILTIN_AGENT_KINDS: ReadonlySet<string> = new Set<AgentKind>(['claude-code', 'codex', 'pi', 'agy']);
 
 export function isBuiltinAgentKind(kind: unknown): kind is AgentKind {
   return typeof kind === 'string' && BUILTIN_AGENT_KINDS.has(kind);

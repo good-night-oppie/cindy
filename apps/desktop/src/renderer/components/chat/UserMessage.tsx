@@ -877,8 +877,10 @@ export function UserMessage({
   // Capability gate: 没传 agentKind (调用方未升级) → 默认两者都允许 (兼容旧路径)
   // 传了 agentKind → 按 capabilities.fork/rewind.supported 决定 icon 显示
   // renderer 'cc' ↔ maker 'claude-code' 别名映射 (DB / Session 用 'cc', maker IPC 用 'claude-code')
+  // agy 保留自己的身份,不按 Claude 的能力判断;读不到 agy 能力时不显示 Fork/Rewind。
   const makerKind: MakerAgentKind =
-    agentKind === 'codex' || agentKind === 'pi' ? agentKind : 'claude-code';
+    agentKind === 'codex' || agentKind === 'pi' || agentKind === 'agy' ? agentKind : 'claude-code';
+  const capabilityFallback = makerKind !== 'agy';
   // 插件引擎任务(agent_kind = 'acp')不支持分叉与回退，也不读任何内置 Harness 的能力
   // (docs/plans/acp-plugin-bridge.md)。
   const pluginEngineTask = isPluginEngineKind(agentKind);
@@ -898,10 +900,10 @@ export function UserMessage({
   // remoteHostId 非空时直接关掉这两个能力, 避免点了落到后端错误。
   const isRemote = Boolean(remoteHostId);
   const forkSupported =
-    !isRemote && !pluginEngineTask && (!agentKind || (capabilities?.fork?.supported ?? true));
+    !isRemote && !pluginEngineTask && (!agentKind || (capabilities?.fork?.supported ?? capabilityFallback));
   const rewindSupported =
     !isRemote && !pluginEngineTask &&
-    (!agentKind || (capabilities?.rewind?.supported ?? true));
+    (!agentKind || (capabilities?.rewind?.supported ?? capabilityFallback));
 
   const hasImages = images && images.length > 0;
   const hasFiles = files && files.length > 0;

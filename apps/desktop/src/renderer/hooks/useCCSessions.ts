@@ -65,7 +65,7 @@ interface UseCCSessionsReturn {
     /** 计划模式一级开关(与 permissionMode 正交); 草稿开着时随建会话落库。 */
     planModeEnabled?: boolean;
     /** 'acp' = 插件引擎任务(只在本机新任务草稿创建，见 sessionService.create)。 */
-    agentKind?: AgentKind | typeof PLUGIN_ENGINE_AGENT_KIND;
+    agentKind?: Exclude<AgentKind, 'agy'> | typeof PLUGIN_ENGINE_AGENT_KIND;
     extraDirs?: string[];
     writableDirs?: string[];
     remoteHostId?: string;
@@ -174,7 +174,7 @@ export function useCCSessions(options?: UseCCSessionsOptions): UseCCSessionsRetu
       permissionMode?: string;
       fastMode?: boolean | 'ultrafast';
       planModeEnabled?: boolean;
-      agentKind?: AgentKind | typeof PLUGIN_ENGINE_AGENT_KIND;
+      agentKind?: Exclude<AgentKind, 'agy'> | typeof PLUGIN_ENGINE_AGENT_KIND;
       /** 附加只读引用目录列表 (绝对路径); 透传到 sessionService.create → mapper 写库。 */
       extraDirs?: string[];
       writableDirs?: string[];

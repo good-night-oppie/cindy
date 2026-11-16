@@ -30,7 +30,7 @@ export interface OneshotPinOption {
 }
 
 
-function knownAgent(value: string): value is AgentKind {
+function knownAgent(value: string): value is Exclude<AgentKind, 'agy'> {
   return value === 'claude-code' || value === 'codex' || value === 'pi';
 }
 

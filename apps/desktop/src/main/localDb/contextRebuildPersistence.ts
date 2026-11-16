@@ -1,4 +1,5 @@
 import type { HandoffCoverage } from '../maker-ipc/agentHandoff.js';
+import type { DbAgentKind } from '../../shared/agentKindConversion.js';
 import type { ContextRebuildArgs } from './client/tx/types.js';
 
 export interface ContextRebuildPersistencePorts {
@@ -20,7 +21,7 @@ export async function commitContextRebuildWithPorts(
       | 'idle-gap';
     sourceUserClientId: string | null;
     handoffCoverage?: HandoffCoverage;
-    sourceAgentKind?: 'cc' | 'codex' | 'pi';
+    sourceAgentKind?: DbAgentKind;
     sourceModel?: string | null;
     sourceProviderId?: string | null;
     expectedClearedAt?: number | null;

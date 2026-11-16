@@ -138,6 +138,7 @@ export function agentEngineLabel(dbKind: DbEngineKind): string {
   if (dbKind === 'codex') return 'Codex';
   if (dbKind === 'pi') return 'Pi';
   if (dbKind === 'acp') return PLUGIN_ENGINE_FALLBACK_LABEL;
+  if (dbKind === 'agy') return 'Antigravity';
   return 'Claude Code';
 }
 
@@ -658,6 +659,7 @@ export async function relocateForFreshStart(
   if (row.agentKind === 'acp') throwIpcError('PRECONDITION_FAILED', 'tasks running on a plugin engine run on this computer only');
   const model = row.model;
   const dbKind = normalizeDbAgentKind(row.agentKind);
+  if (dbKind === 'agy') throwIpcError('UNSUPPORTED_CAPABILITY', 'Native Antigravity history relocation is not supported');
   const handoffGeneration = deps.readPendingHandoffGeneration?.(sessionId);
   const full = buildHandoff(await deps.listMessagesForHandoff(sessionId), {
     fromLabel: `${agentEngineLabel(dbKind)} (on a different computer)`,

@@ -125,7 +125,8 @@ ${JSON.stringify({ skills, tools, previous: previous ? { ...previous, name: inpu
       signal: AbortSignal.timeout(100000),
       beforeDispatch: async (selection) => {
         assertOwner();
-        assertEnabled(selection);
+        if (selection.agentKind === 'agy') return false;
+        assertEnabled({ ...selection, agentKind: selection.agentKind });
         return true;
       },
     });

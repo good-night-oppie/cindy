@@ -1,4 +1,5 @@
 import { projectHandoffPreview, type HandoffCoverage } from '../../maker-ipc/agentHandoff.js';
+import type { DbAgentKind } from '../../../shared/agentKindConversion.js';
 import { commitContextRebuildWithPorts } from '../contextRebuildPersistence.js';
 import { rebroadcastAgentSwitchBoundaryWith } from '../agentSwitchRows.js';
 import { parseAgentMetaRecord, patchMessageAgentMetaWithResultRow, findVisibleToolUseMessageByAliasesRow,
@@ -1045,7 +1046,7 @@ export function commitContextRebuild(
       | 'idle-gap';
     sourceUserClientId: string | null;
     handoffCoverage?: HandoffCoverage;
-    sourceAgentKind?: 'cc' | 'codex' | 'pi';
+    sourceAgentKind?: DbAgentKind;
     sourceModel?: string | null;
     sourceProviderId?: string | null;
     expectedClearedAt?: number | null;
@@ -1333,7 +1334,7 @@ export async function createMessage(
      * 无 SDK 元信息的行留空(null 回落 session.agentKind)。
      */
     /** 'acp' = plugin engine task; its rows carry no vendor meta. */
-    agentKind?: 'cc' | 'codex' | 'pi' | 'acp' | null;
+    agentKind?: DbAgentKind | 'acp' | null;
     createdAt?: number;
   },
   opts?: {

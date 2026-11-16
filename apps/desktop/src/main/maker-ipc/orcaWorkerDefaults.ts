@@ -82,7 +82,7 @@ export async function resolveWorkerCreationDefaults(
       const models = route.remoteCodexModels ?? deps.getAvailableModels(agent);
       if (
         models.some((model) => model.id === input.model) &&
-        route.availability[agent].some(
+        route.availability[agent]?.some(
           (provider) =>
             provider.models.includes(input.model!) &&
             (!input.providerId || provider.id === input.providerId),

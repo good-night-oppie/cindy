@@ -1340,6 +1340,7 @@ export class MakerScheduleRunner implements ScheduleRunner {
         // (e.g. a Bot routine) before the task's engine feeds any routing below.
         if (meta?.agentKind === 'acp') throw new PluginEngineUnsupportedError(SCHEDULED_TASKS_FEATURE);
         if (resolvedSelection) {
+          if (resolvedSelection.agentKind === 'agy') throw new Error('Native Antigravity scheduled execution is not supported');
           schedule = {
             ...schedule,
             agentKind: resolvedSelection.agentKind,
@@ -1500,6 +1501,7 @@ export class MakerScheduleRunner implements ScheduleRunner {
       (isHeartbeat
         ? (heartbeatAgentKind ?? schedule.agentKind)
         : (schedule.modelAgentKind ?? schedule.agentKind));
+    if (effectiveAgentKind === 'agy') throw new Error('Native Antigravity scheduled execution is not supported');
     // 插件引擎(docs/plans/acp-plugin-bridge.md)只用于每次新建任务、在本机运行的自动任务(保存时已校验)。
     // 它不在内置模型目录里：只属于内置引擎的步骤一律经 builtinKind()，插件引擎万一走到会明确拒绝，
     // 绝不被当成内置引擎；插件引擎改按本机此刻提供的引擎准入，不可用时本次运行明确失败。
@@ -1621,6 +1623,7 @@ export class MakerScheduleRunner implements ScheduleRunner {
       resolvedSelection = freshAgentDeviceId
         ? await this.deps.resolveModelSelection(selection, { agentDeviceId: freshAgentDeviceId })
         : await this.deps.resolveModelSelection(selection);
+      if (resolvedSelection.agentKind === 'agy') throw new Error('Native Antigravity scheduled execution is not supported');
       createProviderId = resolvedSelection.providerId;
       fastMode = resolvedSelection.fastMode;
       schedule = {
