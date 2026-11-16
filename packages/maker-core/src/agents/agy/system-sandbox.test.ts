@@ -5,7 +5,10 @@ import os from 'node:os';
 import path from 'node:path';
 import { afterAll, describe, expect, it } from 'vitest';
 import {
+  AGY_SANDBOX_BLOCKED_V4,
+  AGY_SANDBOX_BLOCKED_V6,
   AgySandboxUnavailableError,
+  agyNetGuardCommand,
   agyPrivateStateMounts,
   agySandboxDenialModelNote,
   assertAgyTaskDirPaths,
@@ -30,6 +33,7 @@ const base = {
   bwrapPath: '/usr/bin/bwrap',
   supportsDisableUserns: false,
   pastaPath: '/usr/bin/pasta',
+  ipPath: '/usr/sbin/ip',
   dnsHost: '172.26.0.2',
   resolvConfPath: '/tmp/cindy-agy-sandbox-1000/resolv.conf',
   uid: 1000,
@@ -59,7 +63,7 @@ describe('buildAgySandboxLaunch', () => {
     for (const f of ['-t', '-u', '-T', '-U']) expect(pasta[pasta.indexOf(f) + 1]).toBe('none');
     expect(pasta.slice(pasta.indexOf('--dns-forward'), pasta.indexOf('--dns-forward') + 4))
       .toEqual(['--dns-forward', '169.254.1.53', '--dns-host', '172.26.0.2']);
-    expect(l.args[sep + 1]).toBe('/usr/bin/bwrap');
+    expect(l.args.slice(sep + 1, sep + 7)).toEqual([...agyNetGuardCommand('/usr/sbin/ip'), '/usr/bin/bwrap']);
     expect(pairs(l.args, '--ro-bind')).toContainEqual(['/tmp/cindy-agy-sandbox-1000/resolv.conf', '/etc/resolv.conf']);
     expect(l.args.slice(l.args.indexOf('--uid'), l.args.indexOf('--uid') + 4)).toEqual(['--uid', '1000', '--gid', '1000']);
   });
@@ -97,9 +101,11 @@ describe('buildAgySandboxLaunch', () => {
   });
 
   it('adds writable state dirs and read-only paths only when asked', () => {
-    const l = buildAgySandboxLaunch({ ...base, writableDirs: [{ source: '/home/u/.cindy/agy-state/t1', target: '/home/u/.gemini' }],
+    const l = buildAgySandboxLaunch({ ...base, stateRoot: '/home/u/.cindy/agy-state',
+      writableDirs: [{ source: '/home/u/.cindy/agy-state/gemini', target: '/home/u/.gemini' }],
       readOnlyPaths: ['/etc/hosts'] });
-    expect(pairs(l.args, '--bind')).toContainEqual(['/home/u/.cindy/agy-state/t1', '/home/u/.gemini']);
+    expect(pairs(l.args, '--bind')).toContainEqual(['/home/u/.cindy/agy-state/gemini', '/home/u/.gemini']);
+    expect(pairs(l.args, '--ro-bind')).toContainEqual(['/etc/hosts', '/etc/hosts']);
   });
 
   it('uses --disable-userns when bubblewrap supports it', () => {
@@ -144,6 +150,61 @@ describe('login and private state', () => {
   it('refuses a writable dir whose source is inside the task dir', () => {
     expect(() => buildAgySandboxLaunch({ ...base, writableDirs: [{ source: '/home/u/work/task-1/state', target: '/home/u/.gemini' }] }))
       .toThrow(/overlaps/);
+  });
+});
+
+describe('private network ranges (cindy#3 review item 1)', () => {
+  const script = agyNetGuardCommand('/usr/sbin/ip')[2]!;
+  it('prohibits metadata, LAN, tailnet and IPv6 private ranges before bwrap starts', () => {
+    expect(agyNetGuardCommand('/usr/sbin/ip').slice(0, 2)).toEqual(['/bin/sh', '-c']);
+    expect(agyNetGuardCommand('/usr/sbin/ip').slice(3)).toEqual(['agy-net-guard', '/usr/sbin/ip']);
+    expect(script.split('\n')[0]).toBe('set -eu');
+    expect(script.trimEnd().endsWith('exec "$@"')).toBe(true);
+    for (const n of ['169.254.0.0/16', '10.0.0.0/8', '172.16.0.0/12', '192.168.0.0/16', '100.64.0.0/10']) {
+      expect(AGY_SANDBOX_BLOCKED_V4).toContain(n);
+      expect(script).toContain(`"$ip" rule add pref 200 to ${n} prohibit`);
+    }
+    for (const n of ['fc00::/7', 'fe80::/10', 'fd00:ec2::254/128']) {
+      expect(AGY_SANDBOX_BLOCKED_V6).toContain(n);
+      expect(script).toContain(`"$ip" -6 rule add pref 200 to ${n} prohibit`);
+    }
+  });
+  it('lets only the in-sandbox DNS address through, ahead of the 169.254/16 block', () => {
+    expect(script).toContain('"$ip" rule add pref 100 to 169.254.1.53/32 lookup main');
+    expect(script.indexOf('169.254.1.53/32')).toBeLessThan(script.indexOf('169.254.0.0/16'));
+  });
+});
+
+describe('extra mount sources (cindy#3 review item 3)', () => {
+  it('refuses the real ~/.gemini as a writable dir', () => {
+    expect(() => buildAgySandboxLaunch({ ...base, writableDirs: [{ source: '/home/u/.gemini', target: '/home/u/.gemini' }] }))
+      .toThrow(/inside the home directory/);
+  });
+  it('refuses /, the home dir, a parent of it, or anything in it', () => {
+    for (const source of ['/', '/home', '/home/u', '/home/u/.ssh', '/home/u/.cindy/agy-state/gemini']) {
+      expect(() => buildAgySandboxLaunch({ ...base, taskDir: '/srv/task-1', writableDirs: [{ source, target: '/home/u/.gemini' }] }))
+        .toThrow(AgySandboxUnavailableError);
+    }
+    expect(() => buildAgySandboxLaunch({ ...base, readOnlyPaths: ['/home/u/.ssh'],
+      fs: fakeFs({ existing: ['/etc/hosts', '/home/u/.ssh'] }) })).toThrow(/inside the home directory/);
+  });
+  it('allows home paths only inside the state root', () => {
+    expect(() => buildAgySandboxLaunch({ ...base, stateRoot: '/home/u/.cindy/agy-state',
+      writableDirs: [{ source: '/home/u/.cindy/agy-state/gemini', target: '/home/u/.gemini' }] })).not.toThrow();
+    expect(() => buildAgySandboxLaunch({ ...base, stateRoot: '/home/u/.cindy/agy-state',
+      writableDirs: [{ source: '/home/u/.cindy/other', target: '/home/u/.gemini' }] })).toThrow(/inside the home directory/);
+  });
+  it('refuses a state root that is the real ~/.gemini, ~/.config/antigravity, a parent or home', () => {
+    for (const stateRoot of ['/home/u/.gemini', '/home/u/.config/antigravity', '/home/u/.config', '/home/u', '/home', '/',
+      '/home/u/.gemini/sub']) {
+      expect(() => buildAgySandboxLaunch({ ...base, stateRoot, writableDirs: [{ source: `${stateRoot}/gemini`.replace('//', '/'), target: '/home/u/.gemini' }] }))
+        .toThrow(/state root/);
+    }
+  });
+  it('checks the path after resolving symlinks', () => {
+    const fs: AgySandboxFsView = { ...fakeFs(), realpath: p => (p === '/srv/innocent' ? '/home/u/.gemini' : p) };
+    expect(() => buildAgySandboxLaunch({ ...base, fs, writableDirs: [{ source: '/srv/innocent', target: '/home/u/.gemini' }] }))
+      .toThrow(/inside the home directory/);
   });
 });
 
