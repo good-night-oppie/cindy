@@ -1,3 +1,4 @@
+import type { MakerAgentKindWire } from '../../shared/agentKindConversion.js';
 import { normalizeWorkerCreationSelection, type WorkerCreationSelection } from '../../shared/workerCreationSelection.js';
 import { normalizeBotModelChain, type BotModelRoute } from '../../shared/botModelChain.js';
 import { isDataOwnerPushStamp, type DataOwnerPushStamp } from '../../shared/dataOwnerPush.js';
@@ -183,7 +184,7 @@ function applyPinnedThinkingIntents(
  * 读到用户刚选的值，避免新建会话用旧偏好。
  */
 export function setThinkingEnabledInMemory(
-  agentKind: 'claude-code' | 'codex' | 'pi',
+  agentKind: MakerAgentKindWire,
   providerId: string | null | undefined,
   model: string | undefined,
   enabled: boolean,
