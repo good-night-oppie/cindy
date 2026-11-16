@@ -488,3 +488,39 @@ describe('AgyAgent stall watchdog', () => {
     await handle.close();
   });
 });
+
+describe('AgyAgent auto-review roots inside the system sandbox', () => {
+  it('reviews against the same real task folder agy sees, not a symlinked workingDir', async () => {
+    const fs = await import('node:fs');
+    const os = await import('node:os');
+    const path = await import('node:path');
+    const root = fs.realpathSync(fs.mkdtempSync(path.join(os.tmpdir(), 'agy-roots-')));
+    const real = path.join(root, 'real');
+    fs.mkdirSync(real);
+    const link = path.join(root, 'link');
+    fs.symlinkSync(real, link);
+    const requests: { workspaceRoots: string[]; writableRoots?: readonly string[]; action: { kind: string; cwd?: string } }[] = [];
+    const delegate = vi.fn(async (request: (typeof requests)[number]) => { requests.push(request); return { verdict: 'allow' as const, reason: 'test' }; });
+    const { fake, agent } = create(new FakeAgy(), {
+      binaryPath: fs.realpathSync(process.execPath),
+      agySandbox: { stateRoot: path.join(root, 'state'),
+        probe: { ok: true, bwrapPath: '/usr/bin/bwrap', pastaPath: '/usr/bin/pasta', ipPath: '/usr/sbin/ip', version: '0.6.1', supportsDisableUserns: false } },
+      reviewAutoPermissionAction: delegate as unknown as AgyAgentDeps['reviewAutoPermissionAction'],
+    });
+    try {
+      const handle = await agent.startSession({ workingDir: link, model: 'gpt-oss-120b-medium', permissionMode: 'auto' });
+      handle.setInteractionResolver(async () => ({ kind: 'permission', behavior: 'deny' }) as InteractionDecision);
+      await handle.send({ type: 'user', content: 'make a file' });
+      fake.permission('r1', { toolCallId: 'c9', name: 'run_command', kind: 'execute', status: 'pending', rawInput: { CommandLine: 'touch b.ts' } });
+      await ticks();
+      expect(requests).toHaveLength(1);
+      expect(requests[0]!.workspaceRoots).toEqual([real]);
+      expect(requests[0]!.writableRoots).toEqual([real]);
+      expect(requests[0]!.action).toMatchObject({ kind: 'exec', cwd: real });
+      expect(fake.responseTo('r1')?.result).toEqual({ outcome: { outcome: 'selected', optionId: 'allow' } });
+      await handle.close();
+    } finally {
+      fs.rmSync(root, { recursive: true, force: true });
+    }
+  });
+});
