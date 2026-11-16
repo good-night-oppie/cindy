@@ -11,6 +11,6 @@ if (!task || !state || !bin) throw new Error('usage: run-module.ts <taskDir> <st
 const pastaPath = process.env.AGY_SANDBOX_TEST_PASTA;
 const probe = probeAgySystemSandbox(pastaPath ? { pastaCandidates: [pastaPath] } : {});
 const launch = await prepareAgySandboxedLaunch({ probe, binaryPath: bin, args: [], taskDir: task, homeDir: os.homedir(),
-  writableDirs: [{ source: state, target: `${os.homedir()}/.gemini` }], env: process.env });
+  stateRoot: state, env: process.env });
 const result = spawnSync(launch.command, launch.args, { cwd: task, env: launch.env, stdio: 'inherit' });
 process.exit(result.status ?? 1);
