@@ -19,8 +19,8 @@
  */
 
 import { spawnSync } from 'node:child_process';
-import { existsSync, lstatSync, readlinkSync, realpathSync } from 'node:fs';
-import { chmod, mkdir, opendir, lstat } from 'node:fs/promises';
+import { existsSync, lstatSync, readFileSync, readlinkSync, realpathSync } from 'node:fs';
+import { chmod, mkdir, opendir, lstat, writeFile } from 'node:fs/promises';
 import os from 'node:os';
 import path from 'node:path';
 
