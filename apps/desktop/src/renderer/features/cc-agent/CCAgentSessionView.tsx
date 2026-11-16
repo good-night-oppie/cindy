@@ -51,7 +51,7 @@ import { CindyMakeSessionGate } from './CindyMakeSessionGate';
 import { SessionRouteOriginGate } from './SessionRouteOriginGate';
 import { usePluginSkillSetup } from './pluginSkillSetup';
 import { useBotIslandVisibleSession } from '@/features/bots/useBotIslandVisibleSession';
-import { dbToMakerAgentKind, normalizeDbAgentKind } from '../../../shared/agentKindConversion';
+import { dbToMakerAgentKind, isLaunchableDbAgentKind, normalizeDbAgentKind } from '../../../shared/agentKindConversion';
 import { useTranslation } from 'react-i18next';
 import { buildSessionDeepLink } from '@/lib/deepLink';
 import {
@@ -2198,6 +2198,9 @@ function CCAgentSessionContent({
   ]);
   // 展示引擎可乐观跟随 intent；真实 event reducer 仍只读 store.agentKind。
   const displayAgentKind = agentSwitchIntent?.target ?? dbToMakerAgentKind(session?.agentKind);
+  // agy 不沿用 Claude/Codex/Pi 的模型目录与价格:容量环、花费、输入框引擎键对 agy 为空。
+  const displayVendorKey = normalizeDbAgentKind(displayAgentKind);
+  const launchableVendorKey = isLaunchableDbAgentKind(displayVendorKey) ? displayVendorKey : null;
   // 真实会话 agentKind(pending switch intent 不影响)——压缩分流必须用它,
   // 否则 intent 乐观切到 pi 但真实会话仍在跑 claude-code 时会错调 compact-session(#1933 review)。
   const realAgentKind = dbToMakerAgentKind(session?.agentKind);
@@ -4658,11 +4661,11 @@ function CCAgentSessionContent({
       const contextWindow = resolveDisplayContextWindow({
         sdkContextWindow: agentStatus.contextWindow,
         verifiedContextWindow: resolveSessionContextWindow({ providers }, sourceSession),
-        modelContextWindow: getModelContextWindow(
-          sourceSession.model,
-          sourceSession.agentKind ?? 'cc',
-          remoteDeviceId,
-        ),
+        // agy 没有本地模型目录,上下文窗口只用 SDK/已核实值,不套 Claude 的。
+        modelContextWindow: ((kind) =>
+          isLaunchableDbAgentKind(kind)
+            ? getModelContextWindow(sourceSession.model, kind, remoteDeviceId)
+            : undefined)(sourceSession.agentKind ?? 'cc'),
       });
       const used = Math.min(agentStatus.contextTokens, contextWindow || Infinity);
       const pct = contextWindow > 0 ? Math.round((used / contextWindow) * 100) : 0;
@@ -6379,7 +6382,7 @@ function CCAgentSessionContent({
                   draftKey={composerDraftKey}
                   externalDragOver={isDragOver}
                   onComposerDropHandled={resetFullAreaDragState}
-                  vendorKey={normalizeDbAgentKind(displayAgentKind)}
+                  vendorKey={launchableVendorKey ?? undefined}
                   extraDirs={session?.extraDirs ?? []}
                   onExtraDirsChange={handleExtraDirsChange}
                   writableDirs={session?.writableDirs ?? []}
@@ -6558,8 +6561,9 @@ function CCAgentSessionContent({
                         />
                       </Tip>
                     )}
+                    {launchableVendorKey && (
                     <TodaySpendChip
-                      vendorKey={normalizeDbAgentKind(displayAgentKind)}
+                      vendorKey={launchableVendorKey}
                       modelId={agentSwitchIntent?.model ?? session?.model ?? null}
                       providerId={usageChipProviderId}
                       sessionId={sessionId}
@@ -6570,6 +6574,8 @@ function CCAgentSessionContent({
                       deviceLinkDeviceId={remoteDeviceId ?? null}
                       usageAccount={usageAccount}
                     />
+                    )}
+                    {launchableVendorKey && (
                     <ContextCapacityRing
                       isRunning={agentStatus.isRunning}
                       sessionId={sessionId}
@@ -6578,12 +6584,12 @@ function CCAgentSessionContent({
                       disabled={readOnly || !session}
                       contextTokens={agentStatus.contextTokens}
                       model={agentSwitchIntent?.model ?? session?.model ?? ''}
-                      vendorKey={normalizeDbAgentKind(displayAgentKind)}
+                      vendorKey={launchableVendorKey}
                       sdkContextWindow={agentStatus.contextWindow}
                       verifiedContextWindow={resolveSessionContextWindow(
                         { providers },
                         {
-                          agentKind: normalizeDbAgentKind(displayAgentKind),
+                          agentKind: launchableVendorKey,
                           model: agentSwitchIntent?.model ?? session?.model,
                           providerId: agentSwitchIntent
                             ? agentSwitchIntent.providerId
@@ -6610,6 +6616,7 @@ function CCAgentSessionContent({
                           : undefined
                       }
                     />
+                    )}
                   </div>
                 </div>
               ) : (
