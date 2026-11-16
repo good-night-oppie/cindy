@@ -340,6 +340,7 @@ function referencePriceQuoteForVariant(
   registry: ModelRegistry | null | undefined,
   options: ReferencePriceOptions = {},
 ): ModelPriceQuote | undefined {
+  if (options.agent === 'agy') return undefined;
   // 参考价 registry 的 agent 维度只有 claude-code / codex;Pi(动态 BYOM,按 provider/模型
   // 路由)在此按 agent 无关的参考价解析 —— pi 一律降级为 undefined 传给协议函数。
   const resolved = resolveModelReferencePrice(registry, providerId, modelId, {
