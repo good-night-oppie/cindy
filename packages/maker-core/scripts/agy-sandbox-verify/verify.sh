@@ -41,6 +41,19 @@ sleep 1   # make any later atime/mtime update visible
 
 PORT=47123
 python3 -m http.server --bind 127.0.0.1 $PORT >/dev/null 2>&1 & LP=$!
+# A 0.0.0.0 listener that accepts and closes (serves nothing), reached via the
+# host's other interface IPs (docker bridge, tailnet, ...).
+ANY_PORT=47124
+python3 - "$ANY_PORT" >/dev/null 2>&1 <<'EOF' &
+import socket, sys
+s = socket.socket(); s.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
+s.bind(("0.0.0.0", int(sys.argv[1]))); s.listen(16)
+while True:
+    c, _ = s.accept(); c.close()
+EOF
+AP=$!
+HOST_IF_IPS="$(ip -4 -o addr show scope global 2>/dev/null | awk '{split($4,a,"/"); print a[1]}' | tr '\n' ' ')"
+export HOST_IF_IPS ANY_PORT
 sleep 0.5
 
 O=$R/outside
@@ -55,7 +68,9 @@ json.dump({
    h + "/.agentdex-arena-oauth-app", h + "/.bash_history", h + "/.config/gh", h + "/build",
    h + "/.local/bin/claude", "/run/user/1000/bus", "/var/run/docker.sock", "/etc/ssh", "/etc/shadow"],
  "host_pid": int(pid), "probe_port": int(port),
- "cindy_ports": [int(x) for x in os.environ.get("CINDY_PORTS", "").split()]}, open(r + "/task/probe-plan.json", "w"), indent=1)
+ "cindy_ports": [int(x) for x in os.environ.get("CINDY_PORTS", "").split()],
+ "host_if_ips": os.environ.get("HOST_IF_IPS", "").split(), "any_port": int(os.environ["ANY_PORT"])},
+ open(r + "/task/probe-plan.json", "w"), indent=1)
 EOF
 
 manifest() {
@@ -88,7 +103,7 @@ case $MODE in
 esac > stdout.jsonl 2> stderr.txt
 RC=$?
 T1=$(date +%s%N)
-kill $LP 2>/dev/null
+kill $LP $AP 2>/dev/null
 manifest > manifest-after.json
 
 python3 - "$R" "$MODE" "$RC" "$(( (T1-T0)/1000000 ))" "$SIBLING" <<'EOF'
