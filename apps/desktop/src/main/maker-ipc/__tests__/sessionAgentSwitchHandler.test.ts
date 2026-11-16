@@ -1,6 +1,7 @@
 import { describe, expect, it, vi } from 'vitest';
 
 import {
+  agentEngineLabel,
   applyPendingAgentSwitchIfIdle,
   applySetModelThenCancelAgentSwitchIntent,
   createPendingAgentSwitchRegistry,
@@ -2622,4 +2623,14 @@ describe('relocateForFreshStart (opening a task elsewhere when its own computer 
       .rejects.toBeTruthy();
     expect(noModel.deps.applyAgentSwitchToDb).not.toHaveBeenCalled();
   });
+});
+
+// Native identity is displayable, but remote history transfer is not implemented.
+it('preserves the Antigravity label and refuses fresh-start relocation before reading messages', async () => {
+  expect(agentEngineLabel('agy')).toBe('Antigravity');
+  const { deps } = makeDeps({ getSessionRow: vi.fn(async () => makeRow({ agentKind: 'agy', model: 'gpt-oss-120b-medium' })) });
+  await expect(relocateForFreshStart(deps, { sessionId: 's1', agentDeviceId: 'remote', providerId: null }))
+    .rejects.toThrow('Native Antigravity history relocation is not supported');
+  expect(deps.listMessagesForHandoff).not.toHaveBeenCalled();
+  expect(deps.applyAgentSwitchToDb).not.toHaveBeenCalled();
 });
