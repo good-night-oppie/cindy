@@ -333,7 +333,8 @@ async function searchRemoteHistoricalTasks(
  */
 export async function scanAtResources(
   workingDir: string,
-  agentKind: PaletteAgentKind,
+  /** agy 只保留历史身份,主进程不为它扫描工作区;仍可搜上下文与任务历史。 */
+  agentKind: PaletteAgentKind | 'agy',
   cap = 2000,
   query?: string,
   /**
@@ -348,13 +349,14 @@ export async function scanAtResources(
   if (!workingDir && !includeLocalContext && !includeTaskHistory) {
     return { success: false, error: 'workingDir not bound', items: [], truncated: false };
   }
-  const workspacePromise: Promise<RawWorkspaceScan | null> = workingDir
+  const workspaceAgentKind = agentKind === 'agy' ? null : agentKind;
+  const workspacePromise: Promise<RawWorkspaceScan | null> = workingDir && workspaceAgentKind
     ? deviceId
       ? (window.electronAPI.deviceLink.invoke(deviceId, 'maker:scan-at-resources', [
-          agentKind,
+          workspaceAgentKind,
           { workingDir, cap, query },
         ]) as Promise<RawWorkspaceScan>)
-      : window.electronAPI.maker.scanAtResources(agentKind, { workingDir, cap, query })
+      : window.electronAPI.maker.scanAtResources(workspaceAgentKind, { workingDir, cap, query })
     : Promise.resolve(null);
   const contextPromise = includeLocalContext
     ? window.electronAPI.maker.listAtContext({
