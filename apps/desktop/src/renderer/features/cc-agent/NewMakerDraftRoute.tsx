@@ -3332,6 +3332,8 @@ export function NewMakerDraftRoute() {
   // ChatInput 的 initial* 由父级传入,vendor 切换后 ChatInput 重新 mount(key 变化)
   // 自动 pickup 新 vendor 的 lastByVendor 值。
   const handleVendorChange = useCallback((next: MakerVendor) => {
+    // 新建任务只列原三种引擎;agy 只是历史身份,不进草稿。
+    if (next === 'agy') return;
     markDefaultTupleCustomized();
     switchVendor(next, { userSelected: true });
   }, []);
@@ -3538,7 +3540,7 @@ export function NewMakerDraftRoute() {
   // 的、providerModelMemory 里当键的,全是它。行的归一化 id 只是面板内部的行身份,**一律不进
   // 草稿** —— 写错这一格的后果不是显示难看,是首条请求路由到一个不存在的 model id。
   const handleUnifiedDraftSelect = useCallback(
-    (selection: {
+    (rawSelection: {
       vendor: MakerVendor;
       providerId: string;
       /** 选中引擎的 **wire model id**(不是行的归一化 id)。 */
@@ -3550,6 +3552,9 @@ export function NewMakerDraftRoute() {
       /** 远程 Agent:这一行属于哪台电脑(null = 本机);未带 = 面板没有远程 Agent 入口。 */
       agentDevice?: { deviceId: string; name: string } | null;
     }) => {
+      // 新建任务只列原三种引擎;面板若带出 agy 行也不写进草稿(不回落成 Claude)。
+      if (rawSelection.vendor === 'agy') return;
+      const selection = { ...rawSelection, vendor: rawSelection.vendor };
       // 收藏锚点写进**目标引擎的槽**(Chris 2026-08-19 起持久化,见 draftFavoriteAnchor 的
       // 说明):记的是 uid + **本次写进草稿的 wire id**,失效判定才有可比的同类值。
       // 换账号 / 换设备不必在这里补清理 —— 槽本身按 dataOwnerId 分区,面板侧另有一道兜底:
