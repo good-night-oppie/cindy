@@ -8,17 +8,27 @@
  */
 import type { AgentEvent, UsageSnapshot } from '../../types/events.js';
 import { record, type AcpRecord } from './models.js';
+import {
+  AGY_SANDBOX_USER_COPY_DRAFT, agySandboxDenialModelNote, detectAgySandboxDenial,
+  type AgySandboxDenial, type AgySandboxDenialKind,
+} from './system-sandbox.js';
+
+/** Set when agy runs inside Cindy's system isolation (system-sandbox.ts). */
+export interface AgySandboxContext { taskDir: string; homeDir: string; visibleDirs: readonly string[] }
 
 export class AgyTranslator {
   private tools = new Map<string, AcpRecord>();
   private completedTools = new Set<string>();
   readonly usage: UsageSnapshot = { tokenUsage: 0, contextTokens: 0, contextWindow: 0, costUsd: 0 };
 
-  constructor(private emit: (event: AgentEvent) => void) {}
+  private sandboxNotified = new Set<string>();
+
+  constructor(private emit: (event: AgentEvent) => void, private sandbox?: AgySandboxContext) {}
 
   beginTurn(): void {
     this.tools.clear();
     this.completedTools.clear();
+    this.sandboxNotified.clear();
     this.usage.tokenUsage = 0;
     this.usage.outputTokens = 0;
   }
@@ -56,7 +66,17 @@ export class AgyTranslator {
         if (!previous) event('tool_use', { toolUseId: id, toolName: agyToolName(tool), input: agyToolInput(tool) });
         if ((tool.status === 'completed' || tool.status === 'failed') && !this.completedTools.has(id)) {
           this.completedTools.add(id);
-          event('tool_result_full', { toolUseId: id, fullText: toolText(tool), isError: tool.status === 'failed' });
+          let fullText = toolText(tool);
+          const denial = tool.status === 'failed' ? this.sandboxDenial(tool, fullText) : null;
+          if (denial) {
+            // Blocked by the isolation, not a missing file: tell the model not to retry, tell the user once per path.
+            fullText = `${fullText.trimEnd()}\n\n${agySandboxDenialModelNote(denial)}`;
+            if (!this.sandboxNotified.has(denial.path)) {
+              this.sandboxNotified.add(denial.path);
+              event('error', { message: agySandboxBlockedText(denial), isTerminal: false, reason: 'agy_sandbox_blocked' });
+            }
+          }
+          event('tool_result_full', { toolUseId: id, fullText, isError: tool.status === 'failed' });
           event('tool_result', { summary: tool.status === 'failed' ? 'failed' : 'done', toolUseIds: [id] });
         }
         break;
@@ -80,6 +100,35 @@ export class AgyTranslator {
   }
 
   tool(id: unknown): AcpRecord { return typeof id === 'string' ? this.tools.get(id) ?? {} : {}; }
+
+  private sandboxDenial(tool: AcpRecord, errorText: string): AgySandboxDenial | null {
+    if (!this.sandbox) return null;
+    const kind: AgySandboxDenialKind = tool.kind === 'read' || tool.kind === 'search' ? 'read'
+      : tool.kind === 'edit' || tool.kind === 'delete' ? 'write' : 'unknown';
+    return detectAgySandboxDenial({ paths: agyToolPaths(tool, this.sandbox.homeDir), errorText,
+      taskDir: this.sandbox.taskDir, visibleDirs: this.sandbox.visibleDirs, kind });
+  }
+}
+
+/** Paths a tool call refers to: path-like input fields, ACP locations, and absolute paths in a command line. */
+export function agyToolPaths(tool: AcpRecord, homeDir: string): string[] {
+  const input = agyToolInput(tool);
+  const out: string[] = [];
+  const add = (value: unknown) => {
+    if (typeof value === 'string' && value) out.push(value.startsWith('~/') ? homeDir + value.slice(1) : value);
+  };
+  for (const [key, value] of Object.entries(input)) if (/path|file|dir|cwd/i.test(key)) add(value);
+  if (Array.isArray(tool.locations)) for (const location of tool.locations) add(record(location).path);
+  if (typeof input.command === 'string') {
+    for (const match of input.command.matchAll(/(?:^|[\s'"=])((?:~|\.\.)?\/[^\s'"`;|&<>()]+)/g)) add(match[1]);
+  }
+  return out;
+}
+
+/** `[agy_sandbox_blocked]` code + English fallback; zh/en wording pending JJ (cindy#1). */
+export function agySandboxBlockedText(denial: AgySandboxDenial): string {
+  const copy = AGY_SANDBOX_USER_COPY_DRAFT.blocked;
+  return `[agy_sandbox_blocked] ${copy.en.replace('{action}', copy.action[denial.kind].en).replace('{path}', denial.path)}`;
 }
 
 function finite(value: unknown): value is number {
