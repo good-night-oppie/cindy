@@ -3165,7 +3165,8 @@ export function ProvidersSection() {
         const batch = await fetchCustomProviderModelsForRefresh(p, config);
         for (const agent of p.agents) {
           const rt = config.runtimes[agent];
-          if (!rt?.baseUrl) continue;
+          // agy 没有自定义供应商运行时,不刷新模型列表。
+          if (!rt?.baseUrl || agent === 'agy') continue;
           const authMethod =
             p.auth.method === 'none' ? 'none' : p.auth.method === 'oauth' ? 'oauth' : 'apiKey';
           const apiKey = !batch && authMethod === 'apiKey' ? await readCustomProviderKey(p.id, agent) : null;
