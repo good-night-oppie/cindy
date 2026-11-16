@@ -7,14 +7,13 @@ import { and, eq, inArray } from 'drizzle-orm';
 
 import type { AgentKind, SessionMeta, SessionStorage, WorkspaceKind } from '@cindy/maker-core';
 
-import { dbToMakerAgentKind, makerToDbAgentKind } from '../../shared/agentKindConversion.js';
+import { dbToMakerAgentKind, makerToDbAgentKind, type DbAgentKind } from '../../shared/agentKindConversion.js';
 import { DESKTOP_VISIBLE_SESSION_SOURCES } from '../../shared/sessionSource.js';
 import { normalizeWorkingDirForStorage } from '../../shared/workingDir.js';
 import type { DbClient } from '../localDb/client/DbClient.js';
 import { normalizeRemoteHostId } from '../localDb/mapper.js';
 import { sessions } from '../localDb/schema.js';
 
-type DbAgentKind = 'cc' | 'codex' | 'pi';
 
 function toDbKind(k: AgentKind): DbAgentKind {
   return makerToDbAgentKind(k);

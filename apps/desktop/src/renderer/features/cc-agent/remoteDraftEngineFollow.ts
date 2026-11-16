@@ -1,5 +1,8 @@
-import type { MakerVendor } from '@/lib/ccAgent.types';
+import type { MakerVendor as AnyMakerVendor } from '@/lib/ccAgent.types';
 import type { AgentKind } from '@/hooks/useAgentCapabilities';
+
+/** 草稿只用原三种引擎和 orca；agy 只是历史身份，不跟随。 */
+type MakerVendor = Exclude<AnyMakerVendor, 'agy'>;
 
 /**
  * 「到另一台电脑新建任务」时，引擎跟随那台电脑自己的新建任务选择。
@@ -27,11 +30,11 @@ interface FollowEntry {
 
 let entry: FollowEntry | null = null;
 
-function vendorForAgentKind(kind: AgentKind): MakerVendor {
+function vendorForAgentKind(kind: Exclude<AgentKind, 'agy'>): MakerVendor {
   return kind === 'claude-code' ? 'cc' : kind;
 }
 
-function sameEngine(vendor: MakerVendor, kind: AgentKind): boolean {
+function sameEngine(vendor: MakerVendor, kind: Exclude<AgentKind, 'agy'>): boolean {
   // orca 是 Claude Code 上的协同形态，与 cc 同一引擎。
   return vendorForAgentKind(kind) === (vendor === 'orca' ? 'cc' : vendor);
 }
@@ -87,7 +90,7 @@ export function nextRemoteDraftEngine(args: {
     return null;
   }
   const target = args.selectedAgentKind;
-  if (!target || sameEngine(currentVendor, target)) return null;
+  if (!target || target === 'agy' || sameEngine(currentVendor, target)) return null;
   const next = vendorForAgentKind(target);
   entry.followedVendor = next;
   return next;

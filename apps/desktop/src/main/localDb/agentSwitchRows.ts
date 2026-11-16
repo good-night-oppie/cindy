@@ -3,13 +3,13 @@ import { getDbClient } from './client/current.js';
 import { messages, sessions } from './schema.js';
 import { messageRowid } from './retriedUserTurnSupersede.js';
 import { persistableSessionEffort, projectSessionRuntimeFields } from './mapper.js';
-import { normalizeDbAgentKind } from '../../shared/agentKindConversion.js';
+import { normalizeDbAgentKind, type DbAgentKind } from '../../shared/agentKindConversion.js';
 import { isProviderShareAgentDeviceId } from '../../shared/providerShare.js';
 import { throwIpcError } from '../utils/ipcValidate.js';
 
 /** The agent-switch row patch (applyAgentSwitchToSessionRow). */
 export type AgentSwitchRowPatch = {
-    agentKind: 'cc' | 'codex' | 'pi';
+    agentKind: DbAgentKind;
     model: string;
     providerId: string | null | undefined;
     sdkSessionId?: string | null;
@@ -166,7 +166,7 @@ export interface ParkedEngineSession {
  */
 export async function findParkedEngineSession(
   sessionId: string,
-  targetDbKind: 'cc' | 'codex' | 'pi',
+  targetDbKind: DbAgentKind,
   fromAgentDeviceId?: string | null,
 ): Promise<ParkedEngineSession | null> {
   const db = getDbClient().drizzle;

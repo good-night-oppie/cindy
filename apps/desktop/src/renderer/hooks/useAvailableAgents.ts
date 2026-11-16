@@ -17,7 +17,7 @@ import { useEffect, useState } from 'react';
 import { invokeModelCatalog } from '@/lib/invokeModelCatalog';
 import { CONTROLLED_MODEL_CATALOG_CHANGED, parseModelCatalogKey } from '../../shared/controlledModelCatalog';
 
-import type { MakerVendor } from '@/lib/ccAgent.types';
+import type { SelectableVendor } from '@/lib/agentVendors';
 import { createLogger } from '@/lib/logger';
 import {
   evictDeviceCapabilities,
@@ -52,7 +52,7 @@ function refreshRemoteCapabilitiesOnce(deviceId: string): void {
 type RuntimeAgentKind = 'claude-code' | 'codex' | 'pi';
 
 /** runtime agent id → NewMaker vendor(其余保持同名)。 */
-function toVendor(agent: RuntimeAgentKind): MakerVendor {
+function toVendor(agent: RuntimeAgentKind): SelectableVendor {
   return agent === 'claude-code' ? 'cc' : agent;
 }
 
@@ -103,11 +103,11 @@ async function fetchAvailableAgents(deviceId?: string | null): Promise<RuntimeAg
  */
 const REFETCH_MIN_INTERVAL_MS = 15_000;
 interface AgentsCacheEntry {
-  vendors: ReadonlySet<MakerVendor>;
+  vendors: ReadonlySet<SelectableVendor>;
   fetchedAt: number;
 }
 const agentsCache = new Map<string, AgentsCacheEntry>();
-const inFlight = new Map<string, Promise<ReadonlySet<MakerVendor>>>();
+const inFlight = new Map<string, Promise<ReadonlySet<SelectableVendor>>>();
 /**
  * 每个 roster 缓存 key 的失效代际。收到 roster push 后递增，使 push 之前发起的
  * 在途请求不能把旧的 agent 集合重新写回缓存或覆盖当前 hook 状态。
@@ -216,14 +216,14 @@ function cacheKeyOf(deviceId?: string | null): string {
   return deviceId ?? '';
 }
 
-function loadAvailableAgents(deviceId?: string | null): Promise<ReadonlySet<MakerVendor>> {
+function loadAvailableAgents(deviceId?: string | null): Promise<ReadonlySet<SelectableVendor>> {
   const key = cacheKeyOf(deviceId);
   const pending = inFlight.get(key);
   if (pending) return pending;
   const requestGeneration = currentAgentsCacheGeneration(key);
   const promise = fetchAvailableAgents(deviceId)
     .then((agents) => {
-      const vendors: ReadonlySet<MakerVendor> = new Set(agents.map(toVendor));
+      const vendors: ReadonlySet<SelectableVendor> = new Set(agents.map(toVendor));
       // A roster push can invalidate this request while the IPC call is pending. Do not
       // let that pre-change response become the authoritative cache entry.
       if (currentAgentsCacheGeneration(key) === requestGeneration) {
@@ -240,7 +240,7 @@ function loadAvailableAgents(deviceId?: string | null): Promise<ReadonlySet<Make
 
 export interface UseAvailableAgentsResult {
   /** runtime 已注册的 vendor 集合(cc/codex/pi);loaded=false 时为空。 */
-  availableVendors: ReadonlySet<MakerVendor>;
+  availableVendors: ReadonlySet<SelectableVendor>;
   /** 首次结果是否已返回。未加载完成时消费方不应据此隐藏任何入口。 */
   loaded: boolean;
   /** 当前查询是否仍在进行；查询失败后为 false，loaded 仍可为 false。 */
@@ -254,7 +254,7 @@ export function useAvailableAgents(deviceId?: string | null): UseAvailableAgents
   const cached = agentsCache.get(cacheKeyOf(deviceId));
   // 初值取缓存:同一 deviceId 已经查过时,新实例挂载即出值,不再走一遍「空集合 → loaded」
   // 的闪帧。useState 的 lazy 初值只在首次 render 取一次,后续由下面的 effect 维护。
-  const [availableVendors, setAvailableVendors] = useState<ReadonlySet<MakerVendor>>(
+  const [availableVendors, setAvailableVendors] = useState<ReadonlySet<SelectableVendor>>(
     () => cached?.vendors ?? new Set(),
   );
   const [loaded, setLoaded] = useState(() => cached !== undefined);
@@ -339,6 +339,6 @@ export function useModelPickerAgents(current: RuntimeAgentKind, deviceId?: strin
 }
 
 /** Synchronous projection of the same runtime roster used by the client picker. */
-export function getCachedAvailableVendors(): ReadonlySet<MakerVendor> | null {
+export function getCachedAvailableVendors(): ReadonlySet<SelectableVendor> | null {
   return agentsCache.get('')?.vendors ?? null;
 }

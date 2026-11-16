@@ -35,7 +35,7 @@ import { useTranslation } from 'react-i18next';
 import { cn } from '@/lib/utils';
 import { WINDOW_DRAG_STYLE, WINDOW_NO_DRAG_STYLE } from '@/components/layout/windowDrag';
 import { Tip } from '@/components/ui/tooltip';
-import { VendorIcon } from '@/components/sidebar/VendorIcon';
+import { VendorIcon, agentKindToVendor } from '@/components/sidebar/VendorIcon';
 import {
   DropdownMenu,
   DropdownMenuContent,
@@ -249,7 +249,7 @@ export function SessionTabsBar({
         {sessions.map((session) => {
           const sessionId = session.id;
           const title = getSessionDisplayTitle(session, unnamedLabel, t).trim() || unnamedLabel;
-          const vendor = session.agentKind;
+          const vendor = agentKindToVendor(session.agentKind);
           const isActive = sessionId === activeSessionId;
           const isRunning = runningMap.has(sessionId);
           const isEditing = renamingId === sessionId;

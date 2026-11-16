@@ -15,7 +15,8 @@ export interface DeploymentDetectionResult {
 /** In-memory handoff only. Never persisted or logged. */
 export interface DetectedProviderDraft {
   preset: ProviderPreset;
-  agent: AgentKind;
+  /** 检测只产出可配置自定义供应商的三种运行时;agy 不走这条路。 */
+  agent: Exclude<AgentKind, 'agy'>;
   config: CustomProviderConfig;
   apiKey: string;
   keys?: Partial<Record<AgentKind, string>>;

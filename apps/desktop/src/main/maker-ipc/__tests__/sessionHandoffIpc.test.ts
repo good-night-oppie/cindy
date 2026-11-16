@@ -445,3 +445,19 @@ it('releases consumed receipts without allowing replay for quoted owner requests
   }
   expect(await handle('target-device', lastWire)).toMatchObject({ ok: false });
 });
+
+// Unit boundary: unsupported native defaults must not trigger remote work.
+it('rejects an agy default before reading providers or creating a remote task', async () => {
+  const { id, deps, insert } = creationFixture();
+  const readRemoteRouting = vi.fn();
+  deps.resolveExecution = createRemoteSessionExecutionResolver({
+    isSelfDeviceId: () => false, resolveLocal: vi.fn(), readRemoteRouting,
+    readDefault: () => ({ agentKind: 'agy', model: 'gpt-oss-120b-medium', fastMode: false }),
+  });
+  const result = await createRemoteSessionOpener(deps)(id, {
+    permissionMode: 'ask', agentDeviceId: 'provider-computer',
+  }, async () => {});
+  expect(result).toMatchObject({ ok: false, errorCode: 'INVALID_ARGS' });
+  expect(readRemoteRouting).not.toHaveBeenCalled();
+  expect(insert).not.toHaveBeenCalled();
+});

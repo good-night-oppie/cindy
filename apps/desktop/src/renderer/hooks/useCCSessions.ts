@@ -62,7 +62,7 @@ interface UseCCSessionsReturn {
     fastMode?: boolean | 'ultrafast';
     /** 计划模式一级开关(与 permissionMode 正交); 草稿开着时随建会话落库。 */
     planModeEnabled?: boolean;
-    agentKind?: AgentKind;
+    agentKind?: Exclude<AgentKind, 'agy'>;
     extraDirs?: string[];
     writableDirs?: string[];
     remoteHostId?: string;
@@ -167,7 +167,8 @@ export function useCCSessions(options?: UseCCSessionsOptions): UseCCSessionsRetu
       permissionMode?: string;
       fastMode?: boolean | 'ultrafast';
       planModeEnabled?: boolean;
-      agentKind?: AgentKind;
+      /** 新建任务只列原三种引擎;agy 只是历史身份,不能新建。 */
+      agentKind?: Exclude<AgentKind, 'agy'>;
       /** 附加只读引用目录列表 (绝对路径); 透传到 sessionService.create → mapper 写库。 */
       extraDirs?: string[];
       writableDirs?: string[];

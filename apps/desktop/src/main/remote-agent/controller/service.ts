@@ -33,7 +33,7 @@ import {
   resolveMemoryScopeKey,
   snapshotManagedSkillGrants,
 } from '@cindy/maker-core';
-import { parseProviderSharePeer, providerShareHostPeer } from '@cindy/device-link';
+import { parseProviderSharePeer, providerShareHostPeer, type RemoteAgentKind } from '@cindy/device-link';
 import { createLogger } from '../../logger.js';
 import { findReceivedShare, parseProviderShareAgentDeviceId, providerShareAccessEpoch,
   onProviderShareReceivedChanged } from '../../device-link/providerShareGuest.js';
@@ -234,7 +234,7 @@ export function createDeviceAgentStarter(deps: DeviceAgentServiceDeps) {
     return pool;
   };
   type StartInput = { agentKind: AgentKind; deviceId: string; options: StartSessionOptions };
-  const startAttempt = async (input: StartInput, skipDirect: boolean,
+  const startAttempt = async (input: Omit<StartInput, 'agentKind'> & { agentKind: RemoteAgentKind }, skipDirect: boolean,
     attempt: ReturnType<typeof registerPendingRemoteStart>, recoverLostHistoryGrant = true,
     reissuedHistory = false): Promise<AgentSessionHandle> => {
     const initialShareId = parseProviderShareAgentDeviceId(input.deviceId);
@@ -1013,6 +1013,8 @@ export function createDeviceAgentStarter(deps: DeviceAgentServiceDeps) {
     return handle;
   };
   return async (input: StartInput): Promise<AgentSessionHandle> => {
+    const agentKind = input.agentKind;
+    if (agentKind === 'agy') throw new Error('[REMOTE_AGENT_UNAVAILABLE] Native Antigravity remote execution is not supported');
     if (!input.options.sessionId) throw new Error('remote agent sessions require a session id');
     liveDirectGuestSessions.get(input.options.sessionId)?.failedStartCleanup?.();
     const attempt = registerPendingRemoteStart(input.options.sessionId);
@@ -1023,7 +1025,7 @@ export function createDeviceAgentStarter(deps: DeviceAgentServiceDeps) {
     const onCancel = () => { closeCancelled(); rejectCancelled(attempt.signal.reason); };
     attempt.signal.addEventListener('abort', onCancel, { once: true });
     try {
-      return await Promise.race([startAttempt(input, false, attempt).then(handle => {
+      return await Promise.race([startAttempt({ ...input, agentKind }, false, attempt).then(handle => {
         ready = handle;
         if (attempt.signal.aborted) { closeCancelled(); throw attempt.signal.reason; }
         return handle;

@@ -37,6 +37,7 @@ function factoryModelForAgent(
   agent: AgentKind,
   isModelEnabled?: ModelEnabledPredicate,
 ): PickedConnectedModel | null {
+  if (agent === 'agy') return null;
   const tuple = resolveNewMakerDefaultTuple({
     providers, providersLoading: false, availableAgentsLoaded: true, isModelEnabled,
     availableAgents: new Set([agent === 'claude-code' ? 'cc' : agent]),

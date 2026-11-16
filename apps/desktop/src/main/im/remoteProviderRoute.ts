@@ -1,6 +1,6 @@
 import type { AgentKind } from '@cindy/maker-core';
 import { resolveAutomaticImSettings } from '../../shared/imAutomaticModel';
-import type { ImDefaultSettings } from '../../shared/imDefaultSettings';
+import { isImDefaultAgentKind, type ImDefaultSettings } from '../../shared/imDefaultSettings';
 import { readDeviceProviderViews } from '../remote-agent/controller/deviceCatalog';
 
 export { readRemoteProviderRoute as readImRemoteProviderRoute } from '../remote-agent/controller/deviceCatalog';
@@ -14,11 +14,13 @@ export async function readImRemoteAutomaticDefaults<T extends ImDefaultSettings>
     providerId?: string | null;
   },
 ): Promise<T | null> {
+  const agentKind = options.agentKind;
+  if (agentKind !== undefined && !isImDefaultAgentKind(agentKind)) return null;
   const { remoteBackgroundInvoke } = await import('../device-link');
   const providers = await readDeviceProviderViews(remoteBackgroundInvoke, options.agentDeviceId, {
     visibleOnly: true,
   });
-  const resolved = resolveAutomaticImSettings(settings, providers, options);
+  const resolved = resolveAutomaticImSettings(settings, providers, { ...options, agentKind });
   if (!resolved) return null;
   return {
     ...resolved,
