@@ -698,6 +698,7 @@ function modelRegistryMetaFields(
   agent: AgentKind,
   modelId: string,
 ): RegistryMetaFields | undefined {
+  if (agent === 'agy') return undefined;
   // 模型 registry 的路由与 perAgent 覆盖只按 claude-code / codex 建键;Pi 是动态 BYOM,
   // 无 registry per-agent 覆盖,按 agent 无关处理(取条目基线元数据)。
   const registryAgent = agent === 'pi' ? undefined : agent;
@@ -983,6 +984,7 @@ function materializeXaiAccountModels(
   agent: AgentKind,
   discovered: readonly XaiDiscoveredModel[],
 ): CatalogModel[] {
+  if (agent === 'agy') return [];
   return discovered.map((entry, index) => {
     const catalogModel = xaiCatalogModelById(provider, entry.id, agent);
     const registry = modelRegistryMetaFields('xai', agent, entry.id);
