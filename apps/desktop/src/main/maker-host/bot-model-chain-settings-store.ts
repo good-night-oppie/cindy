@@ -103,7 +103,7 @@ export async function readBotModelChainSettingsState(
   const latest = store.readState();
   if (latest.isCustomized) return latest;
   const availableAgents = options?.availableAgents ?? new Set(
-    (getMakerIfReady()?.listAvailableAgents() ?? []).map((agent) => agent === 'claude-code' ? 'cc' : agent),
+    (getMakerIfReady()?.listAvailableAgents() ?? []).filter(agent => agent !== 'agy').map((agent) => agent === 'claude-code' ? 'cc' : agent),
   );
   const value = { modelChain: defaultBotModelChain({ providers, providersLoading: false,
     availableAgents, availableAgentsLoaded: true,
