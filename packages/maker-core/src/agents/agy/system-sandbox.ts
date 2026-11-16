@@ -4,7 +4,8 @@
  * agy 的「只碰工作目录」只是它自己守规则，系统层面不拦。本模块用 bubblewrap
  * 把 agy 进程树关进一个新的挂载命名空间：只有当前任务目录（以及调用方显式给出的
  * 可写目录，例如 agy 自己的状态目录）可写，运行必需的系统目录只读，家目录是空的，
- * 宿主进程不可见。网络照常共享（agy 要访问模型，与其他引擎一致；不在本层范围）。
+ * 宿主进程不可见。网络放在单独的网络命名空间里，由 pasta 只放外网：宿主的本机回环
+ * （Cindy 的 MCP 端口、Review Inbox）和 X11 等抽象 Unix 套接字都连不上（cindy#1 6909268027）。
  *
  * 失败策略：fail closed。探测不到可用的 bubblewrap、或任务目录不安全时抛
  * `AgySandboxUnavailableError`，调用方不得退回无隔离启动。
@@ -32,6 +33,7 @@ export type AgySandboxUnavailableReason =
   | 'unsupported-platform'
   | 'bwrap-missing'
   | 'bwrap-blocked'
+  | 'network-isolation-missing'
   | 'task-dir-unsafe';
 
 export class AgySandboxUnavailableError extends Error {
@@ -55,6 +57,8 @@ export interface AgySandboxProbeOk {
   version: string;
   /** bubblewrap >= 0.8 supports --disable-userns (blocks nested user namespaces). */
   supportsDisableUserns: boolean;
+  /** pasta (passt project): gives the sandbox its own network namespace with outbound-only access. */
+  pastaPath: string;
 }
 export interface AgySandboxProbeFailed {
   ok: false;
@@ -66,11 +70,36 @@ export type AgySandboxProbe = AgySandboxProbeOk | AgySandboxProbeFailed;
 export interface AgySandboxProbeDeps {
   platform?: NodeJS.Platform;
   bwrapCandidates?: readonly string[];
+  pastaCandidates?: readonly string[];
   exists?: (p: string) => boolean;
   run?: (cmd: string, args: readonly string[]) => { status: number | null; stdout: string; stderr: string };
 }
 
 const DEFAULT_BWRAP_CANDIDATES = ['/usr/bin/bwrap', '/bin/bwrap', '/usr/local/bin/bwrap'];
+const DEFAULT_PASTA_CANDIDATES = ['/usr/bin/pasta', '/usr/local/bin/pasta', '/bin/pasta'];
+
+/**
+ * pasta options: own network namespace with a tap device for outbound traffic
+ * only. --no-map-gw stops the gateway address from reaching the host; the four
+ * `none` port specs disable every forward in both directions, including the
+ * default ns-loopback -> host-loopback splice that would expose Cindy's local
+ * MCP ports. DNS goes to a fixed in-sandbox address forwarded to one upstream.
+ */
+export const AGY_SANDBOX_DNS_ADDR = '169.254.1.53';
+export function pastaNetArgs(dnsHost: string | null): string[] {
+  const a = ['--config-net', '--quiet', '--no-map-gw', '-t', 'none', '-u', 'none', '-T', 'none', '-U', 'none'];
+  if (dnsHost) a.push('--dns-forward', AGY_SANDBOX_DNS_ADDR, '--dns-host', dnsHost);
+  return a;
+}
+
+/** First upstream nameserver, preferring non-loopback ones (systemd-resolved's real list first). */
+export function pickUpstreamDns(resolvTexts: readonly (string | null | undefined)[]): string | null {
+  const all: string[] = [];
+  for (const t of resolvTexts) {
+    for (const m of (t ?? '').matchAll(/^\s*nameserver\s+(\S+)/gm)) all.push(m[1]!);
+  }
+  return all.find(a => !/^(127\.|::1$)/.test(a)) ?? all[0] ?? null;
+}
 
 function defaultRun(cmd: string, args: readonly string[]) {
   const r = spawnSync(cmd, args as string[], { encoding: 'utf8', timeout: 5000 });
@@ -106,8 +135,14 @@ export function probeAgySystemSandbox(deps: AgySandboxProbeDeps = {}): AgySandbo
   if (trial.status !== 0) {
     return { ok: false, reason: 'bwrap-blocked', detail: trial.stderr.trim() || `exit ${trial.status}` };
   }
+  const pastaPath = (deps.pastaCandidates ?? DEFAULT_PASTA_CANDIDATES).find(p => exists(p));
+  if (!pastaPath) return { ok: false, reason: 'network-isolation-missing', detail: 'pasta (passt) not installed' };
+  const netTrial = run(pastaPath, [...pastaNetArgs(null), '--', '/bin/true']);
+  if (netTrial.status !== 0) {
+    return { ok: false, reason: 'network-isolation-missing', detail: netTrial.stderr.trim() || `pasta exit ${netTrial.status}` };
+  }
   const [maj, min] = parsed;
-  return { ok: true, bwrapPath, version: parsed.join('.'), supportsDisableUserns: maj > 0 || min >= 8 };
+  return { ok: true, bwrapPath, pastaPath, version: parsed.join('.'), supportsDisableUserns: maj > 0 || min >= 8 };
 }
 
 // ---------------------------------------------------------------------------
@@ -185,6 +220,14 @@ const realFs: AgySandboxFsView = {
 export interface AgySandboxLaunchInput {
   bwrapPath: string;
   supportsDisableUserns: boolean;
+  pastaPath: string;
+  /** Upstream DNS server pasta forwards to (see pickUpstreamDns); null = no DNS. */
+  dnsHost: string | null;
+  /** File mounted as the sandbox's /etc/resolv.conf (points at AGY_SANDBOX_DNS_ADDR). */
+  resolvConfPath?: string;
+  /** Ids agy runs as inside the sandbox; default: the caller's. */
+  uid?: number;
+  gid?: number;
   binaryPath: string;
   args: readonly string[];
   /** Absolute task dir; bound read-write at the same path and used as cwd. */
@@ -211,7 +254,7 @@ export interface AgySandboxLaunch {
 
 const ETC_ENTRIES = ['hosts', 'host.conf', 'nsswitch.conf', 'gai.conf', 'passwd', 'group', 'localtime',
   'ld.so.cache', 'ld.so.conf', 'ld.so.conf.d', 'ssl', 'ca-certificates', 'pki', 'crypto-policies',
-  'protocols', 'services', 'mime.types', 'alternatives', 'resolv.conf', 'gitconfig'];
+  'protocols', 'services', 'mime.types', 'alternatives', 'gitconfig'];
 const ROOT_LIB_DIRS = ['bin', 'sbin', 'lib', 'lib64', 'lib32', 'libx32'];
 const ENV_ALLOW = new Set(['LANG', 'LANGUAGE', 'TERM', 'COLORTERM', 'TZ', 'NO_COLOR', 'FORCE_COLOR',
   'HTTP_PROXY', 'HTTPS_PROXY', 'NO_PROXY', 'ALL_PROXY', 'http_proxy', 'https_proxy', 'no_proxy', 'all_proxy',
@@ -250,8 +293,11 @@ export function buildAgySandboxLaunch(input: AgySandboxLaunchInput): AgySandboxL
   const writable = (input.writableDirs ?? []).map(w => ({ source: fs.realpath(w.source), target: w.target ?? fs.realpath(w.source) }));
   assertAgyTaskDirPaths(taskDir, homeDir, writable.flatMap(w => [w.source, w.target]));
 
+  // --share-net shares pasta's isolated namespace (the outer process), never the host's.
   const a: string[] = ['--unshare-all', '--share-net', '--die-with-parent', '--new-session',
     '--cap-drop', 'ALL', '--hostname', 'agy-sandbox'];
+  // pasta maps the caller to root in its user namespace; map back to the real ids.
+  a.push('--uid', String(input.uid ?? process.getuid?.() ?? 1000), '--gid', String(input.gid ?? process.getgid?.() ?? 1000));
   if (input.supportsDisableUserns) a.push('--disable-userns');
 
   a.push('--ro-bind', '/usr', '/usr', '--proc', '/proc', '--dev', '/dev', '--tmpfs', '/tmp', '--tmpfs', '/run');
@@ -265,6 +311,7 @@ export function buildAgySandboxLaunch(input: AgySandboxLaunchInput): AgySandboxL
     const p = `/etc/${e}`;
     if (fs.exists(p)) a.push('--ro-bind', fs.realpath(p), p);
   }
+  if (input.resolvConfPath) a.push('--ro-bind', input.resolvConfPath, '/etc/resolv.conf');
 
   // Empty home: hide every user's files, then add back only what was asked for.
   a.push('--tmpfs', '/home');
@@ -284,8 +331,8 @@ export function buildAgySandboxLaunch(input: AgySandboxLaunchInput): AgySandboxL
   const login = input.login ?? { kind: 'private-state' };
   const loginEnv = login.kind === 'api-key' ? login.env : {};
   return {
-    command: input.bwrapPath,
-    args: a,
+    command: input.pastaPath,
+    args: [...pastaNetArgs(input.dnsHost), '--', input.bwrapPath, ...a],
     env: filterAgySandboxEnv({ ...input.env, ...loginEnv }, homeDir, taskDir,
       [...(input.passEnvKeys ?? []), ...Object.keys(loginEnv)]),
   };
@@ -331,6 +378,19 @@ export async function ensureAgyPrivateState(stateRoot: string, homeDir: string):
   return mounts;
 }
 
+function readText(p: string): string | null {
+  try { return readFileSync(p, 'utf8'); } catch { return null; }
+}
+
+/** The sandbox's resolv.conf: a single nameserver, the in-sandbox address pasta forwards. */
+async function writeSandboxResolvConf(): Promise<string> {
+  const dir = path.join(os.tmpdir(), `cindy-agy-sandbox-${process.getuid?.() ?? 'u'}`);
+  await mkdir(dir, { recursive: true, mode: 0o700 });
+  const file = path.join(dir, 'resolv.conf');
+  await writeFile(file, `nameserver ${AGY_SANDBOX_DNS_ADDR}\n`, { mode: 0o644 });
+  return file;
+}
+
 /**
  * One call at the agy spawn site: probe, check the task dir, build the wrapped
  * command. Throws `AgySandboxUnavailableError` instead of returning an
@@ -353,8 +413,11 @@ export async function prepareAgySandboxedLaunch(
     throw new AgySandboxUnavailableError('task-dir-unsafe', 'agy state root must not be inside the task dir');
   }
   const stateMounts = input.stateRoot ? await ensureAgyPrivateState(input.stateRoot, input.homeDir) : [];
+  const dnsHost = pickUpstreamDns([readText('/run/systemd/resolve/resolv.conf'), readText('/etc/resolv.conf')]);
+  const resolvConfPath = dnsHost ? await writeSandboxResolvConf() : undefined;
   const launch = buildAgySandboxLaunch({ ...input, writableDirs: [...stateMounts, ...(input.writableDirs ?? [])],
-    bwrapPath: probe.bwrapPath, supportsDisableUserns: probe.supportsDisableUserns });
+    bwrapPath: probe.bwrapPath, pastaPath: probe.pastaPath, supportsDisableUserns: probe.supportsDisableUserns,
+    dnsHost, resolvConfPath });
   return { ...launch, hardlinkScan };
 }
 
@@ -410,12 +473,13 @@ export const AGY_SANDBOX_USER_COPY_DRAFT = {
     action: { read: { 'zh-CN': '读取', en: 'read' }, write: { 'zh-CN': '修改', en: 'change' }, unknown: { 'zh-CN': '使用', en: 'use' } },
   },
   unavailable: {
-    'zh-CN': '这台电脑上开不了 Antigravity 的文件隔离（{reason}）。为了不让它碰到任务文件夹以外的文件，这次没有启动 Antigravity。可以换用其他引擎，或请管理员安装并允许 bubblewrap 后再试。',
-    en: 'Cindy could not turn on file isolation for Antigravity on this computer ({reason}). To keep it away from files outside the task folder, Antigravity was not started. Use another engine, or ask an administrator to install and allow bubblewrap, then try again.',
+    'zh-CN': '这台电脑上开不了 Antigravity 的文件隔离（{reason}）。为了不让它碰到任务文件夹以外的文件，这次没有启动 Antigravity。可以换用其他引擎，或请管理员安装并允许 bubblewrap 和 pasta 后再试。',
+    en: 'Cindy could not turn on file isolation for Antigravity on this computer ({reason}). To keep it away from files outside the task folder, Antigravity was not started. Use another engine, or ask an administrator to install and allow bubblewrap and pasta, then try again.',
     reason: {
       'unsupported-platform': { 'zh-CN': '这个系统暂不支持', en: 'not supported on this system yet' },
       'bwrap-missing': { 'zh-CN': '没有安装 bubblewrap', en: 'bubblewrap is not installed' },
       'bwrap-blocked': { 'zh-CN': '系统不允许创建隔离环境', en: 'the system does not allow creating the isolated environment' },
+      'network-isolation-missing': { 'zh-CN': '没有安装 pasta，无法隔离网络', en: 'pasta is not installed, so the network cannot be isolated' },
       'task-dir-unsafe': { 'zh-CN': '任务文件夹不能被安全隔离', en: 'the task folder cannot be isolated safely' },
     },
   },
