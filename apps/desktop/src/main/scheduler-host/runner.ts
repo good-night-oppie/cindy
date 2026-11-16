@@ -1183,6 +1183,7 @@ export class MakerScheduleRunner implements ScheduleRunner {
         }
       } else {
         if (resolvedSelection) {
+          if (resolvedSelection.agentKind === 'agy') throw new Error('Native Antigravity scheduled execution is not supported');
           schedule = {
             ...schedule,
             agentKind: resolvedSelection.agentKind,
@@ -1343,6 +1344,7 @@ export class MakerScheduleRunner implements ScheduleRunner {
       (isHeartbeat
         ? (heartbeatAgentKind ?? schedule.agentKind)
         : (schedule.modelAgentKind ?? schedule.agentKind));
+    if (effectiveAgentKind === 'agy') throw new Error('Native Antigravity scheduled execution is not supported');
     const rawModel = schedule.model?.trim()
       ? schedule.model
       : isHeartbeat
@@ -1455,6 +1457,7 @@ export class MakerScheduleRunner implements ScheduleRunner {
       resolvedSelection = freshAgentDeviceId
         ? await this.deps.resolveModelSelection(selection, { agentDeviceId: freshAgentDeviceId })
         : await this.deps.resolveModelSelection(selection);
+      if (resolvedSelection.agentKind === 'agy') throw new Error('Native Antigravity scheduled execution is not supported');
       createProviderId = resolvedSelection.providerId;
       fastMode = resolvedSelection.fastMode;
       schedule = {
