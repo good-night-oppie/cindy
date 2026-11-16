@@ -131,7 +131,7 @@ export function ErrorTailErrorBanner({
   onContinue: () => Promise<void> | void;
   onDismiss: () => void;
   dismissOnEscape?: boolean;
-  agentKind?: 'cc' | 'codex' | 'pi';
+  agentKind?: import('../../../shared/agentKindConversion').DbAgentKind;
   agentDeviceId?: string | null;
   remoteHostId?: string;
   deviceLinkDeviceId?: string | null;
