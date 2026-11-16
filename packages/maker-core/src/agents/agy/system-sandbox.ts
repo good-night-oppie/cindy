@@ -97,7 +97,45 @@ export function pastaNetArgs(dnsHost: string | null): string[] {
   return a;
 }
 
-/** First upstream nameserver, preferring non-loopback ones (systemd-resolved's real list first). */
+/**
+ * pasta relays the sandbox's outbound traffic through ordinary host sockets, so
+ * without more rules the sandbox could reach anything the host can: the cloud
+ * metadata service (169.254.169.254 hands out instance credentials), services
+ * bound to 0.0.0.0 on the host's other interfaces (docker bridge, tailnet IP),
+ * the LAN / VPC and the tailnet (cindy#3, QQ review).
+ *
+ * These ranges are closed with `ip rule ... prohibit` inside pasta's namespace
+ * before bwrap starts. Policy rules are checked before any route, so the on-link
+ * route pasta copies from the host (e.g. 172.26.0.0/20) cannot win over them by
+ * being more specific, as it would over a blackhole route; `prohibit` also fails
+ * fast (EACCES) instead of hanging. Only the in-sandbox DNS address is let
+ * through, by a higher-priority rule. The rules belong to pasta's user
+ * namespace; bwrap drops every capability and any namespace agy creates is a
+ * child of it, so agy cannot remove them. Any failing step aborts the launch.
+ */
+export const AGY_SANDBOX_BLOCKED_V4 = ['169.254.0.0/16', '10.0.0.0/8', '172.16.0.0/12', '192.168.0.0/16', '100.64.0.0/10'] as const;
+export const AGY_SANDBOX_BLOCKED_V6 = ['fc00::/7', 'fe80::/10', 'fd00:ec2::254/128'] as const;
+export function agyNetGuardCommand(ipPath: string): string[] {
+  const script = [
+    'set -eu',
+    'ip=$1; shift',
+    `"$ip" rule add pref 100 to ${AGY_SANDBOX_DNS_ADDR}/32 lookup main`,
+    ...AGY_SANDBOX_BLOCKED_V4.map(n => `"$ip" rule add pref 200 to ${n} prohibit`),
+    // IPv6 disabled in the kernel: no IPv6 traffic at all, nothing to block.
+    'if [ -e /proc/net/if_inet6 ]; then',
+    ...AGY_SANDBOX_BLOCKED_V6.map(n => `  "$ip" -6 rule add pref 200 to ${n} prohibit`),
+    'fi',
+    'exec "$@"',
+  ].join('\n');
+  return ['/bin/sh', '-c', script, 'agy-net-guard', ipPath];
+}
+
+/**
+ * First upstream nameserver, preferring non-loopback ones (systemd-resolved's real list first).
+ * If the host only lists a loopback resolver (e.g. just 127.0.0.53), that one is used on purpose:
+ * pasta then sends the sandbox's DNS queries to port 53 on the host loopback. Only DNS to that one
+ * address is forwarded; every other host-loopback port stays closed (cindy#3 review, item 5).
+ */
 export function pickUpstreamDns(resolvTexts: readonly (string | null | undefined)[]): string | null {
   const all: string[] = [];
   for (const t of resolvTexts) {
@@ -142,12 +180,14 @@ export function probeAgySystemSandbox(deps: AgySandboxProbeDeps = {}): AgySandbo
   }
   const pastaPath = (deps.pastaCandidates ?? DEFAULT_PASTA_CANDIDATES).find(p => exists(p));
   if (!pastaPath) return { ok: false, reason: 'network-isolation-missing', detail: 'pasta (passt) not installed' };
-  const netTrial = run(pastaPath, [...pastaNetArgs(null), '--', '/bin/true']);
+  const ipPath = (deps.ipCandidates ?? DEFAULT_IP_CANDIDATES).find(p => exists(p));
+  if (!ipPath) return { ok: false, reason: 'network-isolation-missing', detail: 'iproute2 (ip) not installed' };
+  const netTrial = run(pastaPath, [...pastaNetArgs(null), '--', ...agyNetGuardCommand(ipPath), '/bin/true']);
   if (netTrial.status !== 0) {
     return { ok: false, reason: 'network-isolation-missing', detail: netTrial.stderr.trim() || `pasta exit ${netTrial.status}` };
   }
   const [maj, min] = parsed;
-  return { ok: true, bwrapPath, pastaPath, version: parsed.join('.'), supportsDisableUserns: maj > 0 || min >= 8 };
+  return { ok: true, bwrapPath, pastaPath, ipPath, version: parsed.join('.'), supportsDisableUserns: maj > 0 || min >= 8 };
 }
 
 // ---------------------------------------------------------------------------
@@ -172,6 +212,32 @@ export function assertAgyTaskDirPaths(taskDir: string, homeDir: string, writable
   if (taskDir === homeDir || isInside(homeDir, taskDir)) refuse('task dir must not be or contain the home directory');
   for (const w of writableDirs) {
     if (isInside(w, taskDir) || isInside(taskDir, w)) refuse(`task dir overlaps writable dir: ${w}`);
+  }
+}
+
+/**
+ * Extra mounts must not hand agy the real home or anything in it (cindy#3 review,
+ * item 3). Sources (already realpath'd) that are /, are or contain the home dir,
+ * or lie inside the home dir are refused; the only exception is a path inside
+ * agy's private state root. The state root itself must not be, contain or lie
+ * inside the real ~/.gemini or ~/.config/antigravity, and must not contain home.
+ */
+export function assertAgyMountSources(sources: readonly string[], homeDir: string, stateRoot: string | null): void {
+  const refuse = (detail: string) => { throw new AgySandboxUnavailableError('task-dir-unsafe', detail); };
+  if (stateRoot !== null) {
+    if (isInside(homeDir, stateRoot)) refuse(`agy state root must not be or contain the home directory: ${stateRoot}`);
+    for (const d of AGY_PRIVATE_STATE_DIRS) {
+      const real = path.join(homeDir, d.homeRelative);
+      if (isInside(real, stateRoot) || isInside(stateRoot, real)) {
+        refuse(`agy state root must not be the real ~/${d.homeRelative}, its parent or inside it: ${stateRoot}`);
+      }
+    }
+  }
+  for (const s of sources) {
+    if (s === '/' || isInside(homeDir, s)) refuse(`mount source is or contains the home directory: ${s}`);
+    if (isInside(s, homeDir) && !(stateRoot !== null && isInside(s, stateRoot))) {
+      refuse(`mount source is inside the home directory: ${s}`);
+    }
   }
 }
 
