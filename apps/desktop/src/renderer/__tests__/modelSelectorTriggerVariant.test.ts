@@ -1376,6 +1376,21 @@ describe('ModelSelector trigger variants', () => {
     expect(trigger.getAttribute('aria-label')).not.toContain('Claude Code');
   });
 
+  it('gives an Antigravity session no engine identity instead of the Claude mark (cindy#2)', () => {
+    expect(resolveModelSelectorAgentIdentity('agy', null)).toBeUndefined();
+    // agy 不是可切换引擎:待切换目标是 agy 时忽略,按当前引擎判断。
+    expect(resolveModelSelectorAgentIdentity('agy', 'agy')).toBeUndefined();
+    expect(resolveModelSelectorAgentIdentity('claude-code', 'agy')).toEqual({ vendorKey: 'cc', state: 'current' });
+  });
+
+  it('keeps the engine identity of the other three engines unchanged', () => {
+    expect(resolveModelSelectorAgentIdentity('claude-code', null)).toEqual({ vendorKey: 'cc', state: 'current' });
+    expect(resolveModelSelectorAgentIdentity('codex', null)).toEqual({ vendorKey: 'codex', state: 'current' });
+    expect(resolveModelSelectorAgentIdentity('pi', null)).toEqual({ vendorKey: 'pi', state: 'current' });
+    expect(resolveModelSelectorAgentIdentity('claude-code', 'codex')).toEqual({ vendorKey: 'codex', state: 'pending' });
+    expect(resolveModelSelectorAgentIdentity(null, null)).toBeUndefined();
+  });
+
   it.each([
     ['claude-code', false], ['claude-code', true], ['codex', false], ['codex', true],
   ] as const)('keeps target identity and current/next context in a narrow composer (current=%s, ultra=%s)', (currentAgent, ultra) => {
