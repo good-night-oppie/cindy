@@ -1,5 +1,6 @@
 import { spawnSync } from 'node:child_process';
 import { linkSync, mkdirSync, mkdtempSync, readFileSync, realpathSync, rmSync, statSync, writeFileSync, existsSync } from 'node:fs';
+import net from 'node:net';
 import os from 'node:os';
 import path from 'node:path';
 import { afterAll, describe, expect, it } from 'vitest';
@@ -8,6 +9,7 @@ import {
   agyPrivateStateMounts,
   agySandboxDenialModelNote,
   assertAgyTaskDirPaths,
+  pickUpstreamDns,
   buildAgySandboxLaunch,
   detectAgySandboxDenial,
   filterAgySandboxEnv,
@@ -27,6 +29,11 @@ const fakeFs = (opts: { symlinks?: Record<string, string>; existing?: string[] }
 const base = {
   bwrapPath: '/usr/bin/bwrap',
   supportsDisableUserns: false,
+  pastaPath: '/usr/bin/pasta',
+  dnsHost: '172.26.0.2',
+  resolvConfPath: '/tmp/cindy-agy-sandbox-1000/resolv.conf',
+  uid: 1000,
+  gid: 1000,
   binaryPath: '/home/u/.local/bin/agy',
   args: ['--acp'],
   taskDir: '/home/u/work/task-1',
@@ -43,12 +50,31 @@ function pairs(args: string[], flag: string): string[][] {
 }
 
 describe('buildAgySandboxLaunch', () => {
+  it('runs bwrap inside pasta with every host-loopback path closed', () => {
+    const l = buildAgySandboxLaunch(base);
+    expect(l.command).toBe('/usr/bin/pasta');
+    const sep = l.args.indexOf('--');
+    const pasta = l.args.slice(0, sep);
+    expect(pasta).toEqual(expect.arrayContaining(['--config-net', '--no-map-gw']));
+    for (const f of ['-t', '-u', '-T', '-U']) expect(pasta[pasta.indexOf(f) + 1]).toBe('none');
+    expect(pasta.slice(pasta.indexOf('--dns-forward'), pasta.indexOf('--dns-forward') + 4))
+      .toEqual(['--dns-forward', '169.254.1.53', '--dns-host', '172.26.0.2']);
+    expect(l.args[sep + 1]).toBe('/usr/bin/bwrap');
+    expect(pairs(l.args, '--ro-bind')).toContainEqual(['/tmp/cindy-agy-sandbox-1000/resolv.conf', '/etc/resolv.conf']);
+    expect(l.args.slice(l.args.indexOf('--uid'), l.args.indexOf('--uid') + 4)).toEqual(['--uid', '1000', '--gid', '1000']);
+  });
+
+  it('never binds the host resolv.conf (it points at host loopback)', () => {
+    const l = buildAgySandboxLaunch({ ...base, dnsHost: null, resolvConfPath: undefined });
+    expect(pairs(l.args, '--ro-bind').some(([, dst]) => dst === '/etc/resolv.conf')).toBe(false);
+    expect(l.args).not.toContain('--dns-forward');
+  });
+
   it('wraps agy in bwrap with only the task dir writable at the same path', () => {
     const l = buildAgySandboxLaunch(base);
-    expect(l.command).toBe('/usr/bin/bwrap');
     expect(pairs(l.args, '--bind')).toEqual([['/home/u/work/task-1', '/home/u/work/task-1']]);
     expect(l.args.slice(l.args.indexOf('--chdir'), l.args.indexOf('--chdir') + 2)).toEqual(['--chdir', '/home/u/work/task-1']);
-    expect(l.args.slice(l.args.indexOf('--'))).toEqual(['--', '/home/u/.local/bin/agy', '--acp']);
+    expect(l.args.slice(l.args.lastIndexOf('--'))).toEqual(['--', '/home/u/.local/bin/agy', '--acp']);
   });
 
   it('hides home: tmpfs over /home, never binds the home dir itself', () => {
@@ -66,7 +92,7 @@ describe('buildAgySandboxLaunch', () => {
   it('binds system dirs read-only and follows merged-usr symlinks', () => {
     const l = buildAgySandboxLaunch(base);
     expect(pairs(l.args, '--ro-bind')).toEqual(expect.arrayContaining([['/usr', '/usr'], ['/lib64', '/lib64'],
-      ['/run/systemd/resolve/stub-resolv.conf', '/etc/resolv.conf'], ['/home/u/.local/bin/agy', '/home/u/.local/bin/agy']]));
+      ['/home/u/.local/bin/agy', '/home/u/.local/bin/agy']]));
     expect(pairs(l.args, '--symlink')).toEqual(expect.arrayContaining([['usr/bin', '/bin'], ['usr/lib', '/lib']]));
   });
 
@@ -143,6 +169,17 @@ describe('probeAgySystemSandbox', () => {
   it('is linux only', () => {
     expect(probeAgySystemSandbox({ platform: 'win32' })).toMatchObject({ ok: false, reason: 'unsupported-platform' });
   });
+  it('reports missing network isolation (no pasta) instead of running with the host network', () => {
+    const run = (_c: string, a: readonly string[]) => a[0] === '--version'
+      ? { status: 0, stdout: 'bubblewrap 0.9.0\n', stderr: '' } : { status: 0, stdout: '', stderr: '' };
+    expect(probeAgySystemSandbox({ platform: 'linux', exists: p => !p.includes('pasta'), run }))
+      .toMatchObject({ ok: false, reason: 'network-isolation-missing' });
+  });
+  it('picks a non-loopback upstream DNS server', () => {
+    expect(pickUpstreamDns(['nameserver 172.26.0.2\n', 'nameserver 127.0.0.53\n'])).toBe('172.26.0.2');
+    expect(pickUpstreamDns([null, '# c\nnameserver 127.0.0.53\n'])).toBe('127.0.0.53');
+    expect(pickUpstreamDns([null, null])).toBeNull();
+  });
   it('reports a missing bubblewrap', () => {
     expect(probeAgySystemSandbox({ platform: 'linux', exists: () => false })).toMatchObject({ ok: false, reason: 'bwrap-missing' });
   });
@@ -202,7 +239,7 @@ describe('scanTaskDirForHardlinks', () => {
 });
 
 // Real bubblewrap on Linux hosts that allow it (runs on arena; skipped elsewhere).
-const probe = probeAgySystemSandbox();
+const probe = probeAgySystemSandbox(process.env.AGY_SANDBOX_TEST_PASTA ? { pastaCandidates: [process.env.AGY_SANDBOX_TEST_PASTA] } : {});
 describe.runIf(probe.ok)('real bubblewrap decoy check', () => {
   const root = realpathSync(mkdtempSync(path.join(os.tmpdir(), 'agy-sbx-test-')));
   afterAll(() => rmSync(root, { recursive: true, force: true }));
@@ -215,6 +252,13 @@ describe.runIf(probe.ok)('real bubblewrap decoy check', () => {
     const canary = `CANARY-${Math.random().toString(36).slice(2)}`;
     writeFileSync(decoy, canary);
     const before = statSync(decoy);
+    const hostSrv = net.createServer(s => s.destroy());
+    await new Promise<void>(res => hostSrv.listen(0, '127.0.0.1', () => res()));
+    const port = (hostSrv.address() as net.AddressInfo).port;
+    const abstractName = `agy-sbx-test-${Math.random().toString(36).slice(2)}`;
+    const absSrv = net.createServer(s => s.destroy());
+    await new Promise<void>(res => absSrv.listen('\0' + abstractName, () => res()));
+    const egress = process.env.AGY_SANDBOX_TEST_EGRESS === '1';
     const script = `
       const fs = require('fs'); const r = {};
       const t = (k, f) => { try { f(); r[k] = 'ok'; } catch (e) { r[k] = e.code || String(e); } };
@@ -229,7 +273,15 @@ describe.runIf(probe.ok)('real bubblewrap decoy check', () => {
       const home = require('os').homedir();
       t('stateWrite', () => { fs.writeFileSync(home + '/.gemini/token-probe', 't');
         fs.writeFileSync(home + '/.config/antigravity/plugin-probe', 'p'); });
-      process.stdout.write(JSON.stringify(r));`;
+      const net = require('net');
+      const tryc = o => new Promise(res => { const s = net.connect(o); const tm = setTimeout(() => { s.destroy(); res('timeout'); }, 3000);
+        s.on('connect', () => { clearTimeout(tm); s.destroy(); res('CONNECTED'); }); s.on('error', e => { clearTimeout(tm); res(e.code); }); });
+      (async () => {
+        r.hostLoopback = await tryc({ host: '127.0.0.1', port: ${port} });
+        r.hostAbstract = await tryc({ path: ${JSON.stringify('\0' + abstractName)} });
+        if (${egress}) { try { const resp = await fetch('https://api.github.com/zen'); r.egress = 'HTTP ' + resp.status; } catch (e) { r.egress = String((e.cause && e.cause.code) || e); } }
+        process.stdout.write(JSON.stringify(r));
+      })();`;
     writeFileSync(path.join(task, 'probe.cjs'), script);
     const node = realpathSync(process.execPath);
     const stateRoot = path.join(root, 'agy-state');
@@ -238,6 +290,8 @@ describe.runIf(probe.ok)('real bubblewrap decoy check', () => {
       env: { ...process.env, DBUS_SESSION_BUS_ADDRESS: `unix:path=/run/user/${process.getuid?.()}/bus` },
       passEnvKeys: ['DBUS_SESSION_BUS_ADDRESS'] });
     const res = spawnSync(launch.command, launch.args, { cwd: task, env: launch.env, encoding: 'utf8' });
+    hostSrv.close();
+    absSrv.close();
     expect(res.stderr).toBe('');
     const r = JSON.parse(res.stdout) as Record<string, string>;
     expect(r.readDecoy).not.toBe('ok');
@@ -246,6 +300,9 @@ describe.runIf(probe.ok)('real bubblewrap decoy check', () => {
     expect(r.symlinkRead).not.toBe('ok');
     expect(r.sshVisible).not.toBe('ok');
     expect(r.writeInside).toBe('ok');
+    expect(r.hostLoopback).not.toBe('CONNECTED');
+    expect(r.hostAbstract).not.toBe('CONNECTED');
+    if (egress) expect(r.egress).toBe('HTTP 200');
     expect(r.busVisible).not.toBe('ok');
     expect(r.dbusEnv).toBe('');
     expect(r.stateWrite).toBe('ok');
