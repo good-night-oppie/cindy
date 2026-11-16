@@ -52,6 +52,8 @@ async function loadCatalog(
   if (!isCurrent()) return {};
   const agentKind = mcpResult.agentKind;
   if (!agentKind) throw new Error('Missing next-turn route');
+  // 伙伴不支持 agy;显式报错,不按 Claude 读技能。
+  if (agentKind === 'agy') throw new Error('Unsupported next-turn agent: agy');
   const results = await Promise.allSettled([
     api().listSkills(bot.id),
     maker.listAgentSkills(agentKind, {
