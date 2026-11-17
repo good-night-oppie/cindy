@@ -37,6 +37,14 @@ export const AGY_HOST_PATH_USER_COPY = {
     'zh-CN': '这个文件本身只是个链接，指向任务文件夹外面，所以 Cindy 没有打开它。任务文件夹以外的文件，Cindy 不会替 Antigravity 打开。要用的话，把这个文件复制进任务文件夹，再试一次。',
     en: 'This file is just a link pointing outside the task folder, so Cindy did not open it. Cindy does not open files outside the task folder for Antigravity. If you need it, copy the file into the task folder and try again.',
   },
+  /**
+   * JJ on cindy#15: entries without a text channel of their own (xdt-file / xdt-audio, the
+   * dangerous-attachment stage), where the refusal is not necessarily about a link.
+   */
+  notInTaskFolder: {
+    'zh-CN': '这个文件不在任务文件夹里，Cindy 没有打开它。要用的话，把它复制进任务文件夹，再试一次。',
+    en: 'This file is not in the task folder, so Cindy did not open it. If you need it, copy it into the task folder and try again.',
+  },
 } as const;
 
 export type AgyCopyLocale = 'zh-CN' | 'en';
@@ -433,13 +441,19 @@ export function agyWriteTargets(tool: AcpRecord): { paths: string[]; cwd?: strin
  * reaching outside through a link inside the task folder (same real-path check as the read side).
  * Null when every target stays inside or the call is not a write. Only the call's own target paths
  * decide; agy's completed / failed status does not.
+ *
+ * `inScopeDirs` are sandbox paths that are Cindy's own space for agy, not "outside": the private state
+ * dirs (seen as ~/.gemini and ~/.config/antigravity inside the sandbox). Writing there is expected and
+ * lands in Cindy's agy state, not in the user's files, so it gets no notice (JJ on cindy#15).
  */
-export function agyWriteOutsideTask(tool: AcpRecord, taskDir: string, homeDir: string): string | null {
+export function agyWriteOutsideTask(tool: AcpRecord, taskDir: string, homeDir: string,
+  inScopeDirs: readonly string[] = []): string | null {
   const { paths, cwd } = agyWriteTargets(tool);
   const base = cwd ? path.resolve(taskDir, expandHome(cwd, homeDir)) : taskDir;
   for (const raw of paths) {
     const target = path.resolve(base, expandHome(raw, homeDir));
     if (PSEUDO_TARGETS.has(target) || target.startsWith('/dev/fd/') || target.startsWith('/proc/self/fd/')) continue;
+    if (inScopeDirs.some(dir => isInsideDir(target, path.resolve(dir)))) continue;
     try {
       if (checkAgyTaskPath(target, { taskDir }) === null) return target; // not in the task folder at all
     } catch (error) {
