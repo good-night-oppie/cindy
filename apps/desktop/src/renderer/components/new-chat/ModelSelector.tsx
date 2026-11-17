@@ -647,9 +647,10 @@ export function resolveModelSelectorAgentIdentity(
   runtimeAgentKind: AgentKind | null | undefined,
   pendingTarget: AgentKind | null | undefined,
 ): ModelSelectorAgentIdentity | undefined {
-  // agy(Antigravity)现在可以作为新任务引擎:有自己的引擎小标,不再落成 Claude 图标。
+  // agy 可以作为新任务引擎,但不是会话内可切换目标:这里保持「不看它」的既有口径
+  // (agy 会话的引擎标识走 VendorIcon 的中性图标,见 agyVendorIcon 用例)。
   const toVendorKey = (kind: AgentKind): SelectableVendor | null =>
-    kind === 'codex' ? 'codex' : kind === 'pi' ? 'pi' : kind === 'agy' ? 'agy' : 'cc';
+    kind === 'agy' ? null : kind === 'codex' ? 'codex' : kind === 'pi' ? 'pi' : 'cc';
   const pendingKey = pendingTarget ? toVendorKey(pendingTarget) : null;
   if (pendingKey) {
     return {
