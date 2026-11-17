@@ -89,6 +89,7 @@ import {
 } from '../cindy-brain/ghostGrantConfirmBridge.js';
 
 import { classifyLocalAttachmentPath } from '../cindy-brain/ghostLocalPathGrant.js';
+import { agyHostPathRefusal } from '../agyHostPathGuard.js';
 
 import { toolNotFoundMessage } from '../cindy-brain/pipeDispatcher.js';
 
@@ -1060,6 +1061,8 @@ async function prepareLocalPathAttachments(params: {
       handledByChain = false;
     }
     if (handledByChain) continue;
+    const agyRefusal = agyHostPathRefusal(url);
+    if (agyRefusal) return { ok: false, message: agyRefusal };
     const c = classifyLocalAttachmentPath(url, params.workdirAbs, {
       mimeForExt: blobStore.mimeForExt,
     });
@@ -1375,6 +1378,8 @@ async function confirmDepositOutsideWorkdir(params: {
 > {
   if (!params.target.isCurrent()) return { ok: false, message: GRANT_AUTHORIZATION_CHANGED_MESSAGE };
   if (!path.isAbsolute(params.dirAbs)) return { ok: true, userGranted: false };
+  const agyRefusal = agyHostPathRefusal(params.dirAbs);
+  if (agyRefusal) return { ok: false, message: agyRefusal };
   let real: string;
   let stat: fs.Stats;
   try {

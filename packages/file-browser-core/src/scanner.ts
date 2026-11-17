@@ -15,6 +15,7 @@
 
 import { randomBytes } from 'node:crypto';
 import { promises as fs, type Stats, type Dirent } from 'node:fs';
+import type { FileHandle } from 'node:fs/promises';
 import path from 'node:path';
 
 import { scopedLogger } from './logging.js';
@@ -377,6 +378,8 @@ export async function listDir(
 export async function readFile(
   workdir: string,
   relPath: string,
+  /** Runs on the open handle before reading (the desktop host re-checks agy task folders by handle). */
+  opts: { afterOpen?: (handle: FileHandle) => Promise<void> } = {},
 ): Promise<FileReadResult> {
   const sub = assertInsideWorkdir(workdir, relPath);
   if (sub === '') throw new Error('cannot read workdir root as file');
@@ -388,6 +391,7 @@ export async function readFile(
   const truncated = st.size > MAX_FILE_BYTES;
   const handle = await fs.open(realAbs, 'r');
   try {
+    await opts.afterOpen?.(handle);
     const buf = Buffer.alloc(Math.min(st.size, MAX_FILE_BYTES));
     if (buf.length > 0) {
       await handle.read(buf, 0, buf.length, 0);

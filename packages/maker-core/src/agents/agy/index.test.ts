@@ -4,6 +4,12 @@ import { AgentNotAuthenticatedError, AgentStartupStoppedError } from '../base-ag
 import type { AcpTransport } from '../acp/transport.js';
 import type { AgentEvent, InteractionDecision, InteractionRequest } from '../../types/events.js';
 import { createConsoleLogger } from '../../interfaces/logger.js';
+import { tmpdir as osTmpdir } from 'node:os';
+import { join as joinPath } from 'node:path';
+import { setAgyTaskDirStoreFile } from './host-path-guard.js';
+
+// Sessions here register their task folder; keep that registry out of the real ~/.cindy.
+setAgyTaskDirStoreFile(joinPath(osTmpdir(), `agy-task-dirs-${process.pid}-index.json`));
 
 // FakeTransport structure follows the Cursor ACP tests in makecindy/cindy#5611.
 interface Frame { id?: string | number; method?: string; params?: Record<string, unknown>; result?: unknown; error?: unknown }

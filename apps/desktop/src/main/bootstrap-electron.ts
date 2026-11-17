@@ -467,6 +467,10 @@ import {
   getSensitiveMediaBlocklist,
   isPathAllowedAgainst,
 } from './filePathPolicy';
+import {
+  agyHostPathRefusal, checkAgyHostPath, isAgyLinkOutsideTaskError, openHostFileForRead, readHostFile, setAgyHostPathLocale,
+  agyAwareRealpath, agyHandoffPath, agyNotInTaskFolderRefusal, openNoFollowForRead, setAgyHostPathRefusalNotifier,
+} from './agyHostPathGuard';
 import { readFileThumbnail } from './fileThumbnail';
 import { createOpenWithHandlers, decodeRegOutput, parseChcpCodepage } from './openWithApps';
 import { resolveShellOpenPathTarget } from './shellOpenPath';
@@ -7531,6 +7535,10 @@ const registerIpcHandlers = () => {
         if (!root || !path.isAbsolute(root) || !fs.existsSync(root)) {
           return { success: false, error: 'workingDir not found' };
         }
+        // agy task folder (cindy#1): the same real-path check for the root and each folder read below;
+        // the walk does not descend into links (Dirent.isDirectory() is false for them).
+        const rootRefusal = agyHostPathRefusal(root);
+        if (rootRefusal) return { success: false, error: rootRefusal };
 
         // Minimal ignore list — don't attempt full .gitignore parsing (out of
         // MVP scope per spec). These are the dirs that would blow up a scan.
@@ -7563,7 +7571,7 @@ const registerIpcHandlers = () => {
         // 1) Scan .claude/agents/*.md — silently skip if missing
         try {
           const agentsDir = path.join(root, '.claude', 'agents');
-          if (fs.existsSync(agentsDir) && fs.statSync(agentsDir).isDirectory()) {
+          if (!agyHostPathRefusal(agentsDir) && fs.existsSync(agentsDir) && fs.statSync(agentsDir).isDirectory()) {
             const entries = fs.readdirSync(agentsDir, { withFileTypes: true });
             for (const ent of entries) {
               if (ent.isFile() && ent.name.endsWith('.md')) {
@@ -7672,6 +7680,9 @@ const registerIpcHandlers = () => {
         if (!root || !path.isAbsolute(root) || !fs.existsSync(root)) {
           return { success: true, commands: [] };
         }
+        // agy task folder (cindy#1): root and every folder / file read below go through the same check.
+        const rootRefusal = agyHostPathRefusal(root);
+        if (rootRefusal) return { success: false, error: rootRefusal };
 
         /**
          * Parse YAML frontmatter `description` from a .md file's raw content.
@@ -7707,6 +7718,7 @@ const registerIpcHandlers = () => {
         const scanCommands = (
           dirPath: string,
         ): Array<{ name: string; description?: string; source: 'user' | 'skill' }> => {
+          if (agyHostPathRefusal(dirPath)) return [];
           if (!fs.existsSync(dirPath) || !fs.statSync(dirPath).isDirectory()) return [];
           const entries = fs.readdirSync(dirPath, { withFileTypes: true });
           const results: Array<{ name: string; description?: string; source: 'user' | 'skill' }> =
@@ -7760,6 +7772,7 @@ const registerIpcHandlers = () => {
               }
             }) ?? null;
           const addSkill = (subDir: string, name: string, skillFile: string): void => {
+            if (agyHostPathRefusal(path.join(subDir, skillFile))) return;
             let description: string | undefined;
             try {
               const raw = fs.readFileSync(path.join(subDir, skillFile), 'utf-8');
@@ -8016,6 +8029,15 @@ const registerIpcHandlers = () => {
   // XD 网关 key / Mivo key 均为本地 only(safeStorage),没有服务器副本,
   // 因此不再提供 `*:refresh-from-server` 拉取通道。本地 key 失效时由用户在设置里重填。
 
+  // agy task-folder refusals (agyHostPathGuard) speak the UI language. Entries without a text channel
+  // (xdt-file / xdt-audio) push the sentence to the app windows, which show it as a toast.
+  setAgyHostPathLocale(getResolvedMainLocale);
+  setAgyHostPathRefusalNotifier((notice) => {
+    for (const win of BrowserWindow.getAllWindows()) {
+      if (!win.isDestroyed()) win.webContents.send('agy-host-path:refused', notice);
+    }
+  });
+
   // ── File attachment IPC (F-FI-7) ──
   ipcMain.handle(
     'read-file-for-attachment',
@@ -8040,38 +8062,41 @@ const registerIpcHandlers = () => {
         if (!path.isAbsolute(filePath)) {
           return { success: false, error: 'Path must be absolute', size: 0 };
         }
+        const agyRefusal = agyHostPathRefusal(filePath);
+        if (agyRefusal) return { success: false, error: agyRefusal, size: 0 };
         if (!isPathAllowed(filePath)) {
           return { success: false, error: '不允许访问该路径', size: 0 };
         }
 
-        const stat = await fs.promises.stat(filePath);
-        const size = stat.size;
+        // One handle for stat and read; in an agy task folder it is checked again after open.
+        const fileHandle = await openHostFileForRead(filePath);
+        try {
+          const stat = await fileHandle.stat();
+          const size = stat.size;
 
-        if (size > maxSize) {
-          return { success: false, error: 'File too large', size };
-        }
+          if (size > maxSize) {
+            return { success: false, error: 'File too large', size };
+          }
 
-        if (encoding === 'base64') {
-          const buffer = await fs.promises.readFile(filePath);
-          return { success: true, data: buffer.toString('base64'), size, truncated: false };
-        }
+          if (encoding === 'base64') {
+            const buffer = await fileHandle.readFile();
+            return { success: true, data: buffer.toString('base64'), size, truncated: false };
+          }
 
-        // utf8 mode
-        const TEXT_LIMIT = 1 * 1024 * 1024; // 1MB
-        if (size > TEXT_LIMIT) {
-          // Read only the first 1MB
-          const fileHandle = await fs.promises.open(filePath, 'r');
-          try {
+          // utf8 mode
+          const TEXT_LIMIT = 1 * 1024 * 1024; // 1MB
+          if (size > TEXT_LIMIT) {
+            // Read only the first 1MB
             const buf = Buffer.alloc(TEXT_LIMIT);
             await fileHandle.read(buf, 0, TEXT_LIMIT, 0);
             return { success: true, data: buf.toString('utf8'), size, truncated: true };
-          } finally {
-            await fileHandle.close();
           }
-        }
 
-        const data = await fs.promises.readFile(filePath, 'utf8');
-        return { success: true, data, size, truncated: false };
+          const data = await fileHandle.readFile('utf8');
+          return { success: true, data, size, truncated: false };
+        } finally {
+          await fileHandle.close();
+        }
       } catch (err) {
         return { success: false, error: err instanceof Error ? err.message : String(err), size: 0 };
       }
@@ -8115,11 +8140,14 @@ const registerIpcHandlers = () => {
       const noFollow = typeof fs.constants.O_NOFOLLOW === 'number' ? fs.constants.O_NOFOLLOW : 0;
       return readFileBytesForPreview(params, {
         isPathAllowed: (p) => isPathAllowedAgainst(p, getSensitiveMediaBlocklist()),
-        realpath: (p) => fs.promises.realpath(p),
+        // agy task folders (QQ B3 on #15): decided from the requested path, opened through the handle check.
+        realpath: (p) => agyAwareRealpath(p),
         // bigint stats: dev/ino identity must not be rounded (see FileIdentityStat).
         stat: (p) => fs.promises.stat(p, { bigint: true }),
         open: async (p) => {
-          const handle = await fs.promises.open(p, fs.constants.O_RDONLY | noFollow);
+          const handle = checkAgyHostPath(p)
+            ? await openHostFileForRead(p)
+            : await fs.promises.open(p, fs.constants.O_RDONLY | noFollow);
           return {
             stat: () => handle.stat({ bigint: true }),
             read: (buffer, offset, length, position) =>
@@ -8161,24 +8189,26 @@ const registerIpcHandlers = () => {
         if (!path.isAbsolute(filePath)) {
           return { success: false, error: 'Path must be absolute', actualBytes: 0, totalSize: 0 };
         }
+        const agyRefusal = agyHostPathRefusal(filePath);
+        if (agyRefusal) return { success: false, error: agyRefusal, actualBytes: 0, totalSize: 0 };
         if (!isPathAllowed(filePath)) {
           return { success: false, error: '不允许访问该路径', actualBytes: 0, totalSize: 0 };
         }
 
-        const stat = await fs.promises.stat(filePath);
-        const totalSize = stat.size;
-
-        if (totalSize === 0) {
-          return { success: true, actualBytes: 0, totalSize: 0 };
-        }
-
-        const toRead = Math.min(requested, totalSize);
-        if (toRead === 0) {
-          return { success: true, actualBytes: 0, totalSize };
-        }
-
-        const fileHandle = await fs.promises.open(filePath, 'r');
+        const fileHandle = await openHostFileForRead(filePath);
         try {
+          const stat = await fileHandle.stat();
+          const totalSize = stat.size;
+
+          if (totalSize === 0) {
+            return { success: true, actualBytes: 0, totalSize: 0 };
+          }
+
+          const toRead = Math.min(requested, totalSize);
+          if (toRead === 0) {
+            return { success: true, actualBytes: 0, totalSize };
+          }
+
           const buf = Buffer.alloc(toRead);
           const { bytesRead } = await fileHandle.read(buf, 0, toRead, 0);
           const slice = buf.subarray(0, bytesRead);
@@ -8247,6 +8277,10 @@ const registerIpcHandlers = () => {
             limitMb: MAX_PREVIEW_MB,
           };
         }
+        const agyRefusal = agyHostPathRefusal(filePath);
+        if (agyRefusal) {
+          return { success: false, error: agyRefusal, reason: 'forbidden', size: 0, limitMb: MAX_PREVIEW_MB };
+        }
         if (!isPathAllowed(filePath)) {
           return {
             success: false,
@@ -8257,10 +8291,13 @@ const registerIpcHandlers = () => {
           };
         }
 
-        let stat: fs.Stats;
+        let fileHandle: Awaited<ReturnType<typeof openHostFileForRead>>;
         try {
-          stat = await fs.promises.stat(filePath);
-        } catch {
+          fileHandle = await openHostFileForRead(filePath);
+        } catch (error) {
+          if (isAgyLinkOutsideTaskError(error)) {
+            return { success: false, error: error.message, reason: 'forbidden', size: 0, limitMb: MAX_PREVIEW_MB };
+          }
           return {
             success: false,
             error: 'File not found',
@@ -8269,16 +8306,21 @@ const registerIpcHandlers = () => {
             limitMb: MAX_PREVIEW_MB,
           };
         }
-        const size = stat.size;
+        try {
+          const stat = await fileHandle.stat();
+          const size = stat.size;
 
-        if (size > MAX_PREVIEW) {
-          // Don't read the body — renderer will switch to Oversize view based
-          // on `reason: 'oversize'` and use `size` for the dynamic copy.
-          return { success: false, reason: 'oversize', size, limitMb: MAX_PREVIEW_MB };
+          if (size > MAX_PREVIEW) {
+            // Don't read the body — renderer will switch to Oversize view based
+            // on `reason: 'oversize'` and use `size` for the dynamic copy.
+            return { success: false, reason: 'oversize', size, limitMb: MAX_PREVIEW_MB };
+          }
+
+          const data = await fileHandle.readFile();
+          return textFilePreviewResult(data, params.allowFileTransfer === true);
+        } finally {
+          await fileHandle.close();
         }
-
-        const data = await fs.promises.readFile(filePath);
-        return textFilePreviewResult(data, params.allowFileTransfer === true);
       } catch (err) {
         return {
           success: false,
@@ -8375,7 +8417,7 @@ const registerIpcHandlers = () => {
         isBrowserOpenablePath,
         existsSync: fs.existsSync,
         openExternal: (url) => shell.openExternal(url),
-        openPath: (filePath) => shell.openPath(filePath),
+        openPath: (filePath) => shell.openPath(agyHandoffPath(filePath)),
         openUrlWithWindowsHandler: openFileUrlWithWindowsHandler,
         onOpenExternalError: ({ filePath, hasUrlState, error }) => {
           openFileInBrowserLog.warn('openExternal failed', {
@@ -8420,7 +8462,8 @@ const registerIpcHandlers = () => {
           return { success: false, error: '不允许访问该路径' };
         }
         // shell.openPath returns '' on success, error string on failure.
-        const errMsg = await shell.openPath(filePath);
+        // agy task folder: hand over the checked real path (QQ R2 on #15).
+        const errMsg = await shell.openPath(agyHandoffPath(filePath));
         if (errMsg) return { success: false, error: errMsg };
         return { success: true };
       } catch (err) {
@@ -8498,7 +8541,8 @@ const registerIpcHandlers = () => {
     });
     ipcMain.handle('open-with:open', (event, params: { filePath: string; appId: string }) => {
       assertTrustedAppRendererEvent(event);
-      return openWith.open(params);
+      // agy task folder: hand over the checked real path (QQ R2 on #15).
+      return openWith.open(typeof params?.filePath === 'string' ? { ...params, filePath: agyHandoffPath(params.filePath) } : params);
     });
   }
 
@@ -8539,11 +8583,12 @@ const registerIpcHandlers = () => {
   });
   const stageChatAttachment = createChatAttachmentStageHandler({
     isPathAllowed,
-    realpath: (filePath) => fs.promises.realpath(filePath),
+    agyRefusal: (sourcePath) => agyNotInTaskFolderRefusal(sourcePath),
+    // agy task folders (QQ B3 on #15): decided from the requested path, opened through the handle check.
+    realpath: (filePath) => agyAwareRealpath(filePath),
     stat: (filePath) => fs.promises.stat(filePath, { bigint: true }),
     openSource: async (filePath) => {
-      const noFollow = typeof fs.constants.O_NOFOLLOW === 'number' ? fs.constants.O_NOFOLLOW : 0;
-      const handle = await fs.promises.open(filePath, fs.constants.O_RDONLY | noFollow);
+      const handle = await openNoFollowForRead(filePath);
       return {
         stat: () => handle.stat({ bigint: true }),
         copyTo: async (targetPath) => {
@@ -9042,6 +9087,8 @@ const registerIpcHandlers = () => {
         if (!absPath) {
           return { success: false, error: 'url 或 filePath 必须二选一' };
         }
+        const agyRefusal = agyHostPathRefusal(absPath);
+        if (agyRefusal) return { success: false, error: agyRefusal };
         if (!isPathAllowed(absPath)) {
           return { success: false, error: '不允许访问该路径' };
         }
@@ -9105,7 +9152,8 @@ const registerIpcHandlers = () => {
 
     const lightboxMedia = createLightboxMediaHandlers({
       isPathAllowed,
-      realpath: (absPath) => fs.promises.realpath(absPath),
+      // agy task folders (QQ B3 on #15): save-as copies the checked real path, read through the handle check.
+      realpath: (absPath) => agyAwareRealpath(absPath),
       resolveImageCacheUrl: (url) =>
         url.startsWith('cindy-media://')
           ? cindyMediaBlobStore.resolveSafe(url)
@@ -9131,7 +9179,7 @@ const registerIpcHandlers = () => {
           : await dialog.showSaveDialog(opts);
         return { canceled: result.canceled, filePath: result.filePath || undefined };
       },
-      openPath: (absPath) => shell.openPath(absPath),
+      openPath: (absPath) => shell.openPath(agyHandoffPath(absPath)),
       // net.fetch 走 Chromium 网络栈(继承代理设置);30s 超时 + 大小上限防御。
       // 限流必须**边读边检**(collectStreamWithLimit):无 / 谎报 Content-Length
       // 的响应若先 arrayBuffer 再检查,会在检查前吃满 main 进程内存(review P1)。
@@ -9170,9 +9218,12 @@ const registerIpcHandlers = () => {
       },
       fileExists: (absPath) => fs.existsSync(absPath),
       statSize: async (absPath) => (await fs.promises.stat(absPath)).size,
-      copyFile: (src, dest) => fs.promises.copyFile(src, dest),
+      // In an agy task folder the source is read through the checked handle (cindy#1).
+      copyFile: async (src, dest) => checkAgyHostPath(src)
+        ? fs.promises.writeFile(dest, await readHostFile(src))
+        : fs.promises.copyFile(src, dest),
       writeFile: (dest, data) => fs.promises.writeFile(dest, data),
-      readFile: (absPath) => fs.promises.readFile(absPath),
+      readFile: async (absPath) => checkAgyHostPath(absPath) ? readHostFile(absPath) : fs.promises.readFile(absPath),
       getDownloadsDir: () => app.getPath('downloads'),
       now: () => Date.now(),
     });

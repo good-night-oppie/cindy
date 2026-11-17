@@ -28,6 +28,7 @@ import * as os from 'node:os';
 import * as path from 'node:path';
 
 import { throwIpcError, requireObject, requireString } from '../utils/ipcValidate.js';
+import { agyHostPathRefusal } from '../agyHostPathGuard.js';
 import { buildDriveOptions, listWindowsDriveRoots, type FsBrowseDrive } from './windowsDrives.js';
 
 export type { FsBrowseDrive } from './windowsDrives.js';
@@ -172,7 +173,11 @@ export async function mkdirP(rawPath: string): Promise<FsMkdirResult> {
 export function registerFsBrowseIpc(): void {
   ipcMain.handle('fs:list-dir', async (_e, arg: unknown) => {
     const obj = requireObject(arg);
-    return listDir(requireString(obj.path, 'path'));
+    const dir = requireString(obj.path, 'path');
+    // agy task folder (cindy#1): a folder link out of it is not listed.
+    const agyRefusal = path.isAbsolute(dir) ? agyHostPathRefusal(dir) : null;
+    if (agyRefusal) throwIpcError('FS_BROWSE_FAILED', agyRefusal);
+    return listDir(dir);
   });
   ipcMain.handle('fs:stat-path', async (_e, arg: unknown) => {
     const obj = requireObject(arg);

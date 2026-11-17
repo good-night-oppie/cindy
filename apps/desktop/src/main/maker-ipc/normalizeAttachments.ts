@@ -25,6 +25,7 @@ import { randomUUID } from 'node:crypto';
 import { CHAT_FOLDER_MIME } from '../../shared/chatFolderAttachment.js';
 import { extractChatFolder } from '../file-browser/chat-folder-transfer.js';
 import { createLogger } from '../logger.js';
+import { checkAgyHostPath, readHostFile } from '../agyHostPathGuard.js';
 import type { AttachmentIntegrity, AttachmentOssRef } from '../../shared/attachmentOssRef.js';
 import { throwIpcError } from '../utils/ipcValidate.js';
 import { isDangerousAttachmentName } from '../../shared/attachmentSafety.js';
@@ -735,7 +736,9 @@ async function materializeQueuedOssAttachmentsInternal(
         const ext = path.extname(refStr).toLowerCase();
         const mimeType = cindyMediaBlobStore.mimeForExt(ext);
         if (!mimeType) throw new Error(`unsupported image ext: ${ext}`);
-        const entry = await ingestIntoBlobStore({ buffer: await fs.readFile(refStr) }, mimeType);
+        // agy task folder (cindy#1): read through the checked handle; a link out of it is refused.
+        const buffer = checkAgyHostPath(refStr) ? await readHostFile(refStr) : await fs.readFile(refStr);
+        const entry = await ingestIntoBlobStore({ buffer }, mimeType);
         byRef.set(refStr, entry);
         return entry;
       } catch (e) {
