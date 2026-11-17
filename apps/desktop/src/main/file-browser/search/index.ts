@@ -13,6 +13,7 @@
  */
 
 import { ipcMain, BrowserWindow } from 'electron';
+import { agyHostPathRefusal } from '../../agyHostPathGuard.js';
 import type { WebContents } from 'electron';
 import { RipgrepSearcher, type SearchEvent } from '@cindy/file-browser-core';
 
@@ -104,6 +105,10 @@ export function registerSearchIpc(): void {
     if (!args.workdir) {
       return { ok: false as const, message: 'workdir required' };
     }
+    // agy task folders (cindy#1): the search root must not be a link out of the folder; ripgrep runs
+    // without --follow, so links inside are not followed.
+    const agyRefusal = args.remoteHostId ? null : agyHostPathRefusal(args.workdir);
+    if (agyRefusal) return { ok: false as const, message: agyRefusal };
     if (args.remoteHostId) {
       // 远程搜索:daemon 内 spawn 远端 rg,match/end/error 经 event 帧流回,
       // 这里转发到发起 window(与本地 RipgrepSearcher 的事件形状完全一致,
