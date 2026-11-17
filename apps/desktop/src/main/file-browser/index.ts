@@ -77,7 +77,7 @@ import { statSshPreviewMetadata } from './html-preview-read.js';
 import { toWorkdirRel } from '../../shared/workdirPath.js';
 import { activeOwnerScopeKey, getActiveAppSession, isAppSessionBoundaryPending } from '../appSessionState.js';
 import { uploadChatFolder, type ChatFolderUploadArgs } from './chat-folder-transfer.js';
-import { agyHostPathRefusal, checkAgyHostPath, isAgyLinkOutsideTaskError } from '../agyHostPathGuard.js';
+import { agyHostPathRefusal, checkAgyHostPath, isAgyLinkOutsideTaskError, verifyHostHandle } from '../agyHostPathGuard.js';
 import { resolve as resolvePath } from 'node:path';
 import { parseSharedTaskPeer } from '@cindy/device-link';
 
@@ -872,7 +872,10 @@ export function registerFileBrowserIpc(): void {
             workdir: args.workdir,
             relPath: args.relPath,
           })
-        : (assertAgyFileBrowserPath(args.workdir, args.relPath), await readFile(args.workdir, args.relPath));
+        : (assertAgyFileBrowserPath(args.workdir, args.relPath), await readFile(args.workdir, args.relPath, {
+            // QQ R1 on #15: the scanner opens the real path it checked; re-check that handle in an agy folder.
+            afterOpen: (handle) => verifyHostHandle(handle, resolvePath(args.workdir, args.relPath)),
+          }));
       return { ok: true as const, data };
     } catch (err) {
       if (isAgyLinkOutsideTaskError(err)) {
