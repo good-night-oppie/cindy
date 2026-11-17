@@ -9,16 +9,21 @@
  * inside the task folder, and tell the user why. Opening re-checks the opened handle, and listing /
  * walking never follow links.
  *
- * Scope: only folders of agy tasks. Host entries without a session look the folder up in a small
- * process-wide registry that AgyAgent fills while a session is open; with no agy session the check
- * returns null and nothing changes for other engines.
+ * Scope: only folders agy has run in. AgyAgent records each one in a registry kept on disk (it outlives
+ * the session and a restart, and recognises a renamed or moved folder by its inode); host entries look
+ * the folder up there from the path they were asked for. On a computer where agy never ran the check
+ * returns null and nothing changes for other engines; if the registry exists but cannot be read, the
+ * check fails closed.
  *
  * The write side (`agyWriteOutsideTask`) uses the same real-path resolution: a write-type tool call
  * whose target is outside the task folder, or reaches outside through a link inside it, gets JJ's
  * first sentence beside the reply. It is a notice, not a block.
  */
-import { constants, lstatSync, readlinkSync, realpathSync } from 'node:fs';
+import {
+  constants, lstatSync, mkdirSync, readFileSync, readlinkSync, realpathSync, renameSync, statSync, writeFileSync,
+} from 'node:fs';
 import { open, opendir, readlink, stat, type FileHandle } from 'node:fs/promises';
+import os from 'node:os';
 import path from 'node:path';
 import { record, type AcpRecord } from './models.js';
 
@@ -83,22 +88,122 @@ export function isAgyLinkOutsideTaskError(error: unknown): error is AgyLinkOutsi
 }
 
 // ---------------------------------------------------------------------------
-// Registry of open agy task folders (host process wide)
+// Registry of agy task folders: in memory for open sessions, and on disk for good (QQ B2 on #15)
 // ---------------------------------------------------------------------------
+//
+// Links agy leaves in a task folder stay on disk after the session ends and after Cindy restarts, so
+// "this folder is an agy task folder" must outlive the process. Every folder agy ever ran in is kept in
+// a small file outside the sandbox (the sandbox home is an empty tmpfs, so agy cannot see or edit it):
+// its path, real path and device/inode. The inode is what recognises a folder that was renamed or moved.
+// If the file exists but cannot be read, the check fails closed (see checkAgyTaskPath).
 
 interface TaskDirEntry { lexical: string; real: string }
+interface StoredTaskDir { path: string; real: string; dev: string; ino: string }
 const registered = new Map<symbol, TaskDirEntry>();
+const MAX_STORED_TASK_DIRS = 5000;
 
-/** AgyAgent calls this when a session starts; the returned function releases it when the session closes. */
+let storeOverride: string | null = null;
+let storeCache: { file: string; key: string; dirs: StoredTaskDir[]; broken: boolean } | null = null;
+
+/** Where the registry lives: ~/.cindy/agy-sandbox/task-dirs.json, next to agy's private state. */
+export function agyTaskDirStoreFile(): string {
+  return storeOverride ?? (process.env.CINDY_AGY_TASK_DIR_STORE
+    || path.join(os.homedir(), '.cindy', 'agy-sandbox', 'task-dirs.json'));
+}
+
+/** Tests (and a host with another layout) point the registry somewhere else; null restores the default. */
+export function setAgyTaskDirStoreFile(file: string | null): void {
+  storeOverride = file;
+  storeCache = null;
+  registered.clear();
+}
+
+function loadStore(): { dirs: StoredTaskDir[]; broken: boolean } {
+  const file = agyTaskDirStoreFile();
+  let info: { ino: bigint; mtimeNs: bigint; size: bigint } | undefined;
+  try { info = statSync(file, { bigint: true }); } catch (error) {
+    // Never written: agy never ran on this computer. Any other filesystem error: we cannot tell, fail
+    // closed. An error without an errno code is not about the file (host test suites that replace
+    // node:fs with a partial mock); it says nothing about the registry, so it does not switch the check.
+    const code = (error as NodeJS.ErrnoException | undefined)?.code;
+    return { dirs: [], broken: typeof code === 'string' && code !== 'ENOENT' };
+  }
+  if (!info) return { dirs: [], broken: true };
+  const key = `${info.ino}:${info.mtimeNs}:${info.size}`;
+  if (storeCache && storeCache.file === file && storeCache.key === key) return storeCache;
+  let dirs: StoredTaskDir[] = [];
+  let broken = false;
+  try {
+    const parsed = JSON.parse(readFileSync(file, 'utf8')) as { dirs?: unknown };
+    if (!Array.isArray(parsed.dirs)) throw new Error('no dirs');
+    dirs = parsed.dirs.map(raw => {
+      const d = record(raw);
+      if (typeof d.path !== 'string' || typeof d.real !== 'string' || typeof d.dev !== 'string' || typeof d.ino !== 'string') throw new Error('bad entry');
+      return { path: d.path, real: d.real, dev: d.dev, ino: d.ino };
+    });
+  } catch { dirs = []; broken = true; }
+  storeCache = { file, key, dirs, broken };
+  return storeCache;
+}
+
+function persistTaskDir(lexical: string, real: string): void {
+  const file = agyTaskDirStoreFile();
+  const current = loadStore();
+  if (current.broken) {
+    throw new Error(`agy task folder registry cannot be read (${file}); refusing to start agy until it is fixed or removed`);
+  }
+  let id: { dev: string; ino: string } = { dev: '', ino: '' };
+  try { const s = statSync(real, { bigint: true }); id = { dev: String(s.dev), ino: String(s.ino) }; } catch { /* path only */ }
+  const entry: StoredTaskDir = { path: lexical, real, ...id };
+  const same = (d: StoredTaskDir) => d.path === entry.path && d.real === entry.real && d.dev === entry.dev && d.ino === entry.ino;
+  if (current.dirs.some(same)) return;
+  const dirs = [...current.dirs, entry].slice(-MAX_STORED_TASK_DIRS);
+  mkdirSync(path.dirname(file), { recursive: true, mode: 0o700 });
+  const tmp = `${file}.${process.pid}.${Date.now()}.tmp`;
+  writeFileSync(tmp, JSON.stringify({ version: 1, dirs }), { mode: 0o600 });
+  renameSync(tmp, file);
+  storeCache = null;
+}
+
+/**
+ * AgyAgent calls this when a session starts. The folder is also written to the on-disk registry and
+ * stays an agy task folder after the session ends; the returned function only ends the in-memory entry.
+ * Throws when the registry cannot be written or read, so agy does not run in a folder the host would forget.
+ */
 export function registerAgyTaskDir(dir: string): () => void {
   const lexical = path.resolve(dir);
+  const real = realpathOr(lexical);
+  persistTaskDir(lexical, real);
   const key = Symbol(lexical);
-  registered.set(key, { lexical, real: realpathOr(lexical) });
+  registered.set(key, { lexical, real });
   return () => { registered.delete(key); };
 }
 
 export function registeredAgyTaskDirs(): string[] {
-  return [...new Set([...registered.values()].map(entry => entry.lexical))];
+  return [...new Set([...[...registered.values()].map(entry => entry.lexical), ...loadStore().dirs.map(d => d.path)])];
+}
+
+/**
+ * The agy task folder `requested` lies in, if any: by path (as registered, or its real path), or by the
+ * device/inode of one of its folders (a task folder that was renamed or moved since).
+ */
+function findTaskDir(requested: string, stored: StoredTaskDir[]): TaskDirEntry | null {
+  for (const entry of registered.values()) {
+    if (isInsideDir(requested, entry.lexical) || isInsideDir(requested, entry.real)) return entry;
+  }
+  for (const d of stored) {
+    if (isInsideDir(requested, d.path) || isInsideDir(requested, d.real)) {
+      const lexical = isInsideDir(requested, d.path) ? d.path : d.real;
+      return { lexical, real: realpathOr(lexical) };
+    }
+  }
+  const ids = new Set(stored.filter(d => d.ino).map(d => `${d.dev}:${d.ino}`));
+  if (!ids.size) return null;
+  for (let p = requested; ; p = path.dirname(p)) {
+    const s = statSync(p, { bigint: true, throwIfNoEntry: false });
+    if (s?.isDirectory() && ids.has(`${s.dev}:${s.ino}`)) return { lexical: p, real: realpathOr(p) };
+    if (path.dirname(p) === p) return null;
+  }
 }
 
 // ---------------------------------------------------------------------------
@@ -125,9 +230,10 @@ export interface AgyTaskPathCheck {
 
 const MAX_LINK_HOPS = 40;
 
+/** Compared by path segment: `task/..config` is inside `task`, `task/../x` is not (QQ B1 on #15). */
 export function isInsideDir(child: string, parent: string): boolean {
   const rel = path.relative(parent, child);
-  return rel === '' || (!rel.startsWith('..') && !path.isAbsolute(rel));
+  return rel === '' || (rel !== '..' && !rel.startsWith(`..${path.sep}`) && !path.isAbsolute(rel));
 }
 
 /**
@@ -138,22 +244,33 @@ export function isInsideDir(child: string, parent: string): boolean {
  * A relative path is taken relative to `taskDir`.
  */
 export function checkAgyTaskPath(target: string, options: AgyTaskPathOptions = {}): AgyTaskPathCheck | null {
-  const candidates: TaskDirEntry[] = options.taskDir !== undefined
-    ? [{ lexical: path.resolve(options.taskDir), real: realpathOr(path.resolve(options.taskDir)) }]
-    : [...registered.values()];
-  if (!candidates.length) return null;
-  // Without a task folder to anchor it, a relative string (URL, name) is not a task-folder path.
-  if (options.taskDir === undefined && !path.isAbsolute(target)) return null;
+  let dir: TaskDirEntry | null;
   const requested = path.resolve(options.taskDir ?? '', target);
-  for (const dir of candidates) {
-    if (!isInsideDir(requested, dir.lexical) && !isInsideDir(requested, dir.real)) continue;
-    const real = resolveRealPath(requested);
-    if (!real.ok || !isInsideDir(real.path, dir.real)) {
-      throw new AgyLinkOutsideTaskError(requested, real.ok ? real.path : real.reason, dir.lexical, options.locale);
+  if (options.taskDir !== undefined) {
+    const lexical = path.resolve(options.taskDir);
+    const given = { lexical, real: realpathOr(lexical) };
+    dir = isInsideDir(requested, given.lexical) || isInsideDir(requested, given.real) ? given : null;
+  } else {
+    // Without a task folder to anchor it, a relative string (URL, name) is not a task-folder path.
+    if (!path.isAbsolute(target)) return null;
+    const store = loadStore();
+    if (!store.broken && !registered.size && !store.dirs.length) return null;
+    dir = findTaskDir(requested, store.dirs);
+    if (!dir && store.broken) {
+      // Fail closed: which folders are agy's is unknown, so nothing reached through a link is opened.
+      const real = resolveRealPath(requested);
+      if (!real.ok || real.path !== requested) {
+        throw new AgyLinkOutsideTaskError(requested, real.ok ? real.path : real.reason, '', options.locale);
+      }
+      return null;
     }
-    return { taskDir: dir.lexical, realTaskDir: dir.real, requestedPath: requested, realPath: real.path };
   }
-  return null;
+  if (!dir) return null;
+  const real = resolveRealPath(requested);
+  if (!real.ok || !isInsideDir(real.path, dir.real)) {
+    throw new AgyLinkOutsideTaskError(requested, real.ok ? real.path : real.reason, dir.lexical, options.locale);
+  }
+  return { taskDir: dir.lexical, realTaskDir: dir.real, requestedPath: requested, realPath: real.path };
 }
 
 /**
@@ -333,7 +450,7 @@ const WRITE_NAME_RE = /write|edit|replace|append|delete|remove|move|rename|touch
 /** Path-valued input keys (TargetFile, AbsolutePath, DestinationPath, file_path, …), not content keys like TargetContent. */
 const PATH_KEY_RE = /(path|file|dir|directory)$|^(target|dest|destination|source|from|to)$/i;
 /** Shell commands that change files: every operand is a target. */
-const ALL_OPERANDS = new Set(['rm', 'rmdir', 'unlink', 'mv', 'touch', 'tee', 'truncate', 'shred']);
+const ALL_OPERANDS = new Set(['rm', 'rmdir', 'unlink', 'mv', 'touch', 'tee', 'truncate', 'shred', 'mkdir']);
 /** Shell commands whose last operand is the target. */
 const LAST_OPERAND = new Set(['cp', 'ln', 'install', 'rsync']);
 /** Not files: writing there is not a file change. */
@@ -376,9 +493,62 @@ function shellCommands(line: string): string[][] {
   return commands;
 }
 
-/** Write targets of one shell line (redirections and file-changing commands). */
-function shellWriteTargets(line: string): string[] {
-  const out: string[] = [];
+const SHELLS = new Set(['bash', 'sh', 'zsh', 'dash', 'ksh']);
+/** Prefixes that run the next word as the command. */
+const WRAPPERS = new Set(['sudo', 'env', 'command', 'nohup', 'time', 'nice', 'exec', 'builtin', 'stdbuf', 'ionice']);
+/** cp / mv / ln / install: `-t DIR` / `--target-directory=DIR` names the destination folder. */
+const TARGET_DIR_COMMANDS = new Set(['cp', 'mv', 'ln', 'install']);
+const XARGS_VALUE_OPTIONS = new Set(['-I', '-i', '-n', '-P', '-d', '-L', '-l', '-s', '-E', '-e', '-a']);
+const FIND_WRITE_ACTIONS = new Set(['-delete', '-fprint', '-fprint0', '-fprintf', '-fls']);
+const FIND_EXEC_ACTIONS = new Set(['-exec', '-execdir', '-ok', '-okdir']);
+const MAX_SHELL_NESTING = 4;
+
+interface ShellScan {
+  /** Absolute write targets. */
+  targets: string[];
+  /** A write whose target could not be worked out (variables, command substitution, xargs, …). */
+  uncertain: boolean;
+}
+
+/** Whether a command (by name) changes files. */
+function isWriteCommand(name: string): boolean {
+  return ALL_OPERANDS.has(name) || LAST_OPERAND.has(name) || name === 'sed' || name === 'dd' || name === 'find'
+    || SHELLS.has(name) || name === 'eval' || name === 'xargs' || name === 'perl';
+}
+
+/**
+ * Write targets of one shell line, resolved against `base` (null: the current folder is unknown).
+ * `cd` moves the base for the commands after it; bash -c / sh -c / eval are read too. A write whose
+ * target is not literal (a variable other than $HOME / $PWD, a command substitution, xargs reading
+ * names from input) is reported as uncertain, so the caller gives the notice rather than miss it
+ * (QQ W1 / W2 on #15). This is a classifier, not a shell.
+ */
+function scanShell(line: string, startBase: string | null, homeDir: string, depth = 0): ShellScan {
+  const out: ShellScan = { targets: [], uncertain: false };
+  let base = startBase;
+  const resolveWord = (word: string): string | null => {
+    let w = word;
+    if (w === '~' || w.startsWith('~/')) w = homeDir + w.slice(1);
+    w = w.replace(/^\$\{HOME\}|^\$HOME(?![A-Za-z0-9_])/, homeDir);
+    if (/^\$\{PWD\}|^\$PWD(?![A-Za-z0-9_])/.test(w)) {
+      if (base === null) return null;
+      w = w.replace(/^\$\{PWD\}|^\$PWD(?![A-Za-z0-9_])/, base);
+    }
+    if (w.includes('$') || w.includes('`')) return null;
+    if (path.isAbsolute(w)) return path.resolve(w);
+    return base === null ? null : path.resolve(base, w);
+  };
+  const addTarget = (word: string) => {
+    const resolved = resolveWord(word);
+    if (resolved === null) out.uncertain = true; else out.targets.push(resolved);
+  };
+  const nested = (script: string) => {
+    if (depth >= MAX_SHELL_NESTING) { out.uncertain = true; return; }
+    const inner = scanShell(script, base, homeDir, depth + 1);
+    out.targets.push(...inner.targets);
+    if (inner.uncertain) out.uncertain = true;
+  };
+
   for (const words of shellCommands(line)) {
     const rest: string[] = [];
     for (let i = 0; i < words.length; i++) {
@@ -387,7 +557,7 @@ function shellWriteTargets(line: string): string[] {
         const target = words[i + 1];
         // `2>` leaves a stray "2" in rest; `>&2` is a fd, not a file.
         if (rest.length && /^\d$/.test(rest[rest.length - 1]!)) rest.pop();
-        if (target !== undefined && target !== '>&' && !/^&?\d$/.test(target)) out.push(target);
+        if (target !== undefined && target !== '>&' && !/^&?\d$/.test(target)) addTarget(target);
         i++; continue;
       }
       if (w === '>&') { i++; continue; }
@@ -395,30 +565,86 @@ function shellWriteTargets(line: string): string[] {
       rest.push(w);
     }
     let start = 0;
-    while (start < rest.length && (/^[A-Za-z_][A-Za-z0-9_]*=/.test(rest[start]!) || ['sudo', 'env', 'command', 'nohup', 'time'].includes(rest[start]!))) start++;
+    for (;;) {
+      const w = rest[start];
+      if (w === undefined) break;
+      if (/^[A-Za-z_][A-Za-z0-9_]*=/.test(w) || WRAPPERS.has(path.basename(w))) { start++; continue; }
+      // Options of a wrapper (`sudo -u x`, `env -i`): skip dashed words right after one.
+      if (start > 0 && w.startsWith('-') && WRAPPERS.has(path.basename(rest[start - 1] ?? ''))) { start++; continue; }
+      if (w === 'timeout') { start += 2; continue; }
+      break;
+    }
     const name = path.basename(rest[start] ?? '');
     const args = rest.slice(start + 1);
     const operands = args.filter(a => !a.startsWith('-'));
-    if (ALL_OPERANDS.has(name)) out.push(...operands);
-    else if (LAST_OPERAND.has(name) && operands.length) {
+
+    if (name === 'cd' || name === 'pushd') {
+      const to = operands[0];
+      base = to === undefined ? homeDir : to === '-' ? null : resolveWord(to);
+      continue;
+    }
+    if (name === 'popd') { base = null; continue; }
+    if (SHELLS.has(name)) {
+      const flag = args.findIndex(a => /^-[A-Za-z]*c[A-Za-z]*$/.test(a));
+      if (flag >= 0) {
+        const script = args.slice(flag + 1).find(a => !a.startsWith('-'));
+        if (script !== undefined) nested(script);
+      }
+      continue;
+    }
+    if (name === 'eval') { nested(args.join(' ')); continue; }
+    if (name === 'xargs') {
+      let i = 0;
+      while (i < args.length && args[i]!.startsWith('-')) i += XARGS_VALUE_OPTIONS.has(args[i]!) ? 2 : 1;
+      const command = args[i];
+      // The names come from input: if the command writes, its targets are unknown.
+      if (command !== undefined && isWriteCommand(path.basename(command))) out.uncertain = true;
+      continue;
+    }
+    if (name === 'find') {
+      const firstExpr = args.findIndex(a => a.startsWith('-') || a === '(' || a === '!');
+      const roots = firstExpr < 0 ? args : args.slice(0, firstExpr);
+      let writes = args.some(a => FIND_WRITE_ACTIONS.has(a));
+      args.forEach((a, i) => {
+        if (FIND_EXEC_ACTIONS.has(a) && isWriteCommand(path.basename(args[i + 1] ?? ''))) writes = true;
+      });
+      if (writes) (roots.length ? roots : ['.']).forEach(addTarget);
+      continue;
+    }
+    if (TARGET_DIR_COMMANDS.has(name)) {
+      let targetDir: string | undefined;
+      const plain: string[] = [];
+      for (let i = 0; i < args.length; i++) {
+        const a = args[i]!;
+        if (a === '-t' || a === '--target-directory') { targetDir = args[++i]; continue; }
+        if (a.startsWith('--target-directory=')) { targetDir = a.slice('--target-directory='.length); continue; }
+        if (/^-t./.test(a)) { targetDir = a.slice(2); continue; }
+        if (!a.startsWith('-')) plain.push(a);
+      }
+      if (name === 'mv') plain.forEach(addTarget); // the sources go away too
+      if (targetDir !== undefined) addTarget(targetDir);
       // `ln -s target` (one operand) makes the link in the current folder.
-      if (!(name === 'ln' && operands.length === 1)) out.push(operands[operands.length - 1]!);
-    } else if (name === 'sed' && args.some(a => /^-[a-zA-Z]*i/.test(a) || a.startsWith('--in-place'))) {
-      out.push(...operands.slice(1));
+      else if (plain.length && !(name === 'ln' && plain.length === 1) && name !== 'mv') addTarget(plain[plain.length - 1]!);
+      continue;
+    }
+    if (ALL_OPERANDS.has(name)) operands.forEach(addTarget);
+    else if (LAST_OPERAND.has(name) && operands.length) addTarget(operands[operands.length - 1]!);
+    else if ((name === 'sed' || name === 'perl') && args.some(a => /^-[a-zA-Z]*i/.test(a) || a.startsWith('--in-place'))) {
+      operands.slice(1).forEach(addTarget);
     } else if (name === 'dd') {
-      for (const a of args) if (a.startsWith('of=')) out.push(a.slice(3));
+      for (const a of args) if (a.startsWith('of=')) addTarget(a.slice(3));
     }
   }
   return out;
 }
 
 /** Target paths of a write-type agy tool call, as written by the call. Empty for anything else. */
-export function agyWriteTargets(tool: AcpRecord): { paths: string[]; cwd?: string } {
+export function agyWriteTargets(tool: AcpRecord): { paths: string[]; cwd?: string; command?: string } {
   const input = { ...record(tool.args), ...record(tool.rawInput) };
   const cwd = [input.Cwd, input.cwd].find((v): v is string => typeof v === 'string' && v.length > 0);
   if (tool.kind === 'execute') {
     const command = [input.CommandLine, input.command, input.cmd].find((v): v is string => typeof v === 'string');
-    return { paths: command ? shellWriteTargets(command) : [], cwd };
+    return { paths: [], cwd, command };
   }
   const name = typeof tool.name === 'string' ? tool.name : '';
   const isWrite = WRITE_KINDS.has(String(tool.kind)) || (tool.kind !== 'read' && tool.kind !== 'search' && tool.kind !== 'fetch' && WRITE_NAME_RE.test(name));
@@ -448,10 +674,12 @@ export function agyWriteTargets(tool: AcpRecord): { paths: string[]; cwd?: strin
  */
 export function agyWriteOutsideTask(tool: AcpRecord, taskDir: string, homeDir: string,
   inScopeDirs: readonly string[] = []): string | null {
-  const { paths, cwd } = agyWriteTargets(tool);
+  const { paths, cwd, command } = agyWriteTargets(tool);
   const base = cwd ? path.resolve(taskDir, expandHome(cwd, homeDir)) : taskDir;
-  for (const raw of paths) {
-    const target = path.resolve(base, expandHome(raw, homeDir));
+  const scan: ShellScan = command !== undefined
+    ? scanShell(command, base, homeDir)
+    : { targets: paths.map(raw => path.resolve(base, expandHome(raw, homeDir))), uncertain: false };
+  for (const target of scan.targets) {
     if (PSEUDO_TARGETS.has(target) || target.startsWith('/dev/fd/') || target.startsWith('/proc/self/fd/')) continue;
     if (inScopeDirs.some(dir => isInsideDir(target, path.resolve(dir)))) continue;
     try {
@@ -461,5 +689,7 @@ export function agyWriteOutsideTask(tool: AcpRecord, taskDir: string, homeDir: s
       throw error;
     }
   }
+  // A write whose target could not be worked out: give the notice rather than miss one (QQ W1).
+  if (scan.uncertain && command !== undefined) return `shell: ${command}`;
   return null;
 }
