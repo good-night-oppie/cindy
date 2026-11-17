@@ -10,6 +10,7 @@ import {
 } from './html-preview.js';
 import { assertTrustedAppRendererEvent } from '../security/trustedAppRenderer.js';
 import { getSensitiveMediaBlocklist, isPathAllowedAgainst } from '../filePathPolicy.js';
+import { checkAgyHostPath } from '../agyHostPathGuard.js';
 import { ingestMedia } from '../cindy-media/ingest.js';
 import { sniffMediaMime } from '../cindy-media/sniffMediaMime.js';
 import { createLogger } from '../logger.js';
@@ -106,6 +107,8 @@ export function registerHtmlPreviewIpc(remote: RemoteSource): void {
               isCurrent,
             );
           }
+          // agy task folder (cindy#1): check the requested path before following it.
+          checkAgyHostPath(path.join(root, rel));
           const real = await fs.realpath(path.join(root, rel));
           if (!isPathAllowedAgainst(real, getSensitiveMediaBlocklist()))
             throw new Error('BAD_ARGS');
@@ -116,6 +119,7 @@ export function registerHtmlPreviewIpc(remote: RemoteSource): void {
             return remote.read(args, root, entry, signal);
           }
           const source = path.join(root, entry.relPath);
+          checkAgyHostPath(source);
           const [rootReal, real] = await Promise.all([fs.realpath(root), fs.realpath(source)]);
           if (
             !real.startsWith(rootReal + path.sep) ||
