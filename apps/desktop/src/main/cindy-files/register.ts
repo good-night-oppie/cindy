@@ -8,6 +8,7 @@ import { installThemePackage } from '../local-themes/packages';
 import { broadcastLocalThemes } from '../local-themes/register';
 import { assertTrustedAppRendererEvent } from '../security/trustedAppRenderer.js';
 import { inspectCindyFile } from './reader';
+import { checkAgyHostPath } from '../agyHostPathGuard';
 
 const log = createLogger('cindy-files');
 
@@ -20,6 +21,8 @@ async function openCindyFile(filePath: unknown): Promise<CindyFileOpenResult> {
   };
   try {
     assertCurrent();
+    // agy task folder (cindy#1): a .cindy link out of it is refused before the reader follows it.
+    checkAgyHostPath(filePath);
     const inspected = await inspectCindyFile(filePath);
     assertCurrent();
     if (inspected.type === 'plugin') return { type: 'plugin' };
