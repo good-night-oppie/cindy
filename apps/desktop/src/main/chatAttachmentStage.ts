@@ -20,7 +20,7 @@ export type ChatAttachmentStageErrorCode =
 
 export type ChatAttachmentStageResult =
   | { success: true; path: string }
-  | { success: false; code: ChatAttachmentStageErrorCode };
+  | { success: false; code: ChatAttachmentStageErrorCode; message?: string };
 
 export interface ChatAttachmentStageSourceStat {
   dev: bigint;
@@ -37,6 +37,8 @@ export interface ChatAttachmentStageOpenedSource {
 
 export interface ChatAttachmentStageDeps {
   isPathAllowed(filePath: string): boolean;
+  /** agy task folder (cindy#1): the sentence for the user when the source is refused, else null. */
+  agyRefusal?(filePath: string): string | null;
   realpath(filePath: string): Promise<string>;
   stat(filePath: string): Promise<ChatAttachmentStageSourceStat>;
   openSource(filePath: string): Promise<ChatAttachmentStageOpenedSource>;
@@ -70,6 +72,8 @@ export function createChatAttachmentStageHandler(deps: ChatAttachmentStageDeps) 
     ) {
       return { success: false, code: 'unsupported_type' };
     }
+    const agyRefusal = deps.agyRefusal?.(sourcePath) ?? null;
+    if (agyRefusal) return { success: false, code: 'forbidden', message: agyRefusal };
     if (!deps.isPathAllowed(sourcePath)) {
       return { success: false, code: 'forbidden' };
     }
