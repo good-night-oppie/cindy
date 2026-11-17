@@ -77,7 +77,18 @@ import { statSshPreviewMetadata } from './html-preview-read.js';
 import { toWorkdirRel } from '../../shared/workdirPath.js';
 import { activeOwnerScopeKey, getActiveAppSession, isAppSessionBoundaryPending } from '../appSessionState.js';
 import { uploadChatFolder, type ChatFolderUploadArgs } from './chat-folder-transfer.js';
+import { agyHostPathRefusal, checkAgyHostPath, isAgyLinkOutsideTaskError } from '../agyHostPathGuard.js';
+import { resolve as resolvePath } from 'node:path';
 import { parseSharedTaskPeer } from '@cindy/device-link';
+
+/**
+ * agy task folders (cindy#1 QQ 6924350879 item 5): the scanner confines reads to the real path of the
+ * workdir it is given, so a workdir argument that is itself a link out of an agy task folder must be
+ * refused first. Throws AgyLinkOutsideTaskError carrying JJ's sentence; no agy session = no-op.
+ */
+function assertAgyFileBrowserPath(workdir: string, relPath = ''): void {
+  checkAgyHostPath(resolvePath(workdir, relPath));
+}
 
 const log = createLogger('file-browser/ipc');
 
@@ -673,6 +684,11 @@ export function registerFileBrowserIpc(): void {
     }, value => {
       if (!event.sender.isDestroyed()) event.sender.send(FILE_BROWSER_PUSH.TRANSFER, value);
     });
+    const agyRefusal = typeof args?.sourcePath === 'string' ? agyHostPathRefusal(args.sourcePath) : null;
+    if (agyRefusal) {
+      transfer.end();
+      return { ok: false as const, code: 'TRANSFER_FAILED' as const, message: agyRefusal };
+    }
     try {
       if (!ownerId || !fileTransferRequestId(args?.requestId) || !args?.deviceId ||
           parseSharedTaskPeer(args.deviceId)) throw new Error('REMOTE_UNSUPPORTED');
@@ -774,6 +790,7 @@ export function registerFileBrowserIpc(): void {
   });
 
   ipcMain.handle(FILE_BROWSER_INVOKE.LIST_DIR, async (_event, args: ListDirArgs) => {
+    if (!args.remoteHostId) assertAgyFileBrowserPath(args.workdir, args.relPath ?? '');
     if (args.remoteHostId) {
       try {
         const { entries } = await getRemoteFileBrowser().request(args.remoteHostId, 'listDir', {
@@ -830,6 +847,7 @@ export function registerFileBrowserIpc(): void {
         }
       }
       try {
+        assertAgyFileBrowserPath(args.workdir);
         const rgPath = getRipgrepBinaryPath();
         return await listAllFiles({ workdir: args.workdir, rgPath, cap: args.cap });
       } catch (err) {
@@ -854,9 +872,12 @@ export function registerFileBrowserIpc(): void {
             workdir: args.workdir,
             relPath: args.relPath,
           })
-        : await readFile(args.workdir, args.relPath);
+        : (assertAgyFileBrowserPath(args.workdir, args.relPath), await readFile(args.workdir, args.relPath));
       return { ok: true as const, data };
     } catch (err) {
+      if (isAgyLinkOutsideTaskError(err)) {
+        return { ok: false as const, code: 'READ_FAILED' as const, message: err.message };
+      }
       const code = (err as Error & { code?: string }).code;
       // BINARY_FILE is the expected "not previewable" path — surface it
       // explicitly so the renderer can show the unrenderable placeholder
@@ -884,6 +905,7 @@ export function registerFileBrowserIpc(): void {
         throwRemoteFsIpcError(err);
       }
     }
+    assertAgyFileBrowserPath(args.workdir, args.relPath);
     return statEntry(args.workdir, args.relPath);
   });
 
