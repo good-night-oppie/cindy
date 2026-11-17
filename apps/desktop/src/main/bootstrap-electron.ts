@@ -469,6 +469,7 @@ import {
 } from './filePathPolicy';
 import {
   agyHostPathRefusal, checkAgyHostPath, isAgyLinkOutsideTaskError, openHostFileForRead, readHostFile, setAgyHostPathLocale,
+  setAgyHostPathRefusalNotifier,
 } from './agyHostPathGuard';
 import { readFileThumbnail } from './fileThumbnail';
 import { createOpenWithHandlers, decodeRegOutput, parseChcpCodepage } from './openWithApps';
@@ -8028,8 +8029,14 @@ const registerIpcHandlers = () => {
   // XD 网关 key / Mivo key 均为本地 only(safeStorage),没有服务器副本,
   // 因此不再提供 `*:refresh-from-server` 拉取通道。本地 key 失效时由用户在设置里重填。
 
-  // agy task-folder refusals (agyHostPathGuard) speak the UI language.
+  // agy task-folder refusals (agyHostPathGuard) speak the UI language. Entries without a text channel
+  // (xdt-file / xdt-audio) push the sentence to the app windows, which show it as a toast.
   setAgyHostPathLocale(getResolvedMainLocale);
+  setAgyHostPathRefusalNotifier((notice) => {
+    for (const win of BrowserWindow.getAllWindows()) {
+      if (!win.isDestroyed()) win.webContents.send('agy-host-path:refused', notice);
+    }
+  });
 
   // ── File attachment IPC (F-FI-7) ──
   ipcMain.handle(
@@ -8571,6 +8578,7 @@ const registerIpcHandlers = () => {
   });
   const stageChatAttachment = createChatAttachmentStageHandler({
     isPathAllowed,
+    agyRefusal: (sourcePath) => agyHostPathRefusal(sourcePath),
     realpath: (filePath) => fs.promises.realpath(filePath),
     stat: (filePath) => fs.promises.stat(filePath, { bigint: true }),
     openSource: async (filePath) => {
