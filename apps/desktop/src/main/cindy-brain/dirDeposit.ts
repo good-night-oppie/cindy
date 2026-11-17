@@ -26,6 +26,7 @@
 import fs from 'node:fs';
 import path from 'node:path';
 import { randomUUID } from 'node:crypto';
+import { agyHostPathRefusal } from '../agyHostPathGuard.js';
 
 import {
   GHOST_DIR_DEPOSIT_TTL_MS,
@@ -91,6 +92,9 @@ export function collectDirFiles(
 ): { ok: true; files: CollectedDirFile[]; totalBytes: number } | { ok: false; message: string } {
   const files: CollectedDirFile[] = [];
   let totalBytes = 0;
+  // agy task folder (cindy#1): the folder itself must not lead out of it; the walk below skips links.
+  const agyRefusal = agyHostPathRefusal(dirAbs);
+  if (agyRefusal) return { ok: false, message: agyRefusal };
 
   const walk = (current: string): string | null => {
     let entries: fs.Dirent[];
