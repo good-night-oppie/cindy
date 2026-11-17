@@ -248,7 +248,7 @@ export function registerLocalFileProtocolHandler(): void {
       // so a swap between check and open cannot serve a file outside it (cindy#1). Elsewhere: as before.
       let handle: FileHandle | undefined;
       try {
-        if (checkAgyHostPath(realPath)) handle = await openHostFileForRead(realPath);
+        if (checkAgyHostPath(resolved)) handle = await openHostFileForRead(resolved);
       } catch (err) {
         if (isAgyLinkOutsideTaskError(err)) {
           notifyAgyHostPathRefusalFor(resolved);
