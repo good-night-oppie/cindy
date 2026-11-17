@@ -52,6 +52,7 @@ import * as fs from 'node:fs/promises';
 import * as path from 'node:path';
 
 import { getSensitiveMediaBlocklist, isPathAllowedAgainst } from './filePathPolicy';
+import { checkAgyHostPath, isAgyLinkOutsideTaskError, readHostFile } from './agyHostPathGuard';
 import { createLogger } from './logger';
 
 const log = createLogger('audioFileProtocol');
@@ -143,7 +144,14 @@ export function registerAudioFileProtocolHandler(): void {
       const stat = await fs.stat(realPath);
       if (!stat.isFile()) return new Response(null, { status: 404 });
 
-      const buffer = await fs.readFile(realPath);
+      // In an agy task folder read through the checked handle (cindy#1); elsewhere as before.
+      let buffer: Buffer;
+      try {
+        buffer = checkAgyHostPath(realPath) ? await readHostFile(realPath) : await fs.readFile(realPath);
+      } catch (err) {
+        if (isAgyLinkOutsideTaskError(err)) return new Response(null, { status: 403 });
+        throw err;
+      }
       const totalSize = buffer.byteLength;
       const mimeType = MIME_BY_EXT[ext] ?? 'application/octet-stream';
       const range = parseRangeHeader(
