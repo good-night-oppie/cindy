@@ -32,6 +32,7 @@ import * as imageCacheStore from '../imageCacheStore.desktop.js';
 import * as videoCacheStore from '../videoCacheStore.js';
 import * as cindyMediaBlobStore from '../cindy-media/blobStore.desktop.js';
 import { getSensitiveMediaBlocklist, isPathAllowedAgainst } from '../filePathPolicy.js';
+import { verifyHostHandle } from '../agyHostPathGuard.js';
 import { materializeSshRemoteMedia } from '../file-browser/ssh-media.js';
 import { getSessionFsSnapshot } from '../localDb/ipc/sessions.js';
 import { mimeOf, uploadLocalFile } from './mediaTransfer.desktop.js';
@@ -461,6 +462,8 @@ async function fetchLocalMediaForOwner(arg: unknown, assertCurrent: () => void):
   const skipCache = record.skipCache === true;
   if (record.prepareOnly === true && record.thumbnail !== true) {
     const file = await open(absPath, constants.O_RDONLY | (constants.O_NOFOLLOW ?? 0));
+    // agy task folder (cindy#1): the opened handle must still be inside it (closes on refusal).
+    await verifyHostHandle(file, absPath);
     try {
       const before = await file.stat();
       if (!before.isFile()) throw new Error('REMOTE_FILE_NOT_REGULAR');
@@ -529,6 +532,8 @@ async function fetchLocalMediaForOwner(arg: unknown, assertCurrent: () => void):
   );
   const readIdentity = async () => {
     const file = await open(absPath, constants.O_RDONLY | (constants.O_NOFOLLOW ?? 0));
+    // agy task folder (cindy#1): the opened handle must still be inside it (closes on refusal).
+    await verifyHostHandle(file, absPath);
     try {
       const st = await file.stat();
       if (!st.isFile()) throw new Error('REMOTE_FILE_NOT_REGULAR');
