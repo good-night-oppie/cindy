@@ -54,7 +54,9 @@ import * as path from 'node:path';
 import { Readable } from 'node:stream';
 
 import { getSensitiveMediaBlocklist, isPathAllowedAgainst } from './filePathPolicy';
-import { checkAgyHostPath, isAgyLinkOutsideTaskError, openHostFileForRead } from './agyHostPathGuard';
+import {
+  checkAgyHostPath, isAgyLinkOutsideTaskError, notifyAgyHostPathRefusal, notifyAgyHostPathRefusalFor, openHostFileForRead,
+} from './agyHostPathGuard';
 import { createLogger } from './logger';
 
 const log = createLogger('localFileProtocol');
@@ -211,6 +213,8 @@ export function registerLocalFileProtocolHandler(): void {
       // requested path is denied deterministically even when realpath fails
       // with EACCES/EPERM (a permission error must not leak a 500 for a path
       // we already know to reject).
+      // agy task folder (cindy#1): refuse a link out of it, and tell the user (the protocol has no text).
+      if (notifyAgyHostPathRefusal(resolved)) return new Response(null, { status: 403 });
       if (!isPathAllowedAgainst(resolved, getSensitiveMediaBlocklist())) {
         return new Response(null, { status: 403 });
       }
@@ -246,7 +250,10 @@ export function registerLocalFileProtocolHandler(): void {
       try {
         if (checkAgyHostPath(realPath)) handle = await openHostFileForRead(realPath);
       } catch (err) {
-        if (isAgyLinkOutsideTaskError(err)) return new Response(null, { status: 403 });
+        if (isAgyLinkOutsideTaskError(err)) {
+          notifyAgyHostPathRefusalFor(resolved);
+          return new Response(null, { status: 403 });
+        }
         throw err;
       }
       let handedOff = false;
