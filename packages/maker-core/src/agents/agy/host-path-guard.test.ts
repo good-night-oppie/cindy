@@ -2,14 +2,14 @@
  * Host-side path guard for agy task folders (good-night-oppie/cindy#1, QQ 6924350879 items 4 and 5).
  * Symlink cases need a POSIX host; CI runs on Linux.
  */
-import { mkdirSync, mkdtempSync, realpathSync, rmSync, symlinkSync, writeFileSync } from 'node:fs';
+import { mkdirSync, mkdtempSync, realpathSync, renameSync, rmSync, symlinkSync, writeFileSync } from 'node:fs';
 import { rename } from 'node:fs/promises';
 import os from 'node:os';
 import path from 'node:path';
-import { afterAll, afterEach, beforeAll, describe, expect, it } from 'vitest';
+import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it } from 'vitest';
 import {
-  AGY_HOST_PATH_USER_COPY, AgyLinkOutsideTaskError, agyWriteOutsideTask, checkAgyTaskPath,
-  listAgyTaskDir, openAgyTaskFile, readAgyTaskFile, registerAgyTaskDir, walkAgyTaskDir,
+  AGY_HOST_PATH_USER_COPY, AgyLinkOutsideTaskError, agyWriteOutsideTask, checkAgyTaskPath, isInsideDir,
+  listAgyTaskDir, openAgyTaskFile, readAgyTaskFile, registerAgyTaskDir, setAgyTaskDirStoreFile, walkAgyTaskDir,
 } from './host-path-guard.js';
 import { AgyTranslator } from './translator.js';
 import { AgyAgent, type AgyAgentDeps } from './index.js';
@@ -20,7 +20,11 @@ const posix = process.platform !== 'win32';
 const root = realpathSync(mkdtempSync(path.join(os.tmpdir(), 'agy-guard-')));
 const task = path.join(root, 'task');
 const outside = path.join(root, 'outside');
-afterAll(() => rmSync(root, { recursive: true, force: true }));
+let storeCount = 0;
+/** A fresh, empty on-disk registry of agy task folders (as on a computer where agy never ran). */
+const freshStore = () => { const file = path.join(root, `task-dirs-${++storeCount}.json`); setAgyTaskDirStoreFile(file); return file; };
+freshStore();
+afterAll(() => { setAgyTaskDirStoreFile(null); rmSync(root, { recursive: true, force: true }); });
 
 beforeAll(() => {
   mkdirSync(path.join(task, 'sub'), { recursive: true });
@@ -44,6 +48,30 @@ beforeAll(() => {
   symlinkSync('/nonexistent-agy-guard/x', path.join(task, 'dangling'));
   symlinkSync('loop-b', path.join(task, 'loop-a'));
   symlinkSync('loop-a', path.join(task, 'loop-b'));
+  // QQ B1: names that start with ".." are inside the folder, and are checked like any other name
+  symlinkSync(path.join(outside, 'config'), path.join(task, '..config'));
+  symlinkSync(path.join(outside, 'secrets'), path.join(task, '..d'));
+});
+
+describe('QQ B1: a name starting with ".." is inside the task folder and gets the check', () => {
+  it('compares by path segment, not by string prefix', () => {
+    expect(isInsideDir('/t/..config', '/t')).toBe(true);
+    expect(isInsideDir('/t/..', '/t')).toBe(false);
+    expect(isInsideDir('/t/../x', '/t')).toBe(false);
+    expect(isInsideDir('/tx/a', '/t')).toBe(false);
+    expect(isInsideDir('/t', '/t')).toBe(true);
+  });
+
+  it.skipIf(!posix)('refuses a "..config" file link and a "..d" directory link that point outside', async () => {
+    expect(() => checkAgyTaskPath(path.join(task, '..config'), { taskDir: task })).toThrow(AgyLinkOutsideTaskError);
+    await expect(readAgyTaskFile(path.join(task, '..config'), { taskDir: task })).rejects.toBeInstanceOf(AgyLinkOutsideTaskError);
+    await expect(listAgyTaskDir(path.join(task, '..d'), { taskDir: task })).rejects.toBeInstanceOf(AgyLinkOutsideTaskError);
+    await expect(readAgyTaskFile(path.join(task, '..d', 'token'), { taskDir: task })).rejects.toBeInstanceOf(AgyLinkOutsideTaskError);
+  });
+
+  it('does not report a write to task/..x as outside', () => {
+    expect(agyWriteOutsideTask({ kind: 'execute', rawInput: { CommandLine: 'touch ..x' } }, task, '/home/u')).toBeNull();
+  });
 });
 
 describe('the one check: real path must stay inside the task folder', () => {
@@ -102,18 +130,49 @@ describe("JJ's third sentence, for refusals that are not about a link (JJ on cin
 
 describe('the registry: host entries without a session find agy task folders', () => {
   let release: (() => void) | undefined;
+  beforeEach(() => { freshStore(); });
   afterEach(() => { release?.(); release = undefined; });
 
-  it('checks nothing while no agy task is registered', () => {
+  it('checks nothing on a computer where agy never ran', () => {
     expect(checkAgyTaskPath(path.join(task, 'notes.md'))).toBeNull();
+    expect(checkAgyTaskPath(path.join(task, 'link-to-config'))).toBeNull();
   });
 
-  it.skipIf(!posix)('applies to every path inside a registered agy task folder, and stops after release', () => {
+  it.skipIf(!posix)('applies to every path inside a registered agy task folder', () => {
     release = registerAgyTaskDir(task);
     expect(() => checkAgyTaskPath(path.join(task, 'link-to-config'))).toThrow(AgyLinkOutsideTaskError);
     expect(checkAgyTaskPath(path.join(task, 'notes.md'))?.taskDir).toBe(task);
-    release(); release = undefined;
-    expect(checkAgyTaskPath(path.join(task, 'link-to-config'))).toBeNull();
+  });
+
+  // QQ B2: links agy left behind stay on disk after the session; the folder must still be known.
+  it.skipIf(!posix)('still refuses the link after the session closed and after a restart', () => {
+    const store = path.join(root, `task-dirs-${storeCount}.json`);
+    registerAgyTaskDir(task)();
+    expect(() => checkAgyTaskPath(path.join(task, 'link-to-config'))).toThrow(AgyLinkOutsideTaskError);
+    // A restart: nothing in memory, the same file on disk.
+    setAgyTaskDirStoreFile(null);
+    setAgyTaskDirStoreFile(store);
+    expect(() => checkAgyTaskPath(path.join(task, 'link-to-config'))).toThrow(AgyLinkOutsideTaskError);
+    expect(checkAgyTaskPath(path.join(task, 'notes.md'))?.realTaskDir).toBe(task);
+  });
+
+  it.skipIf(!posix)('still refuses the link after the task folder was renamed or moved', () => {
+    const moved = path.join(root, 'movable');
+    mkdirSync(moved);
+    symlinkSync(path.join(outside, 'config'), path.join(moved, 'link-to-config'));
+    registerAgyTaskDir(moved)();
+    const renamed = path.join(root, 'renamed-task');
+    renameSync(moved, renamed);
+    expect(() => checkAgyTaskPath(path.join(renamed, 'link-to-config'))).toThrow(AgyLinkOutsideTaskError);
+  });
+
+  it.skipIf(!posix)('fails closed when the registry on disk cannot be read: any path through a link is refused', () => {
+    const store = freshStore();
+    writeFileSync(store, '{not json');
+    setAgyTaskDirStoreFile(store);
+    expect(() => checkAgyTaskPath(path.join(task, 'link-to-config'))).toThrow(AgyLinkOutsideTaskError);
+    expect(checkAgyTaskPath(path.join(outside, 'config'))).toBeNull(); // no link on the way: nothing to refuse
+    expect(() => registerAgyTaskDir(task)).toThrow(); // and agy does not start on a broken registry
   });
 });
 
@@ -177,6 +236,46 @@ describe('write-type tool calls aimed outside the task folder', () => {
     expect(agyWriteOutsideTask(exec('cp /etc/hosts ./hosts.copy'), task, home)).toBeNull();
     expect(agyWriteOutsideTask({ kind: 'read', rawInput: { AbsolutePath: '/etc/hosts' } }, task, home)).toBeNull();
     expect(agyWriteOutsideTask({ kind: 'edit', rawInput: { TargetFile: path.join(task, 'new.ts') } }, task, home)).toBeNull();
+  });
+
+  // QQ W1 / W2: the target is not always written out literally; when unsure, give the notice.
+  it('follows $HOME, ${HOME} and cd, and looks inside bash -c / sh -c / eval', () => {
+    const exec = (CommandLine: string) => agyWriteOutsideTask({ kind: 'execute', rawInput: { CommandLine } }, task, home);
+    expect(exec('rm -f $HOME/.bashrc')).toBe('/home/u/.bashrc');
+    expect(exec('rm -f "${HOME}/.bashrc"')).toBe('/home/u/.bashrc');
+    expect(exec('cd /srv/agy-b/workdata && rm config')).toBe('/srv/agy-b/workdata/config');
+    expect(exec('cd ~ ; rm -rf .cache')).toBe('/home/u/.cache');
+    expect(exec('cd ..; touch x')).toBe(path.join(root, 'x'));
+    expect(exec('bash -c "rm /srv/f"')).toBe('/srv/f');
+    expect(exec('sh -lc \'cd /srv && rm f\'')).toBe('/srv/f');
+    expect(exec('eval "rm /srv/f"')).toBe('/srv/f');
+    expect(exec('mkdir -p /srv/d')).toBe('/srv/d');
+    expect(exec('find /srv -name "*.log" -delete')).toBe('/srv');
+    expect(exec('find /srv -exec rm {} \\;')).toBe('/srv');
+    expect(exec('cp -t /srv f')).toBe('/srv');
+    expect(exec('mv --target-directory=/srv f')).not.toBeNull();
+  });
+
+  it('gives the notice when the target cannot be worked out', () => {
+    const exec = (CommandLine: string) => agyWriteOutsideTask({ kind: 'execute', rawInput: { CommandLine } }, task, home);
+    expect(exec('rm -rf $TARGET/x')).not.toBeNull();
+    expect(exec('cd "$WORK" && rm config')).not.toBeNull();
+    expect(exec('echo x > "$LOG"')).not.toBeNull();
+    expect(exec('rm `cat list`')).not.toBeNull();
+    expect(exec('rm $(cat list)')).not.toBeNull();
+    expect(exec('cat list | xargs rm -f')).not.toBeNull();
+  });
+
+  it('stays quiet when nothing is written, or everything stays in the task folder', () => {
+    const exec = (CommandLine: string) => agyWriteOutsideTask({ kind: 'execute', rawInput: { CommandLine } }, task, home);
+    expect(exec('echo $HOME')).toBeNull();
+    expect(exec('cd sub && touch x')).toBeNull();
+    expect(exec('cd "$WORK" && make')).toBeNull();
+    expect(exec('find /etc -name hosts')).toBeNull();
+    expect(exec('find . -name "*.tmp" -delete')).toBeNull();
+    expect(exec('bash -c "ls /"')).toBeNull();
+    expect(exec('cat list | xargs grep foo')).toBeNull();
+    expect(exec('echo "$(date)" > log.txt')).toBeNull();
   });
 
   it.skipIf(!posix)('uses the same real-path check: a write through an inside link that points out is flagged', () => {
@@ -257,12 +356,14 @@ describe('AgyAgent wiring', () => {
     createAgyTransport: () => transport as never, uiLocale: () => 'zh-CN',
   } as AgyAgentDeps);
 
-  it.skipIf(!posix)('registers the task folder while the session is open and releases it on close', async () => {
+  it.skipIf(!posix)('registers the task folder, and it stays known after the session closes (QQ B2)', async () => {
+    freshStore();
+    expect(checkAgyTaskPath(path.join(task, 'link-to-config'))).toBeNull();
     const { transport } = fakeAgy();
     const handle = await agentFor(transport).startSession({ workingDir: task, model: 'gpt-oss-120b-medium' });
     expect(() => checkAgyTaskPath(path.join(task, 'link-to-config'))).toThrow(AgyLinkOutsideTaskError);
     await handle.close();
-    expect(checkAgyTaskPath(path.join(task, 'link-to-config'))).toBeNull();
+    expect(() => checkAgyTaskPath(path.join(task, 'link-to-config'))).toThrow(AgyLinkOutsideTaskError);
   });
 
   it.skipIf(!posix)('refuses an image attachment that is a link out of the task folder, before anything reaches agy', async () => {
