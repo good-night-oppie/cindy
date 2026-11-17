@@ -117,7 +117,7 @@ export class AgyTranslator {
 
   private writeOutside(tool: AcpRecord): string | null {
     if (!this.sandbox) return null;
-    try { return agyWriteOutsideTask(tool, this.sandbox.taskDir, this.sandbox.homeDir); } catch { return null; }
+    try { return agyWriteOutsideTask(tool, this.sandbox.taskDir, this.sandbox.homeDir, this.sandbox.visibleDirs); } catch { return null; }
   }
 
   private sandboxDenial(tool: AcpRecord, errorText: string): AgySandboxDenial | null {
