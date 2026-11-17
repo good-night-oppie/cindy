@@ -469,7 +469,7 @@ import {
 } from './filePathPolicy';
 import {
   agyHostPathRefusal, checkAgyHostPath, isAgyLinkOutsideTaskError, openHostFileForRead, readHostFile, setAgyHostPathLocale,
-  setAgyHostPathRefusalNotifier,
+  agyNotInTaskFolderRefusal, setAgyHostPathRefusalNotifier,
 } from './agyHostPathGuard';
 import { readFileThumbnail } from './fileThumbnail';
 import { createOpenWithHandlers, decodeRegOutput, parseChcpCodepage } from './openWithApps';
@@ -8578,7 +8578,7 @@ const registerIpcHandlers = () => {
   });
   const stageChatAttachment = createChatAttachmentStageHandler({
     isPathAllowed,
-    agyRefusal: (sourcePath) => agyHostPathRefusal(sourcePath),
+    agyRefusal: (sourcePath) => agyNotInTaskFolderRefusal(sourcePath),
     realpath: (filePath) => fs.promises.realpath(filePath),
     stat: (filePath) => fs.promises.stat(filePath, { bigint: true }),
     openSource: async (filePath) => {
