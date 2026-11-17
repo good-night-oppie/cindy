@@ -469,7 +469,7 @@ import {
 } from './filePathPolicy';
 import {
   agyHostPathRefusal, checkAgyHostPath, isAgyLinkOutsideTaskError, openHostFileForRead, readHostFile, setAgyHostPathLocale,
-  agyNotInTaskFolderRefusal, setAgyHostPathRefusalNotifier,
+  agyAwareRealpath, agyHandoffPath, agyNotInTaskFolderRefusal, openNoFollowForRead, setAgyHostPathRefusalNotifier,
 } from './agyHostPathGuard';
 import { readFileThumbnail } from './fileThumbnail';
 import { createOpenWithHandlers, decodeRegOutput, parseChcpCodepage } from './openWithApps';
@@ -8140,11 +8140,14 @@ const registerIpcHandlers = () => {
       const noFollow = typeof fs.constants.O_NOFOLLOW === 'number' ? fs.constants.O_NOFOLLOW : 0;
       return readFileBytesForPreview(params, {
         isPathAllowed: (p) => isPathAllowedAgainst(p, getSensitiveMediaBlocklist()),
-        realpath: (p) => fs.promises.realpath(p),
+        // agy task folders (QQ B3 on #15): decided from the requested path, opened through the handle check.
+        realpath: (p) => agyAwareRealpath(p),
         // bigint stats: dev/ino identity must not be rounded (see FileIdentityStat).
         stat: (p) => fs.promises.stat(p, { bigint: true }),
         open: async (p) => {
-          const handle = await fs.promises.open(p, fs.constants.O_RDONLY | noFollow);
+          const handle = checkAgyHostPath(p)
+            ? await openHostFileForRead(p)
+            : await fs.promises.open(p, fs.constants.O_RDONLY | noFollow);
           return {
             stat: () => handle.stat({ bigint: true }),
             read: (buffer, offset, length, position) =>
@@ -8414,7 +8417,7 @@ const registerIpcHandlers = () => {
         isBrowserOpenablePath,
         existsSync: fs.existsSync,
         openExternal: (url) => shell.openExternal(url),
-        openPath: (filePath) => shell.openPath(filePath),
+        openPath: (filePath) => shell.openPath(agyHandoffPath(filePath)),
         openUrlWithWindowsHandler: openFileUrlWithWindowsHandler,
         onOpenExternalError: ({ filePath, hasUrlState, error }) => {
           openFileInBrowserLog.warn('openExternal failed', {
@@ -8459,7 +8462,8 @@ const registerIpcHandlers = () => {
           return { success: false, error: '不允许访问该路径' };
         }
         // shell.openPath returns '' on success, error string on failure.
-        const errMsg = await shell.openPath(filePath);
+        // agy task folder: hand over the checked real path (QQ R2 on #15).
+        const errMsg = await shell.openPath(agyHandoffPath(filePath));
         if (errMsg) return { success: false, error: errMsg };
         return { success: true };
       } catch (err) {
@@ -8537,7 +8541,8 @@ const registerIpcHandlers = () => {
     });
     ipcMain.handle('open-with:open', (event, params: { filePath: string; appId: string }) => {
       assertTrustedAppRendererEvent(event);
-      return openWith.open(params);
+      // agy task folder: hand over the checked real path (QQ R2 on #15).
+      return openWith.open(typeof params?.filePath === 'string' ? { ...params, filePath: agyHandoffPath(params.filePath) } : params);
     });
   }
 
@@ -8579,11 +8584,11 @@ const registerIpcHandlers = () => {
   const stageChatAttachment = createChatAttachmentStageHandler({
     isPathAllowed,
     agyRefusal: (sourcePath) => agyNotInTaskFolderRefusal(sourcePath),
-    realpath: (filePath) => fs.promises.realpath(filePath),
+    // agy task folders (QQ B3 on #15): decided from the requested path, opened through the handle check.
+    realpath: (filePath) => agyAwareRealpath(filePath),
     stat: (filePath) => fs.promises.stat(filePath, { bigint: true }),
     openSource: async (filePath) => {
-      const noFollow = typeof fs.constants.O_NOFOLLOW === 'number' ? fs.constants.O_NOFOLLOW : 0;
-      const handle = await fs.promises.open(filePath, fs.constants.O_RDONLY | noFollow);
+      const handle = await openNoFollowForRead(filePath);
       return {
         stat: () => handle.stat({ bigint: true }),
         copyTo: async (targetPath) => {
@@ -9147,7 +9152,8 @@ const registerIpcHandlers = () => {
 
     const lightboxMedia = createLightboxMediaHandlers({
       isPathAllowed,
-      realpath: (absPath) => fs.promises.realpath(absPath),
+      // agy task folders (QQ B3 on #15): save-as copies the checked real path, read through the handle check.
+      realpath: (absPath) => agyAwareRealpath(absPath),
       resolveImageCacheUrl: (url) =>
         url.startsWith('cindy-media://')
           ? cindyMediaBlobStore.resolveSafe(url)
@@ -9173,7 +9179,7 @@ const registerIpcHandlers = () => {
           : await dialog.showSaveDialog(opts);
         return { canceled: result.canceled, filePath: result.filePath || undefined };
       },
-      openPath: (absPath) => shell.openPath(absPath),
+      openPath: (absPath) => shell.openPath(agyHandoffPath(absPath)),
       // net.fetch 走 Chromium 网络栈(继承代理设置);30s 超时 + 大小上限防御。
       // 限流必须**边读边检**(collectStreamWithLimit):无 / 谎报 Content-Length
       // 的响应若先 arrayBuffer 再检查,会在检查前吃满 main 进程内存(review P1)。
