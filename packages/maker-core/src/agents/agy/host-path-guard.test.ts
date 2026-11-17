@@ -91,6 +91,15 @@ describe('the one check: real path must stay inside the task folder', () => {
   });
 });
 
+describe("JJ's third sentence, for refusals that are not about a link (JJ on cindy#15)", () => {
+  it('is word for word', () => {
+    expect(AGY_HOST_PATH_USER_COPY.notInTaskFolder['zh-CN'])
+      .toBe('这个文件不在任务文件夹里，Cindy 没有打开它。要用的话，把它复制进任务文件夹，再试一次。');
+    expect(AGY_HOST_PATH_USER_COPY.notInTaskFolder.en)
+      .toBe('This file is not in the task folder, so Cindy did not open it. If you need it, copy it into the task folder and try again.');
+  });
+});
+
 describe('the registry: host entries without a session find agy task folders', () => {
   let release: (() => void) | undefined;
   afterEach(() => { release?.(); release = undefined; });
@@ -199,6 +208,23 @@ describe('write-type tool calls aimed outside the task folder', () => {
 
   it('says nothing for writes inside the task folder', () => {
     expect(run('completed', { CommandLine: 'touch b.ts' })).toEqual([]);
+  });
+
+  // JJ on #15: Cindy's agy private state (seen as ~/.gemini, ~/.config/antigravity in the sandbox) is
+  // in scope; writing there is not "outside", so the sentence must not appear.
+  it('treats agy private state dirs as in scope, and still flags real outside targets', () => {
+    const exec = (CommandLine: string) => ({ kind: 'execute', rawInput: { CommandLine } });
+    const privateState = ['/home/u/.gemini', '/home/u/.config/antigravity'];
+    expect(agyWriteOutsideTask(exec('echo x > ~/.gemini/settings.json'), task, home, privateState)).toBeNull();
+    expect(agyWriteOutsideTask({ kind: 'edit', rawInput: { TargetFile: '/home/u/.config/antigravity/a.json' } }, task, home, privateState)).toBeNull();
+    expect(agyWriteOutsideTask(exec('touch /srv/x'), task, home, privateState)).toBe('/srv/x');
+    expect(agyWriteOutsideTask(exec('touch ~/.geminiX'), task, home, privateState)).toBe('/home/u/.geminiX');
+    const events: AgentEvent[] = [];
+    const t = new AgyTranslator(e => events.push(e), { taskDir: task, homeDir: home, visibleDirs: privateState });
+    t.beginTurn();
+    t.update({ sessionUpdate: 'tool_call', toolCallId: 'p', kind: 'execute', rawInput: { CommandLine: 'touch ~/.gemini/state.json' } });
+    t.update({ sessionUpdate: 'tool_call_update', toolCallId: 'p', status: 'completed' });
+    expect(events.filter(e => e.type === 'error')).toEqual([]);
   });
 });
 
