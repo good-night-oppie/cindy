@@ -14,6 +14,7 @@
 
 import type { ComponentType } from 'react';
 
+import { AgyMark } from '@/components/icons/AgyMark';
 import { ClaudeMark } from '@/components/icons/ClaudeMark';
 import { CodexMark } from '@/components/icons/CodexMark';
 import { PiMark } from '@/components/icons/PiMark';
@@ -30,6 +31,7 @@ const VENDOR_PRESENTATION: Record<SelectableVendor, Omit<AgentOption, 'vendor'>>
   cc: { label: 'Claude', Mark: ClaudeMark },
   codex: { label: 'Codex', Mark: CodexMark },
   pi: { label: 'Pi', Mark: PiMark },
+  agy: { label: 'Antigravity', Mark: AgyMark },
 };
 
 export const AGENT_OPTIONS: readonly AgentOption[] = SELECTABLE_VENDORS.map((vendor) => ({

@@ -16,6 +16,8 @@ import {
   buildAgySandboxLaunch,
   detectAgySandboxDenial,
   filterAgySandboxEnv,
+  filterAgyUnsandboxedEnv,
+  AGY_NO_SYSTEM_ISOLATION_ENV,
   parseBwrapVersion,
   prepareAgySandboxedLaunch,
   probeAgySystemSandbox,
@@ -223,6 +225,40 @@ describe('filterAgySandboxEnv', () => {
     const env = filterAgySandboxEnv({ LC_ALL: 'C', HTTPS_PROXY: 'http://p', AWS_SECRET_ACCESS_KEY: 'x' }, '/home/u', '/t');
     expect(env).toMatchObject({ LC_ALL: 'C', HTTPS_PROXY: 'http://p' });
     expect(env.AWS_SECRET_ACCESS_KEY).toBeUndefined();
+  });
+});
+
+describe('filterAgyUnsandboxedEnv (issue #13: no full env on the branch without a sandbox)', () => {
+  it('keeps the platform variables agy needs and nothing secret', () => {
+    const env = filterAgyUnsandboxedEnv({
+      PATH: 'C:\\Windows', SystemRoot: 'C:\\Windows', TEMP: 'C:\\Temp', PATHEXT: '.EXE',
+      AWS_SECRET_ACCESS_KEY: 'x', GITHUB_TOKEN: 'ghp_x', OPENAI_API_KEY: 'sk-x',
+    }, 'C:\\Users\\u', 'C:\\task');
+    expect(env).toMatchObject({ PATH: 'C:\\Windows', SystemRoot: 'C:\\Windows', TEMP: 'C:\\Temp', PATHEXT: '.EXE' });
+    expect(env.AWS_SECRET_ACCESS_KEY).toBeUndefined();
+    expect(env.GITHUB_TOKEN).toBeUndefined();
+    expect(env.OPENAI_API_KEY).toBeUndefined();
+  });
+
+  it('marks the process so the UI can say there is no system isolation', () => {
+    const env = filterAgyUnsandboxedEnv({}, '/home/u', '/srv/t');
+    expect(env[AGY_NO_SYSTEM_ISOLATION_ENV]).toBe('1');
+    expect(env.CINDY_AGY_SANDBOX).toBe('0');
+    expect(env.CINDY_AGY_SANDBOX_TASK_DIR).toBe('/srv/t');
+  });
+
+  it('never passes the bus, agent sockets or display variables', () => {
+    const env = filterAgyUnsandboxedEnv({
+      DISPLAY: ':0', SSH_AUTH_SOCK: '/tmp/a', DBUS_SESSION_BUS_ADDRESS: 'unix:path=/run/dbus',
+    }, '/home/u', '/srv/t');
+    expect(env.DISPLAY).toBeUndefined();
+    expect(env.SSH_AUTH_SOCK).toBeUndefined();
+    expect(env.DBUS_SESSION_BUS_ADDRESS).toBeUndefined();
+  });
+
+  it('passes auth env keys the caller explicitly whitelists', () => {
+    const env = filterAgyUnsandboxedEnv({ ANTIGRAVITY_TOKEN: 't' }, '/home/u', '/srv/t', ['ANTIGRAVITY_TOKEN']);
+    expect(env.ANTIGRAVITY_TOKEN).toBe('t');
   });
 });
 

@@ -3362,8 +3362,8 @@ export function stopPiIdleReleaseWatcher(): void {
   piIdleReleaseWatcher = null;
 }
 
-function requireAgentKind(value: unknown): Exclude<AgentKind, 'agy'> {
-  if (value === 'claude-code' || value === 'codex' || value === 'pi') return value;
+function requireAgentKind(value: unknown): AgentKind {
+  if (value === 'claude-code' || value === 'codex' || value === 'pi' || value === 'agy') return value;
   throwIpcError('INVALID_PARAMS', 'agentKind required');
 }
 
@@ -9025,7 +9025,9 @@ export function registerMakerIpc(maker: Maker, options: RegisterMakerIpcOptions)
 
   const appliedTaskPrompts = new WeakMap<Awaited<ReturnType<typeof maker.createSession>>, string>();
   const readTaskPrompt = (sessionId: string, agentKind: AgentKind, agentDeviceId?: string | null) => {
-    if (agentKind === 'agy') throw new Error('Native Antigravity desktop integration is not ready');
+    // ACP gives agy no system-prompt channel, so runtime-plugin task prompts are not injected
+    // there yet. Return none instead of refusing the whole task (cindy#1, agy open).
+    if (agentKind === 'agy') return '';
     return ghostTaskSystemPrompt(sessionId, agentKind === 'claude-code' ? 'cc' : agentKind, !(agentKind === 'pi' && agentDeviceId));
   };
   const createSessionWithRuntimePlugins = (o: CreateOpts, signal?: AbortSignal) => {
