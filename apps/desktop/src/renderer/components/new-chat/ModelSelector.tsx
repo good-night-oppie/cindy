@@ -107,7 +107,7 @@ import { useDevicesProviders } from '@/hooks/useDevicesProviders';
 import { effectiveRunLocation, RUN_LOCATION_LOCAL } from '@/lib/providerRunLocation';
 import { modelCatalogKey, type ControlledModelFavoriteSource } from '../../../shared/controlledModelCatalog';
 import { RemoteSourceMark } from '@/components/icons/RemoteSourceMark';
-import { buildUnifiedRail, remoteAgentProviders } from './unifiedModelSelection';
+import { AGY_PROVIDER_ID, buildAgyProviderView, buildUnifiedRail, remoteAgentProviders } from './unifiedModelSelection';
 import {
   collectRemoteProviderGroups,
   providerGroupMemberOfRoute,
@@ -1457,10 +1457,11 @@ function ModelSelectorContentView({
     // 错误地串在一起，并在回调尚未启动时留下可发送窗口。
     void agentSwitch.onSwitch(targetAgentKind, targetModelId, targetProviderId);
   };
-  // 同时拉三个 agent —— vendorKey 不传时把三边模型一起展示。hooks 必须按固定顺序调用。
+  // 同时拉四个 agent —— vendorKey 不传时把各边模型一起展示。hooks 必须按固定顺序调用。
   const cc = useAgentCapabilities('claude-code', catalogDeviceId);
   const codex = useAgentCapabilities('codex', catalogDeviceId);
   const pi = useAgentCapabilities('pi', catalogDeviceId);
+  const agy = useAgentCapabilities('agy', catalogDeviceId);
   // 本机折扣 GPT 仍按本机 API key gate；device-link 必须只看被控端 provider 状态。
   // 旧被控端不支持 provider:list 时按远端 capabilities 退化，不得误用控制端 key。
   const { hasSavedKey, canReadKey } = useApiKey();
@@ -1490,9 +1491,19 @@ function ModelSelectorContentView({
     () => withFollowedAccountSource(localProviders.providers, taskSourceProvider ?? null),
     [localProviders.providers, taskSourceProvider],
   );
-  const providers = deviceId
+  // agy 没有供应商目录:把 ACP catalog 伪装成一条 ProviderView 排到最前——
+  // unifiedModelEntries 按 UNIFIED_AGENT_PRIORITY 末位遍历 agy,不碰三引擎既有行序。
+  const agyProviderView = useMemo(
+    () => buildAgyProviderView(agy.capabilities?.availableModels ?? []),
+    [agy.capabilities],
+  );
+  const providersBase = deviceId
     ? remoteCatalogProviders
     : providersOverride ?? sshCatalogProviders ?? localTaskProviders;
+  const providers = useMemo<ProviderView[]>(
+    () => (agyProviderView ? [agyProviderView, ...(providersBase as ProviderView[])] : (providersBase as ProviderView[])),
+    [agyProviderView, providersBase],
+  );
   // SSH 目录里 Codex 来自远端主机：本机账号用量、本机供应商组都不能代表它。
   const sshCodexActive = sshCodex !== undefined;
   const mixedCatalog = !!providersOverride || sshCodexActive;

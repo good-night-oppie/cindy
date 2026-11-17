@@ -30,17 +30,53 @@ import type { RecentModelItem } from '@/state/recentModels';
 
 export { resolveStoredModelEntry };
 
+/** agy 的原生入口 —— Antigravity 自登录,无供应商目录;模型全部来自 ACP catalog。 */
+export const AGY_PROVIDER_ID = 'agy';
+export const AGY_PROVIDER_NAME = 'Antigravity';
+
+/**
+ * 把 agy 的 ACP catalog 伪装成一条 ProviderView,让统一面板的聚合层
+ * (unifiedModelEntries 按 (provider, 模型) 聚合)能像老引擎那样列出它。
+ * 必须排第一(调用方拼到 providers 头部):聚合层按 activeAgents 序遍历,
+ * agy 排最后才不会改变三引擎既有行的首见序与 bridge 回落。
+ */
+export function buildAgyProviderView(
+  models: readonly { id: string; displayName: string; description?: string; contextWindow: number; efforts: readonly string[]; defaultEffort: string | null }[],
+): ProviderView | null {
+  if (!models.length) return null;
+  return {
+    id: AGY_PROVIDER_ID,
+    name: AGY_PROVIDER_NAME,
+    source: 'builtin',
+    agents: ['agy'],
+    auth: { method: 'oauth' },
+    routing: { agy: { upstream: 'agy://acp', authStrategy: 'none' } },
+    models: {
+      agy: models.map((m) => ({
+        id: m.id,
+        name: m.displayName,
+        ...(m.description ? { description: m.description } : {}),
+        mode: 'chat',
+        contextWindow: m.contextWindow,
+        efforts: [...m.efforts] as never,
+        defaultEffort: m.defaultEffort as never,
+      })),
+    },
+    connected: true,
+  } as ProviderView;
+}
+
 /** 引擎在**选择器 / 草稿链路**里的口径(vendor);catalog / capabilities 侧是 AgentKind。 */
 export type UnifiedEngine = SelectableVendor;
 
 /** vendor → AgentKind(查目录 / 能力 / 记忆时用)。 */
 export function agentKindOfEngine(engine: UnifiedEngine): AgentKind {
-  return engine === 'cc' ? 'claude-code' : engine === 'codex' ? 'codex' : 'pi';
+  return engine === 'cc' ? 'claude-code' : engine === 'codex' ? 'codex' : engine === 'agy' ? 'agy' : 'pi';
 }
 
 /** AgentKind → vendor(落 store / draft 时用)。未知值回落 cc,与既有 sanitize 方向一致。 */
 export function engineOfAgentKind(agent: AgentKind): UnifiedEngine {
-  return agent === 'codex' ? 'codex' : agent === 'pi' ? 'pi' : 'cc';
+  return agent === 'codex' ? 'codex' : agent === 'pi' ? 'pi' : agent === 'agy' ? 'agy' : 'cc';
 }
 
 /**

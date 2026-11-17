@@ -139,6 +139,7 @@ export class AgyAgent extends BaseAgent {
     promise?: Promise<void>;
   }>();
   private disposed = false;
+  private probePromise: Promise<void> | null = null;
 
   constructor(protected override deps: AgyAgentDeps) {
     super(deps);
@@ -166,6 +167,46 @@ export class AgyAgent extends BaseAgent {
       this.failedStartupCleanups.delete(key);
       entry.confirmStopped();
     }
+  }
+
+  /**
+   * One-shot, unsandboxed ACP probe so the model picker can list agy models before a task
+   * exists. Spawns `agy acp` in the current working directory, reads session/new's catalog
+   * into capabilities, then closes. Cached after the first success; a failed probe is not
+   * cached, so a later call retries. Never runs inside a sandbox and never prompts.
+   */
+  async probeModels(cwd: string): Promise<void> {
+    if (this.capabilities.availableModels.length) return;
+    if (this.probePromise) return this.probePromise;
+    this.probePromise = (async () => {
+      const binaryPath = this.deps.binaryPath;
+      if (!binaryPath) throw new Error('agy binary path is not configured');
+      await assertAgyBinaryUsable(binaryPath, this.deps.readAgyVersion);
+      const authEnv = await this.deps.auth.getAuthEnv();
+      const env = filterAgyUnsandboxedEnv({ ...process.env, ...authEnv }, os.homedir(), cwd, Object.keys(authEnv ?? {}));
+      const transport = (this.deps.createAgyTransport ?? spawnAcpTransport)({
+        binaryPath, args: [...AGY_ACP_ARGS], cwd, env,
+      });
+      const client = new AcpClient(transport, { requestTimeoutMs: CONTROL_TIMEOUT });
+      try {
+        const init = record(await client.request('initialize', {
+          protocolVersion: 1,
+          clientCapabilities: { fs: { readTextFile: false, writeTextFile: false }, terminal: false },
+          clientInfo: { name: 'cindy', version: '1.0.0' },
+        }));
+        if (init.protocolVersion !== 1) throw new Error('agy ACP protocol version is unsupported');
+        const result = record(await client.request('session/new', { cwd, mcpServers: [] }));
+        const catalog = readAgyCatalog(result);
+        this.capabilities.availableModels = catalog.models;
+        this.capabilities.switchModel = catalog.models.length ? yes : no;
+        this.capabilities.effort = catalog.currentEfforts.length ? yes : no;
+        this.capabilities.effortLevels = catalog.currentEfforts.map(id => ({ id, displayName: id }));
+        this.capabilities.planMode = catalog.modes.includes(AGY_PLAN_MODE) ? yes : no;
+      } finally {
+        await client.close().catch(() => {});
+      }
+    })();
+    try { await this.probePromise; } catch (error) { this.probePromise = null; throw error; }
   }
 
   override async dispose(): Promise<void> {

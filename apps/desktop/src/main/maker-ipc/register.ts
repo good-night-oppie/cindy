@@ -7294,6 +7294,14 @@ export function registerMakerIpc(maker: Maker, options: RegisterMakerIpcOptions)
     },
   );
 
+  // agy 模型探活:选择器打开前真实起一次 `agy acp` 读 catalog 写进 capabilities
+  // (缓存后空转)。cwd 用当前工作目录即可—— catalog 与目录无关,任务文件夹在
+  // 创建时才定;不在此登记 agy 任务文件夹,避免探活本身污染任务记录。
+  ipcMain.handle(MAKER_INVOKE.PROBE_AGENT_MODELS, async (_e, agentKind: unknown) => {
+    const kind = requireAgentKind(agentKind);
+    await maker.probeAgentModels(kind, process.cwd());
+  });
+
   ipcMain.handle(MAKER_INVOKE.GET_CAPABILITIES, (_e, agentKind: unknown) => {
     return {
       ...maker.getCapabilities(requireAgentKind(agentKind)),

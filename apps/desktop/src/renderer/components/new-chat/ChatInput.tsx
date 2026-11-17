@@ -368,7 +368,7 @@ import {
   normalizeComposerDocumentJSON,
   plainTextToComposerDocument,
 } from '@/lib/composerListDocument';
-import { useAgentCapabilities, type AgentKind } from '@/hooks/useAgentCapabilities';
+import { probeAgyModelsIfNeeded, useAgentCapabilities, type AgentKind } from '@/hooks/useAgentCapabilities';
 import { useAvailableAgents } from '@/hooks/useAvailableAgents';
 import { useConnectedSource } from '@/hooks/useConnectedSource';
 import { useProviders } from '@/hooks/useProviders';
@@ -1052,7 +1052,7 @@ function rememberCatalogModelPrefs(
 }
 
 /** 统一模型选择器联合列表的候选引擎全集(与 SELECTABLE_VENDORS 同一顺序)。 */
-const UNIFIED_AGENT_KINDS = ['claude-code', 'codex', 'pi'] as const;
+const UNIFIED_AGENT_KINDS = ['claude-code', 'codex', 'pi', 'agy'] as const;
 
 /** AgentKind → NewMaker vendor(useAvailableAgents 用 vendor 口径)。 */
 function agentKindToVendor(kind: AgentKind): SelectableVendor {
@@ -2265,6 +2265,11 @@ export function ChatInput({
     );
     return kinds.length > 0 ? kinds : undefined;
   }, [runtimeAgentsLoaded, runtimeAvailableVendors, agentKind]);
+  // agy 注册时才探活一次:让主进程真实起 ACP 把模型清单读进 capabilities,
+  // 面板才有 Antigravity 的行。探活失败时清单保持空,入口自然不出现。
+  useEffect(() => {
+    if (runtimeAgentsLoaded && runtimeAvailableVendors.has('agy')) probeAgyModelsIfNeeded();
+  }, [runtimeAgentsLoaded, runtimeAvailableVendors]);
   // 已有 device-link 任务在断链时仍有 pinned deviceId + renderer outbox 可接住发送，
   // 不能因为被控端 provider 目录暂时拉不到就禁用 composer。远程草稿没有既有 session
   // 可以排队，仍与本地任务一样保留来源门禁。
