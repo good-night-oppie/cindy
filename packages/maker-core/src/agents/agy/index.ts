@@ -17,7 +17,6 @@
  *     fallback to another runtime.
  */
 import { realpathSync } from 'node:fs';
-import { open } from 'node:fs/promises';
 import os from 'node:os';
 import path from 'node:path';
 import { pathToFileURL } from 'node:url';
@@ -58,6 +57,7 @@ import {
   AGY_SANDBOX_USER_COPY_DRAFT, AgySandboxUnavailableError, agyPrivateStateMounts, prepareAgySandboxedLaunch,
   type AgySandboxProbe,
 } from './system-sandbox.js';
+import { openAgyTaskFile, registerAgyTaskDir } from './host-path-guard.js';
 
 export { AGY_MIN_VERSION, AgyBinaryUnavailableError, parseAgyVersion } from './version.js';
 export { AGY_DEFAULT_STALL_TIMEOUT_MS, AGY_STALL_TIMEOUT_ENV, resolveAgyStallTimeoutMs } from './watchdog.js';
@@ -94,6 +94,8 @@ export interface AgyAgentDeps extends AgentDeps {
    * transport (tests) it is applied only when set. stateRoot defaults to ~/.cindy/agy-sandbox/state.
    */
   agySandbox?: { stateRoot?: string; probe?: AgySandboxProbe };
+  /** UI locale for agy user notices (JJ's wording exists in zh-CN and en). */
+  uiLocale?: () => string | null | undefined;
 }
 
 export class AgyAgent extends BaseAgent {
@@ -223,7 +225,12 @@ export class AgyAgent extends BaseAgent {
     const translator = new AgyTranslator(emit, useSandbox ? {
       taskDir: agyWorkingDir, homeDir: os.homedir(),
       visibleDirs: agyPrivateStateMounts(sandboxStateRoot, os.homedir()).map(mount => mount.target),
+      locale: this.deps.uiLocale,
     } : undefined);
+    // Host reads / lists / uploads of this folder go through checkAgyTaskPath while the session is open
+    // (cindy#1 QQ 6924350879 item 5). Released in close().
+    let releaseTaskDir: (() => void) | undefined = registerAgyTaskDir(opts.workingDir);
+    const uiLocale = this.deps.uiLocale;
     const emitReviewNotice = (message: string) => emit({ type: 'error', data: { message, isTerminal: false } });
     const reviewUnavailable = createAutoReviewUnavailableNotice(emitReviewNotice);
     const confirmUndelivered = createAutoReviewConfirmUndeliveredNotice(emitReviewNotice);
@@ -434,6 +441,7 @@ export class AgyAgent extends BaseAgent {
         if (running && sessionId) await client?.notify('session/cancel', { sessionId }).catch(() => {});
         await client?.close();
         await active?.catch(() => {});
+        releaseTaskDir?.(); releaseTaskDir = undefined;
         if (!closed) queue.end();
         closed = true;
         running = false;
@@ -601,7 +609,7 @@ export class AgyAgent extends BaseAgent {
           try {
             if (options.planMode !== undefined) await setPlanMode(options.planMode, true);
             assertReceipts();
-            const blocks = await promptBlocks(message, promptCapabilities);
+            const blocks = await promptBlocks(message, promptCapabilities, { taskDir: agyWorkingDir, locale: uiLocale?.() });
             if (closed || cancelled || options.signal?.aborted) throw new Error('agy send cancelled before dispatch');
             const nextIntent = appendAutoReviewUserIntent(firstPrompt ? undefined : userIntent, message.content, options);
             actionContext.advance(typeof nextIntent !== 'string');
@@ -768,14 +776,16 @@ function safeError(error: unknown): string {
   return error instanceof Error ? redactSensitiveText(error.message).slice(0, 500) : 'agy ACP request failed';
 }
 
-async function promptBlocks(message: UserMessage, capabilities: AcpRecord): Promise<AcpRecord[]> {
+async function promptBlocks(message: UserMessage, capabilities: AcpRecord,
+  guard: { taskDir: string; locale?: string | null }): Promise<AcpRecord[]> {
   if (typeof message.content === 'string') return [{ type: 'text', text: message.content }];
   const blocks: AcpRecord[] = [];
   for (const item of message.content) {
     if (item.type === 'text') blocks.push({ type: 'text', text: item.text });
     else if (item.type === 'image') {
       if (capabilities.image !== true) throw new Error('This agy version does not support image input');
-      const file = await open(item.path, 'r');
+      // An image from the task folder goes through the same real-path check as every other host read.
+      const { handle: file } = await openAgyTaskFile(item.path, guard);
       let bytes: Buffer;
       try {
         const info = await file.stat();
