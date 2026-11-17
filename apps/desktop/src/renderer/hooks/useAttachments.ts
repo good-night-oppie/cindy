@@ -673,7 +673,8 @@ export function useAttachments(sessionId?: string, draftKey?: string): UseAttach
               pushScopedRejections(operationScope, [
                 t('logic.toasts.attachmentReadFailed', {
                   name: item.name,
-                  error: staged.code,
+                  // agy task folder (cindy#1): the host's sentence explains the refusal.
+                  error: staged.message ?? staged.code,
                 }),
               ]);
               continue;
