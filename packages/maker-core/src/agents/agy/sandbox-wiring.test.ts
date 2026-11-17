@@ -8,6 +8,10 @@ import type { AgySandboxProbe } from './system-sandbox.js';
 import { AgentStartupStoppedError } from '../base-agent.js';
 import type { AgentEvent } from '../../types/events.js';
 import { createConsoleLogger } from '../../interfaces/logger.js';
+import { setAgyTaskDirStoreFile } from './host-path-guard.js';
+
+// Sessions here register their task folder; keep that registry out of the real ~/.cindy.
+setAgyTaskDirStoreFile(path.join(os.tmpdir(), `agy-task-dirs-${process.pid}-wiring.json`));
 
 const OK_PROBE: AgySandboxProbe = { ok: true, bwrapPath: '/usr/bin/bwrap', pastaPath: '/usr/bin/pasta', ipPath: '/usr/sbin/ip', version: '0.6.1', supportsDisableUserns: false };
 const root = realpathSync(mkdtempSync(path.join(os.tmpdir(), 'agy-wire-')));
