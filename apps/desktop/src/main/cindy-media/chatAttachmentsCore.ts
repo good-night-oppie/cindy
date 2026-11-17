@@ -25,6 +25,7 @@ import * as ledger from './ledger';
 import type { LedgerDb } from './ledger';
 import { getDbClient } from '../localDb/client/current';
 import { createLogger } from '../logger';
+import { checkAgyHostPath, readHostFile } from '../agyHostPathGuard';
 
 export interface IngestedChatImage {
   /** `cindy-media://blobs/<hash>.<ext>`——renderer chip / 消息落库共用的永久地址。 */
@@ -91,7 +92,8 @@ export function createChatAttachments(ports: ChatAttachmentPorts) {
     if (!mimeType) {
       throw new Error(`chat-attachments: unsupported image extension: ${ext || '(none)'}`);
     }
-    const buffer = await fs.readFile(params.sourcePath);
+    // A file in an agy task folder is read through the checked handle (cindy#1).
+    const buffer = checkAgyHostPath(params.sourcePath) ? await readHostFile(params.sourcePath) : await fs.readFile(params.sourcePath);
     return ingestChatImageBuffer({ buffer, mimeType }, db);
   }
 

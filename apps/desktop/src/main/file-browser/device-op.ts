@@ -32,6 +32,7 @@
  */
 
 import { promises as fsp } from 'node:fs';
+import { agyHostPathRefusal } from '../agyHostPathGuard.js';
 import path from 'node:path';
 import { gzip as gzipCb, gunzip as gunzipCb } from 'node:zlib';
 import { promisify } from 'node:util';
@@ -252,6 +253,10 @@ async function resolveWorkdirExecution(
   }
   return { kind: 'local' };
 }
+
+/** Read / list / upload ops that run the agy task-folder check (cindy#1 QQ 6924350879 item 5). */
+const AGY_CHECKED_READ_OPS = new Set<string>(['fileUrl', 'listDir', 'readFile', 'stat', 'listAllFiles',
+  'exportFileStart', 'exportDirStart', 'thumbnail', 'searchCollect']);
 
 function bad(message: string): { ok: false; message: string } {
   return { ok: false, message };
@@ -645,6 +650,12 @@ async function handleRemoteOp(args: RemoteOpArgs): Promise<unknown> {
   }
 
   // —— 本地执行(被控端自身 fs)——
+  // agy task folder (cindy#1): list / read / stat / export / thumbnail / search here run the same
+  // real-path check first; a workdir or entry that is a link out of the folder is refused.
+  if (AGY_CHECKED_READ_OPS.has(args.op)) {
+    const agyRefusal = agyHostPathRefusal(path.resolve(workdir, (args as { relPath?: string }).relPath ?? ''));
+    if (agyRefusal) return bad(agyRefusal);
+  }
   switch (args.op) {
     case 'fileUrl': {
       const relPath = args.relPath ?? '';

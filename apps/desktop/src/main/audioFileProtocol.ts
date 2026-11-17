@@ -52,6 +52,9 @@ import * as fs from 'node:fs/promises';
 import * as path from 'node:path';
 
 import { getSensitiveMediaBlocklist, isPathAllowedAgainst } from './filePathPolicy';
+import {
+  checkAgyHostPath, isAgyLinkOutsideTaskError, notifyAgyHostPathRefusal, notifyAgyHostPathRefusalFor, readHostFile,
+} from './agyHostPathGuard';
 import { createLogger } from './logger';
 
 const log = createLogger('audioFileProtocol');
@@ -117,6 +120,8 @@ export function registerAudioFileProtocolHandler(): void {
       // device-link media fetch. Literal (lexical) blocklist FIRST — before
       // realpath — so a sensitive requested path is denied deterministically
       // even if realpath then fails with EACCES/EPERM.
+      // agy task folder (cindy#1): refuse a link out of it, and tell the user (the protocol has no text).
+      if (notifyAgyHostPathRefusal(resolved)) return new Response(null, { status: 403 });
       if (!isPathAllowedAgainst(resolved, getSensitiveMediaBlocklist())) {
         log.warn(`[xdt-audio] blocked sensitive path: ${resolved}`);
         return new Response(null, { status: 403 });
@@ -143,7 +148,17 @@ export function registerAudioFileProtocolHandler(): void {
       const stat = await fs.stat(realPath);
       if (!stat.isFile()) return new Response(null, { status: 404 });
 
-      const buffer = await fs.readFile(realPath);
+      // In an agy task folder read through the checked handle (cindy#1); elsewhere as before.
+      let buffer: Buffer;
+      try {
+        buffer = checkAgyHostPath(resolved) ? await readHostFile(resolved) : await fs.readFile(realPath);
+      } catch (err) {
+        if (isAgyLinkOutsideTaskError(err)) {
+          notifyAgyHostPathRefusalFor(resolved);
+          return new Response(null, { status: 403 });
+        }
+        throw err;
+      }
       const totalSize = buffer.byteLength;
       const mimeType = MIME_BY_EXT[ext] ?? 'application/octet-stream';
       const range = parseRangeHeader(

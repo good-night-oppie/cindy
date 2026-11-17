@@ -49,10 +49,14 @@
 import { protocol, type CustomScheme } from 'electron';
 import { createReadStream } from 'node:fs';
 import * as fs from 'node:fs/promises';
+import type { FileHandle } from 'node:fs/promises';
 import * as path from 'node:path';
 import { Readable } from 'node:stream';
 
 import { getSensitiveMediaBlocklist, isPathAllowedAgainst } from './filePathPolicy';
+import {
+  checkAgyHostPath, isAgyLinkOutsideTaskError, notifyAgyHostPathRefusal, notifyAgyHostPathRefusalFor, openHostFileForRead,
+} from './agyHostPathGuard';
 import { createLogger } from './logger';
 
 const log = createLogger('localFileProtocol');
@@ -147,9 +151,15 @@ export function parseRangeHeader(
   return { kind: 'range', start, end };
 }
 
-/** createReadStream → fetch Response 可用的 web ReadableStream。 */
-function streamBody(filePath: string, opts?: { start: number; end: number }): ReadableStream {
-  return Readable.toWeb(createReadStream(filePath, opts)) as unknown as ReadableStream;
+/**
+ * createReadStream → fetch Response 可用的 web ReadableStream。
+ * From a verified handle (agy task folder; closed when the stream ends) or, as before, from the path.
+ */
+function streamBody(source: FileHandle | string, opts?: { start: number; end: number }): ReadableStream {
+  const stream = typeof source === 'string'
+    ? createReadStream(source, opts)
+    : source.createReadStream({ ...opts, autoClose: true });
+  return Readable.toWeb(stream) as unknown as ReadableStream;
 }
 
 /** Privilege entry for the one-shot registerSchemesAsPrivileged in bootstrap. */
@@ -203,6 +213,8 @@ export function registerLocalFileProtocolHandler(): void {
       // requested path is denied deterministically even when realpath fails
       // with EACCES/EPERM (a permission error must not leak a 500 for a path
       // we already know to reject).
+      // agy task folder (cindy#1): refuse a link out of it, and tell the user (the protocol has no text).
+      if (notifyAgyHostPathRefusal(resolved)) return new Response(null, { status: 403 });
       if (!isPathAllowedAgainst(resolved, getSensitiveMediaBlocklist())) {
         return new Response(null, { status: 403 });
       }
@@ -232,45 +244,64 @@ export function registerLocalFileProtocolHandler(): void {
         return new Response(null, { status: 403 });
       }
 
-      const stat = await fs.stat(realPath);
-      if (!stat.isFile()) return new Response(null, { status: 404 });
+      // In an agy task folder: stat and stream from one handle that is checked again after open,
+      // so a swap between check and open cannot serve a file outside it (cindy#1). Elsewhere: as before.
+      let handle: FileHandle | undefined;
+      try {
+        if (checkAgyHostPath(resolved)) handle = await openHostFileForRead(resolved);
+      } catch (err) {
+        if (isAgyLinkOutsideTaskError(err)) {
+          notifyAgyHostPathRefusalFor(resolved);
+          return new Response(null, { status: 403 });
+        }
+        throw err;
+      }
+      let handedOff = false;
+      try {
+        const stat = handle ? await handle.stat() : await fs.stat(realPath);
+        if (!stat.isFile()) return new Response(null, { status: 404 });
 
-      const mime = MIME_BY_EXT[ext] ?? 'application/octet-stream';
-      const range = parseRangeHeader(request.headers.get('Range'), stat.size);
+        const mime = MIME_BY_EXT[ext] ?? 'application/octet-stream';
+        const range = parseRangeHeader(request.headers.get('Range'), stat.size);
 
-      if (range?.kind === 'unsatisfiable') {
-        return new Response(null, {
-          status: 416,
+        if (range?.kind === 'unsatisfiable') {
+          return new Response(null, {
+            status: 416,
+            headers: {
+              'Content-Type': mime,
+              'Content-Range': `bytes */${stat.size}`,
+              'Accept-Ranges': 'bytes',
+              'Cache-Control': 'no-cache',
+            },
+          });
+        }
+        if (range) {
+          handedOff = true;
+          return new Response(streamBody(handle ?? realPath, { start: range.start, end: range.end }), {
+            status: 206,
+            headers: {
+              'Content-Type': mime,
+              'Content-Length': String(range.end - range.start + 1),
+              'Content-Range': `bytes ${range.start}-${range.end}/${stat.size}`,
+              'Accept-Ranges': 'bytes',
+              'Cache-Control': 'no-cache',
+            },
+          });
+        }
+
+        handedOff = stat.size !== 0;
+        return new Response(stat.size === 0 ? null : streamBody(handle ?? realPath), {
+          status: 200,
           headers: {
             'Content-Type': mime,
-            'Content-Range': `bytes */${stat.size}`,
+            'Content-Length': String(stat.size),
             'Accept-Ranges': 'bytes',
             'Cache-Control': 'no-cache',
           },
         });
+      } finally {
+        if (handle && !handedOff) await handle.close().catch(() => {});
       }
-      if (range) {
-        return new Response(streamBody(realPath, { start: range.start, end: range.end }), {
-          status: 206,
-          headers: {
-            'Content-Type': mime,
-            'Content-Length': String(range.end - range.start + 1),
-            'Content-Range': `bytes ${range.start}-${range.end}/${stat.size}`,
-            'Accept-Ranges': 'bytes',
-            'Cache-Control': 'no-cache',
-          },
-        });
-      }
-
-      return new Response(stat.size === 0 ? null : streamBody(realPath), {
-        status: 200,
-        headers: {
-          'Content-Type': mime,
-          'Content-Length': String(stat.size),
-          'Accept-Ranges': 'bytes',
-          'Cache-Control': 'no-cache',
-        },
-      });
     } catch (err) {
       const code = (err as NodeJS.ErrnoException)?.code;
       if (code === 'ENOENT') return new Response(null, { status: 404 });

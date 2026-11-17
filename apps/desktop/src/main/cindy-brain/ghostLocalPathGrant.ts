@@ -21,6 +21,7 @@ import fs from 'node:fs';
 import path from 'node:path';
 
 import { isPathInsideDir } from './dirDeposit.js';
+import { checkAgyHostPath } from '../agyHostPathGuard.js';
 
 export type LocalPathClassification =
   /** 不是本分支管的输入(非绝对路径 / 不存在 / 不是普通文件)——交回原有教学错误。 */
@@ -47,6 +48,8 @@ export function classifyLocalAttachmentPath(
   if (typeof input !== 'string' || input.includes('\0') || !path.isAbsolute(input)) {
     return { kind: 'not-local' };
   }
+  // agy task folder (cindy#1): a link out of it is refused before it is followed (throws JJ's sentence).
+  checkAgyHostPath(input);
   let realFile: string;
   try {
     realFile = fs.realpathSync.native(input);

@@ -2,7 +2,9 @@
 
 import { ipcMain } from 'electron';
 
-import { requireObject, requireString } from '../utils/ipcValidate.js';
+import * as path from 'node:path';
+import { throwIpcError, requireObject, requireString } from '../utils/ipcValidate.js';
+import { agyHostPathRefusal } from '../agyHostPathGuard.js';
 import { listDir, mkdirP, statPath } from './core.js';
 
 export * from './core.js';
@@ -11,7 +13,11 @@ export * from './core.js';
 export function registerFsBrowseIpc(): void {
   ipcMain.handle('fs:list-dir', async (_e, arg: unknown) => {
     const obj = requireObject(arg);
-    return listDir(requireString(obj.path, 'path'), { canonicalDirectory: obj.canonicalDirectory === true });
+    const dir = requireString(obj.path, 'path');
+    // agy task folder (cindy#1): a folder link out of it is not listed.
+    const agyRefusal = path.isAbsolute(dir) ? agyHostPathRefusal(dir) : null;
+    if (agyRefusal) throwIpcError('FS_BROWSE_FAILED', agyRefusal);
+    return listDir(dir, { canonicalDirectory: obj.canonicalDirectory === true });
   });
   ipcMain.handle('fs:stat-path', async (_e, arg: unknown) => {
     const obj = requireObject(arg);

@@ -26,6 +26,7 @@ import { GitRunError, runGit } from '../git-review/gitRunner.js';
 import { getDbClient } from '../localDb/client/current.js';
 import { userDataPath } from '../userDataPath.js';
 import { createLogger } from '../logger.js';
+import { checkAgyHostPath, readHostFile } from '../agyHostPathGuard.js';
 import { detectSensitivePath } from '../security/sensitivePath.js';
 import * as broadcastTap from '../device-link/broadcast-tap.js';
 import { MAKER_PUSH } from '../maker-ipc/channels.js';
@@ -904,7 +905,8 @@ async function readTextFileForCapture(
     if (!stat.isFile()) return 'read-failed';
     if (stat.size > MAX_CAPTURE_FILE_BYTES) return 'file-too-large';
     if (stat.size > remainingBytes) return 'diff-too-large';
-    const data = await fs.readFile(absolutePath);
+    // agy task folder (cindy#1): same check, and read through the checked handle.
+    const data = checkAgyHostPath(absolutePath) ? await readHostFile(absolutePath) : await fs.readFile(absolutePath);
     try {
       return {
         exists: true,

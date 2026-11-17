@@ -1305,6 +1305,9 @@ interface ElectronAPI {
     callback: (payload: { code: string; address?: string; port?: number }) => void,
   ) => () => void;
 
+  /** agy task folder: a protocol entry refused a link out of the folder (agyHostPathRefusalToast.ts). */
+  onAgyHostPathRefused: (callback: (payload: { message: string; key: string }) => void) => () => void;
+
   // Renderer 日志转发到 main.log（全级别 + scope，main 端按 LOG_LEVEL 过滤）
   logToMain: (
     level: 'trace' | 'debug' | 'info' | 'warn' | 'error' | 'fatal',
@@ -3372,6 +3375,8 @@ interface ElectronAPI {
           | 'not_file'
           | 'unsupported_type'
           | 'copy_failed';
+        /** agy task folder: the sentence for the user (cindy#1). */
+        message?: string;
       }
   >;
 

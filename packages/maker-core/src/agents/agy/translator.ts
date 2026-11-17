@@ -12,9 +12,14 @@ import {
   AGY_SANDBOX_USER_COPY_DRAFT, agySandboxDenialModelNote, detectAgySandboxDenial,
   type AgySandboxDenial, type AgySandboxDenialKind,
 } from './system-sandbox.js';
+import { AGY_HOST_PATH_USER_COPY, agyCopyLocale, agyWriteOutsideTask } from './host-path-guard.js';
 
 /** Set when agy runs inside Cindy's system isolation (system-sandbox.ts). */
-export interface AgySandboxContext { taskDir: string; homeDir: string; visibleDirs: readonly string[] }
+export interface AgySandboxContext {
+  taskDir: string; homeDir: string; visibleDirs: readonly string[];
+  /** UI locale for user notices (JJ wrote zh-CN and en). */
+  locale?: () => string | null | undefined;
+}
 
 export class AgyTranslator {
   private tools = new Map<string, AcpRecord>();
@@ -67,11 +72,20 @@ export class AgyTranslator {
         if ((tool.status === 'completed' || tool.status === 'failed') && !this.completedTools.has(id)) {
           this.completedTools.add(id);
           let fullText = toolText(tool);
+          // A write-type call aimed outside the task folder: only the target path decides, not agy's
+          // completed / failed (cindy#1 QQ 6924350879 item 4). A notice beside the reply, not a block.
+          const writeOutside = this.writeOutside(tool);
+          if (writeOutside && !this.sandboxNotified.has(writeOutside)) {
+            this.sandboxNotified.add(writeOutside);
+            event('error', { message: AGY_HOST_PATH_USER_COPY.writeOutside[agyCopyLocale(this.sandbox?.locale?.())],
+              isTerminal: false, reason: 'agy_write_outside_task' });
+          }
           const denial = tool.status === 'failed' ? this.sandboxDenial(tool, fullText) : null;
           if (denial) {
             // Blocked by the isolation, not a missing file: tell the model not to retry, tell the user once per path.
             fullText = `${fullText.trimEnd()}\n\n${agySandboxDenialModelNote(denial)}`;
-            if (!this.sandboxNotified.has(denial.path)) {
+            // The write notice above already told the user about this step.
+            if (!writeOutside && !this.sandboxNotified.has(denial.path)) {
               this.sandboxNotified.add(denial.path);
               event('error', { message: agySandboxBlockedText(denial), isTerminal: false, reason: 'agy_sandbox_blocked' });
             }
@@ -100,6 +114,11 @@ export class AgyTranslator {
   }
 
   tool(id: unknown): AcpRecord { return typeof id === 'string' ? this.tools.get(id) ?? {} : {}; }
+
+  private writeOutside(tool: AcpRecord): string | null {
+    if (!this.sandbox) return null;
+    try { return agyWriteOutsideTask(tool, this.sandbox.taskDir, this.sandbox.homeDir, this.sandbox.visibleDirs); } catch { return null; }
+  }
 
   private sandboxDenial(tool: AcpRecord, errorText: string): AgySandboxDenial | null {
     if (!this.sandbox) return null;

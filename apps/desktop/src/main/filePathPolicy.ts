@@ -43,6 +43,7 @@
 import * as fsSync from 'node:fs';
 import * as os from 'node:os';
 import * as path from 'node:path';
+import { agyHostPathRefusal } from './agyHostPathGuard.js';
 
 /** Platform-correct path helpers (default to the host so production behaves
  *  exactly like the previous global-`path` usage). */
@@ -146,6 +147,9 @@ export function isPathAllowedAgainst(
     if (target === blockedKey) return false;
     if (target.startsWith(blockedKey + p.sep)) return false;
   }
+  // agy task folders (cindy#1 QQ 6924350879 item 5): a path inside one whose real path leaves it is
+  // refused here too, so every entry behind this policy runs the same check. No agy session = no-op.
+  if (platform === process.platform && agyHostPathRefusal(canonicalInput) !== null) return false;
   return true;
 }
 

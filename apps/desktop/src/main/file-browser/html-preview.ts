@@ -9,6 +9,7 @@ import { createFileReadQueue } from '@cindy/device-link';
 import { HTML_SNAPSHOT_CSP, withSnapshotHtmlCsp } from '@cindy/maker-shared/file-preview';
 import type { DirEntry } from '@cindy/file-browser-core';
 import { toWorkdirRel } from '../../shared/workdirPath.js';
+import { verifyHostHandle } from '../agyHostPathGuard.js';
 
 export interface HtmlPreviewArgs {
   origin:
@@ -42,6 +43,8 @@ export async function copyPreviewFile(
   const before = await fs.lstat(source);
   if (!before.isFile()) throw new Error('PREVIEW_CHANGED');
   const input = await fs.open(source, constants.O_RDONLY | (constants.O_NOFOLLOW ?? 0));
+  // agy task folder (cindy#1): the opened handle itself must still be inside it (closes on refusal).
+  await verifyHostHandle(input, source);
   try {
     const stat = await input.stat();
     if (

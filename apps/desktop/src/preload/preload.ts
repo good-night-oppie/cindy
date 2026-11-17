@@ -735,6 +735,9 @@ const fanOutGithubSetupOpen = createIpcFanOut('git-context:github-setup:open');
 // 系统级瞬时网络错误 tip：lifecycle 兜底 catch 到 ETIMEDOUT/ECONNRESET 等不杀进程时,
 // 把 err.code / address / port 推给 renderer, renderer 自己 toast (带节流) 让用户感知。
 const fanOutSystemTransientNetworkError = createIpcFanOut('system:transient-network-error');
+// agy task folder (cindy#1): a protocol entry (xdt-file / xdt-audio) refused a link out of the folder;
+// the renderer shows the sentence as a toast (agyHostPathRefusalToast.ts).
+const fanOutAgyHostPathRefused = createIpcFanOut('agy-host-path:refused');
 // Find in Page (F-FIP-1): Chromium 异步回推匹配数 / 当前 ordinal。
 const fanOutFindInPageResult = createIpcFanOut('find-in-page:result');
 const fanOutSelectionContextMenuAddToChat = createIpcFanOut(
@@ -1379,6 +1382,12 @@ contextBridge.exposeInMainWorld('electronAPI', {
 
   // 主进程兜底 catch 到瞬时网络错误时推一次 (lifecycle.ts), payload: { code, address?, port? }。
   // 节流由 renderer 侧 (systemNetworkErrorToast.ts) 负责, 这里只透传, 不去重。
+  onAgyHostPathRefused: (callback: (payload: { message: string; key: string }) => void): (() => void) =>
+    fanOutAgyHostPathRefused((payload) => {
+      const p = payload as { message?: unknown; key?: unknown } | null;
+      if (p && typeof p.message === 'string' && typeof p.key === 'string') callback({ message: p.message, key: p.key });
+    }),
+
   onSystemTransientNetworkError: (
     callback: (payload: { code: string; address?: string; port?: number }) => void,
   ): (() => void) =>
@@ -4609,6 +4618,8 @@ contextBridge.exposeInMainWorld('electronAPI', {
           | 'not_file'
           | 'unsupported_type'
           | 'copy_failed';
+        /** agy task folder: the sentence for the user (cindy#1). */
+        message?: string;
       }
   > => ipcRenderer.invoke('chat-attachment:stage', params),
 

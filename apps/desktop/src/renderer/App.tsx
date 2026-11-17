@@ -56,6 +56,7 @@ import {
   setPromptRecommendationOwner,
 } from '@/lib/promptRecommendationStore';
 import { installSystemNetworkErrorToastListener } from '@/lib/systemNetworkErrorToast';
+import { installAgyHostPathRefusalToastListener } from '@/lib/agyHostPathRefusalToast';
 import { installSilentInstallToastListener } from '@/lib/silentInstallToast';
 import { installProviderUpstreamErrorToastListener } from '@/lib/providerUpstreamErrorToast';
 import { installAutoPermissionFallbackToastListener } from '@/lib/autoPermissionFallbackToast';
@@ -466,6 +467,11 @@ export function App() {
   // renderer 弹一条带节流的 warning toast 让用户感知到; 详见 systemNetworkErrorToast.ts。
   useEffect(() => {
     return installSystemNetworkErrorToastListener();
+  }, []);
+
+  // agy task folder (cindy#1): xdt-file / xdt-audio refused a link out of it; say why (agyHostPathRefusalToast.ts).
+  useEffect(() => {
+    return installAgyHostPathRefusalToastListener();
   }, []);
 
   // Phase D — maker:send 触发的远端 agent 静默安装 (codex 没装就自动跑 install)

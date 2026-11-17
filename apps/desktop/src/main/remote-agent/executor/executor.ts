@@ -40,6 +40,7 @@ import { piGrep, type PiGrepInput } from './search';
 import { resolveExecutorShell, runOnce, ShellSession } from './shell';
 import { fetchWebPage, WEB_FETCH_PAGE_CHARS, type GuardedFetch } from './webFetch';
 import { ExecutorPathError, type ExecutorWorkspace } from './workspace';
+import { agyHostPathRefusal, checkAgyHostPath, readHostFile } from '../../agyHostPathGuard';
 
 /** Pi bash 的超时(秒)上限，与 Pi 侧 Cindy 桥的上限一致。 */
 const PI_BASH_MAX_TIMEOUT_SECONDS = 1800;
@@ -313,7 +314,19 @@ export class RemoteExecutor {
     }
   }
 
+  /**
+   * agy task folders (cindy#1, QQ R3 on #15): a link agy left in the working folder must not lead the
+   * remote agent outside it. The one host check, on every path action, before the gate.
+   */
+  private agyRefusal(action: ExecutorAction): string | null {
+    if (action.kind === 'read' || action.kind === 'write') return agyHostPathRefusal(action.path);
+    if (action.kind === 'exec') return agyHostPathRefusal(action.cwd);
+    return null;
+  }
+
   private async authorize(action: ExecutorAction, signal?: AbortSignal): Promise<void> {
+    const agy = this.agyRefusal(action);
+    if (agy) throw new ExecutorRequestError('EACCES', agy);
     const decision = await this.decide(action, signal);
     if (!decision.ok) throw new ExecutorRequestError('EACCES', decision.reason ?? 'Not allowed.');
   }
@@ -328,7 +341,9 @@ export class RemoteExecutor {
         case 'fs.read': {
           const target = this.resolvePath(str(body, 'path'));
           await this.authorize({ kind: 'read', path: target }, signal);
-          return { data: this.workspace.mapOutputForAgent(await rawReadFile(target)).toString('base64') };
+          // In an agy task folder read through the checked handle (no swap after the check).
+          const bytes = checkAgyHostPath(target) ? await readHostFile(target) : await rawReadFile(target);
+          return { data: this.workspace.mapOutputForAgent(bytes).toString('base64') };
         }
         case 'fs.access': {
           const target = this.resolvePath(str(body, 'path'));
@@ -504,6 +519,8 @@ export class RemoteExecutor {
   }
 
   private async authorizeTool(action: ExecutorAction, signal?: AbortSignal): Promise<void> {
+    const agy = this.agyRefusal(action);
+    if (agy) throw new ExecutorDenied(agy);
     const decision = await this.decide(action, signal);
     if (!decision.ok) throw new ExecutorDenied(decision.reason ?? 'Not allowed.');
   }

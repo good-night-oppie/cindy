@@ -14,6 +14,7 @@
     "./pi-extension-ui": "./src/agents/pi/extension-ui-capabilities.ts",
     "./pi-subagent-runs": "./src/agents/pi/pi-subagent-runs.ts",
     "./skill-scan-limits": "./src/agents/shared/skill-scan-limits.ts",
+    "./agy-host-path-guard": "./src/agents/agy/host-path-guard.ts",
     "./runtime-owner-lock": {
       "types": "./src/runtime-owner-lock.d.ts",
       "import": "./src/runtime-owner-lock.js",
