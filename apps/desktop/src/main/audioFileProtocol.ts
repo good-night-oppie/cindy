@@ -151,7 +151,7 @@ export function registerAudioFileProtocolHandler(): void {
       // In an agy task folder read through the checked handle (cindy#1); elsewhere as before.
       let buffer: Buffer;
       try {
-        buffer = checkAgyHostPath(realPath) ? await readHostFile(realPath) : await fs.readFile(realPath);
+        buffer = checkAgyHostPath(resolved) ? await readHostFile(resolved) : await fs.readFile(realPath);
       } catch (err) {
         if (isAgyLinkOutsideTaskError(err)) {
           notifyAgyHostPathRefusalFor(resolved);
