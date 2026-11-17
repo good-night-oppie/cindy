@@ -77,6 +77,14 @@ export function setAgyHostPathRefusalNotifier(notify: (notice: AgyHostPathRefusa
   lastNoticeAt.clear();
 }
 
+/**
+ * JJ's third sentence when `target` is refused, else null: for entries where the refusal is not
+ * necessarily about a link (the dangerous-attachment stage, the media protocols).
+ */
+export function agyNotInTaskFolderRefusal(target: string): string | null {
+  return agyHostPathRefusal(target) === null ? null : AGY_HOST_PATH_USER_COPY.notInTaskFolder[agyCopyLocale(locale())];
+}
+
 /** Tell the user about a refused path, once per path per quiet period. */
 export function notifyAgyHostPathRefusalFor(target: string): void {
   const now = Date.now();
