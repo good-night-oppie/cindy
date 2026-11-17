@@ -333,7 +333,8 @@ export function __resetAvailableAgentsCacheForTest(): void {
 export function useModelPickerAgents(current: RuntimeAgentKind, deviceId?: string | null): readonly RuntimeAgentKind[] | undefined {
   const { availableVendors, loaded } = useAvailableAgents(deviceId);
   if (!loaded) return undefined;
-  return (['claude-code', 'codex', 'pi', 'agy'] as const).filter(
+  // 模型选择器里的会话内跨引擎切换仍只覆盖三种引擎;agy 只用于新建任务。
+  return (['claude-code', 'codex', 'pi'] as const).filter(
     (agent) => agent === current || availableVendors.has(toVendor(agent)),
   );
 }

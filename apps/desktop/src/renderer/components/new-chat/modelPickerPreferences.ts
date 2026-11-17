@@ -79,15 +79,20 @@ export function useTransientModelPickerPreferences(deviceId?: string): ModelPick
         get: (uid) => favorites().find((item) => item.uid === uid),
         add: (config) => {
           const normalized = normalizeModelConfigCopy(config);
-          if (!normalized || favorites().some((item) =>
+          if (!normalized) return;
+          const agent = normalized.agent;
+          // 收藏表只覆盖三种既有引擎(见 modelFavorites.ModelFavoriteConfig)。
+          if (agent === 'agy' || favorites().some((item) =>
             modelConfigCopyIdentity(item) === modelConfigCopyIdentity(normalized))) return;
-          editFavorites([...favorites(), { ...normalized, uid: crypto.randomUUID() }]);
+          editFavorites([...favorites(), { ...normalized, agent, uid: crypto.randomUUID() }]);
         },
         update: (uid, patch) => {
           editFavorites(favorites().map((item) => {
             if (item.uid !== uid) return item;
             const normalized = normalizeModelConfigCopy({ ...item, ...patch });
-            return normalized ? { ...normalized, uid } : item;
+            if (!normalized || normalized.agent === 'agy') return item;
+            const agent = normalized.agent;
+            return { ...normalized, agent, uid };
           }));
         },
         remove: (uid) => editFavorites(favorites().filter((item) => item.uid !== uid)),

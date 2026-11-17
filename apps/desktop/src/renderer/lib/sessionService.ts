@@ -13,6 +13,7 @@ import type {
   UsageHistorySession,
   WorkspaceKind,
 } from '@/lib/ccAgent.types';
+import type { DbAgentKind } from '../../shared/agentKindConversion';
 import { ApiError } from '@/lib/httpClient';
 import { extractIpcError } from '@/utils/ipcError';
 // device-link 透明对等:fork / rewind 按 sessionId 来源路由(本机 → 本地 maker,
@@ -107,7 +108,8 @@ export async function create(body?: {
   fastMode?: boolean | 'ultrafast';
   /** 计划模式一级开关(与 permissionMode 正交); 草稿开着计划模式时随建会话落库。 */
   planModeEnabled?: boolean;
-  agentKind?: 'cc' | 'codex' | 'pi';
+  /** 新建任务可选引擎(含 agy);能否真的启动由主进程注册表决定。 */
+  agentKind?: DbAgentKind;
   orcaRole?: OrcaRole | null;
   /** 附加只读引用目录列表 (绝对路径); main 端 mapper 会 JSON.stringify 后写库。 */
   extraDirs?: string[];

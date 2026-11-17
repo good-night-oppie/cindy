@@ -781,6 +781,8 @@ export function useUnifiedRowActions(options: UnifiedRowActionsOptions): Unified
 
   const applyEngine: UnifiedRowActions['applyEngine'] = (anchor, entry, config, engine) => {
     if (interactionDisabled) return;
+    // 收藏只覆盖三种既有引擎(device-link wire 也只认这三种):agy 行不进收藏链路。
+    if (engine === 'agy') return;
     if (anchor.kind === 'fav') {
       const commit = () => favorites.update(anchor.uid, { agent: engine });
       // 编辑后的整份副本 = 旧副本 ⊕ 新引擎,由收藏行**同一条**解析链路算出(见
@@ -1153,6 +1155,8 @@ export function useUnifiedRowActions(options: UnifiedRowActionsOptions): Unified
 
   const addFavorite: UnifiedRowActions['addFavorite'] = (anchor, config) => {
     if (interactionDisabled) return;
+    // 同上:agy 没有收藏条目。
+    if (config.engine === 'agy') return;
     const result = favorites.add({
       providerId: anchor.providerId,
       modelId: config.storedModelId ?? anchor.modelId,
