@@ -11,6 +11,7 @@ import {
   AGY_HOST_PATH_USER_COPY, AgyLinkOutsideTaskError, agyCopyLocale, checkAgyTaskPath, isAgyLinkOutsideTaskError, listAgyTaskDir, openAgyTaskFile,
   readAgyTaskFile, verifyAgyTaskHandle, type AgyTaskEntry, type AgyTaskPathCheck,
 } from '@cindy/maker-core/agy-host-path-guard';
+import { constants as fsConstants, promises as fsPromises } from 'node:fs';
 import type { FileHandle } from 'node:fs/promises';
 
 let localeSource: () => string | null | undefined = () => undefined;
@@ -49,6 +50,37 @@ export async function verifyHostHandle(handle: FileHandle, target: string, taskD
     await handle.close().catch(() => {});
     throw error;
   }
+}
+
+/**
+ * realpath for entries that check the real path and then open it (read-file-bytes, the attachment
+ * stage, lightbox save-as). Whether the path is in an agy task folder is decided from the path the
+ * caller asked for, never from its real path (QQ B3 on #15): inside one, this is the checked real path
+ * (refused when it leads outside); elsewhere plain fs.realpath, as before.
+ */
+export async function agyAwareRealpath(target: string): Promise<string> {
+  const check = checkAgyHostPath(target);
+  return check ? check.realPath : fsPromises.realpath(target);
+}
+
+/**
+ * Open read-only without following a link in the last component. Inside an agy task folder this is
+ * openHostFileForRead (check, no-follow open, handle re-check); elsewhere the entry's usual O_NOFOLLOW open.
+ */
+export async function openNoFollowForRead(target: string): Promise<FileHandle> {
+  if (checkAgyHostPath(target)) return openHostFileForRead(target);
+  const noFollow = typeof fsConstants.O_NOFOLLOW === 'number' ? fsConstants.O_NOFOLLOW : 0;
+  return fsPromises.open(target, fsConstants.O_RDONLY | noFollow);
+}
+
+/**
+ * For entries that hand a path to another program (shell:open-path, open-with, open in browser, the
+ * lightbox's open with default app): inside an agy task folder, the checked real path, refused when it
+ * leads outside (QQ R2 on #15). The other program still opens by path, so a swap after this check is a
+ * remaining window; it is listed in the PR. Elsewhere the path is returned unchanged.
+ */
+export function agyHandoffPath(target: string): string {
+  return checkAgyHostPath(target)?.realPath ?? target;
 }
 
 export function readHostFile(target: string, taskDir?: string): Promise<Buffer> {
