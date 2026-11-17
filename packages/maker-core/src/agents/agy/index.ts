@@ -227,8 +227,9 @@ export class AgyAgent extends BaseAgent {
       visibleDirs: agyPrivateStateMounts(sandboxStateRoot, os.homedir()).map(mount => mount.target),
       locale: this.deps.uiLocale,
     } : undefined);
-    // Host reads / lists / uploads of this folder go through checkAgyTaskPath while the session is open
-    // (cindy#1 QQ 6924350879 item 5). Released in close().
+    // Host reads / lists / uploads of this folder go through checkAgyTaskPath (cindy#1 QQ 6924350879 item 5).
+    // The folder is also recorded on disk and stays an agy task folder after close() (QQ B2 on #15);
+    // close() only ends the in-memory entry. Throws, and agy does not start, if it cannot be recorded.
     let releaseTaskDir: (() => void) | undefined = registerAgyTaskDir(opts.workingDir);
     const uiLocale = this.deps.uiLocale;
     const emitReviewNotice = (message: string) => emit({ type: 'error', data: { message, isTerminal: false } });
