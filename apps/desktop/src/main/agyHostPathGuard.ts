@@ -8,7 +8,7 @@
  * __tests__/agyHostPathGuardEntries.test.ts).
  */
 import {
-  AgyLinkOutsideTaskError, checkAgyTaskPath, isAgyLinkOutsideTaskError, listAgyTaskDir, openAgyTaskFile,
+  AGY_HOST_PATH_USER_COPY, AgyLinkOutsideTaskError, agyCopyLocale, checkAgyTaskPath, isAgyLinkOutsideTaskError, listAgyTaskDir, openAgyTaskFile,
   readAgyTaskFile, verifyAgyTaskHandle, type AgyTaskEntry, type AgyTaskPathCheck,
 } from '@cindy/maker-core/agy-host-path-guard';
 import type { FileHandle } from 'node:fs/promises';
@@ -60,3 +60,37 @@ export function listHostDir(target: string, taskDir?: string): Promise<AgyTaskEn
 }
 
 export { isAgyLinkOutsideTaskError };
+
+// ---------------------------------------------------------------------------
+// Entries without a text channel (xdt-file / xdt-audio): push JJ's third sentence to the renderer,
+// which shows it as a toast (JJ on cindy#15). Once per path per quiet period.
+// ---------------------------------------------------------------------------
+
+export interface AgyHostPathRefusalNotice { message: string; key: string }
+const NOTICE_QUIET_MS = 60_000;
+let refusalNotifier: (notice: AgyHostPathRefusalNotice) => void = () => {};
+const lastNoticeAt = new Map<string, number>();
+
+/** Wired once at startup: how a refusal reaches the user (bootstrap sends it to the app windows). */
+export function setAgyHostPathRefusalNotifier(notify: (notice: AgyHostPathRefusalNotice) => void): void {
+  refusalNotifier = notify;
+  lastNoticeAt.clear();
+}
+
+/** Tell the user about a refused path, once per path per quiet period. */
+export function notifyAgyHostPathRefusalFor(target: string): void {
+  const now = Date.now();
+  const last = lastNoticeAt.get(target);
+  if (last !== undefined && now - last < NOTICE_QUIET_MS) return;
+  lastNoticeAt.set(target, now);
+  try {
+    refusalNotifier({ key: target, message: AGY_HOST_PATH_USER_COPY.notInTaskFolder[agyCopyLocale(locale())] });
+  } catch { /* a notice must never break the refusal */ }
+}
+
+/** The one check for entries without a text channel: true = refused (and the user was told). */
+export function notifyAgyHostPathRefusal(target: string): boolean {
+  if (agyHostPathRefusal(target) === null) return false;
+  notifyAgyHostPathRefusalFor(target);
+  return true;
+}
