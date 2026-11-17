@@ -2,6 +2,7 @@ import { chatErrorDiagnostic } from './chatServerErrors.js';
 import { retryAfterDeadline } from '@cindy/auth-client';
 import { net } from 'electron';
 import fs from 'node:fs/promises';
+import { checkAgyHostPath, readHostFile } from '../agyHostPathGuard.js';
 import path from 'node:path';
 import { createHash, randomUUID } from 'node:crypto';
 import { readFile as readMedia, supportedMime } from '../cindy-media/blobStore.desktop.js';
@@ -99,11 +100,13 @@ export function createChatMedia(api: ChatApi, current: () => boolean, endpoint: 
           await checkFile();
           if (attachment.size > MAX_SIZE) throw new Error('ATTACHMENT_TOO_LARGE');
           if (attachment.path && !attachment.readBytes) {
+            // agy task folder (cindy#1): refuse a link out of it before uploading anything.
+            checkAgyHostPath(attachment.path);
             const stat = await fs.stat(attachment.path); await checkFile();
             if (!stat.isFile() || stat.size > MAX_SIZE) throw new Error('ATTACHMENT_TOO_LARGE');
           }
           const bytes = attachment.readBytes ? await attachment.readBytes() : attachment.url?.startsWith('cindy-media://') ? (await readMedia(attachment.url)).buffer
-            : attachment.path ? await fs.readFile(attachment.path) : null;
+            : attachment.path ? (checkAgyHostPath(attachment.path) ? await readHostFile(attachment.path) : await fs.readFile(attachment.path)) : null;
           await checkFile();
           if (!bytes || !bytes.length || bytes.length > MAX_SIZE) throw new Error('ATTACHMENT_UNAVAILABLE');
           const key = createHash('sha256').update(source).update(attachment.id).update(bytes).digest('hex');
