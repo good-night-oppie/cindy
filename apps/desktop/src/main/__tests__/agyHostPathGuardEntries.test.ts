@@ -10,7 +10,9 @@ import path from 'node:path';
 import { afterAll, describe, expect, it } from 'vitest';
 import { registerAgyTaskDir } from '@cindy/maker-core/agy-host-path-guard';
 import { isPathAllowedAgainst } from '../filePathPolicy';
-import { agyHostPathRefusal, notifyAgyHostPathRefusal, setAgyHostPathRefusalNotifier } from '../agyHostPathGuard';
+import {
+  agyHostPathRefusal, agyNotInTaskFolderRefusal, notifyAgyHostPathRefusal, setAgyHostPathRefusalNotifier,
+} from '../agyHostPathGuard';
 
 const MAIN = path.resolve(__dirname, '..');
 const read = (rel: string) => readFileSync(path.join(MAIN, rel), 'utf8');
@@ -24,7 +26,7 @@ const ENTRIES: [string, string, RegExp][] = [
   ['bootstrap-electron.ts', 'workspace:scan-at-resources / workspace:scan-slash-commands', /agyHostPathRefusal\(agentsDir\)[\s\S]*agyHostPathRefusal\(dirPath\)/],
   ['localFileProtocol.ts', 'xdt-file://', /notifyAgyHostPathRefusal\(resolved\)[\s\S]*openHostFileForRead\(realPath\)/],
   ['audioFileProtocol.ts', 'xdt-audio://', /notifyAgyHostPathRefusal\(resolved\)[\s\S]*readHostFile\(realPath\)/],
-  ['bootstrap-electron.ts', 'chat-attachment:stage (message) and the refusal push to the renderer', /setAgyHostPathRefusalNotifier\([\s\S]*agyRefusal: \(sourcePath\) => agyHostPathRefusal\(sourcePath\)/],
+  ['bootstrap-electron.ts', 'chat-attachment:stage (message) and the refusal push to the renderer', /setAgyHostPathRefusalNotifier\([\s\S]*agyRefusal: \(sourcePath\) => agyNotInTaskFolderRefusal\(sourcePath\)/],
   ['cindy-media/chatAttachmentsCore.ts', 'image-cache:from-path (drag an image in)', /readHostFile\(params\.sourcePath\)/],
   ['file-browser/index.ts', 'maker:file-browser:list-dir / list-all / read-file / stat, maker:chat-folder:upload', /checkAgyHostPath\(resolvePath\(workdir, relPath\)\)[\s\S]*agyHostPathRefusal\(args\.sourcePath\)/],
   ['file-browser/search/index.ts', 'maker:search:start', /agyHostPathRefusal\(args\.workdir\)/],
@@ -84,6 +86,9 @@ describe('the shared path policy refuses a link out of an open agy task folder',
       expect(notifyAgyHostPathRefusal(path.join(task, 'pic.png'))).toBe(true);
       expect(notifyAgyHostPathRefusal(path.join(task, 'pic.png'))).toBe(true);
       expect(notifyAgyHostPathRefusal(path.join(root, 'outside', 'config'))).toBe(false);
+      // The dangerous-attachment stage uses the same third sentence (JJ: not the link sentence).
+      expect(agyNotInTaskFolderRefusal(path.join(task, 'pic.png'))).toBe(sent[0]?.message);
+      expect(agyNotInTaskFolderRefusal(path.join(root, 'outside', 'config'))).toBeNull();
       expect(sent).toEqual([{ key: path.join(task, 'pic.png'),
         message: 'This file is not in the task folder, so Cindy did not open it. If you need it, copy it into the task folder and try again.' }]);
     } finally { release(); setAgyHostPathRefusalNotifier(() => {}); }
