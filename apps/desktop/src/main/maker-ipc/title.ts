@@ -285,6 +285,9 @@ function parseSessionId(raw: unknown, optional = false): string | undefined {
 }
 
 function parseAgentKind(raw: unknown): AgentKind {
+  // Naming a task is an internal one-off call and Antigravity has no title model of its own:
+  // its tasks are named through the Claude channel (this only affects the generated title).
+  if (raw === 'agy') return 'claude-code';
   if (!TITLE_AGENT_KINDS.some(kind => kind === raw)) {
     throwIpcError('INVALID_PARAMS', 'invalid agentKind');
   }

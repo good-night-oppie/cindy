@@ -151,6 +151,7 @@ import {
   releaseSessionBindingsForOwnerBoundary,
 } from '../maker-ipc/register.js';
 import { MAKER_PUSH } from '../maker-ipc/channels.js';
+import { setAntigravityModelSource } from './antigravity-models.js';
 import { readProviderGroupBinding } from '../provider-group/bindings.desktop.js';
 import { createSubscriptionFastPolicy } from './subscription-fast-policy.js';
 import { getProviderGroupGuestSwitch } from '../provider-group/guestSwitch.js';
@@ -2099,7 +2100,15 @@ export function getMaker(): Maker {
       // Linux keeps the bwrap sandbox and still fails closed if it is unavailable. Windows and
       // macOS have no system sandbox; the owner chose to run agy there with a filtered env and a
       // visible notice instead of hiding the engine (cindy#1, 2026-11-17).
-      agySandbox: { allowWithoutSystemSandbox: process.platform !== 'linux' },
+      // shareCliLogin: the Google Gemini provider is connected through the CLI's own sign-in, so the
+      // sandboxed CLI is shown that one token file read-only (owner decision 2026-11-18, cindy#1).
+      agySandbox: { allowWithoutSystemSandbox: process.platform !== 'linux', shareCliLogin: true },
+    });
+
+    setAntigravityModelSource({
+      read: () => agyAgent.capabilities.availableModels,
+      probe: () => agyAgent.probeModels(process.cwd()),
+      changed: () => refreshSelectableModelsAndBroadcast({}),
     });
 
     const makerAgents: ConstructorParameters<typeof Maker>[0]['agents'] = {
