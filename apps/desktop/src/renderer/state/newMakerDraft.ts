@@ -411,7 +411,9 @@ function sanitize(raw: unknown): NewMakerDraft {
   const newChatDefaultPermissionMode =
     r.newChatDefaultPermissionMode === 'auto' || r.newChatDefaultPermissionMode === 'bypassPermissions'
       ? r.newChatDefaultPermissionMode : null;
-  const sanitizeVendorPrefs = (p: Partial<VendorPrefs> | undefined, v: DraftVendor): VendorPrefs => {
+  const sanitizeVendorPrefs = (p: Partial<VendorPrefs> | undefined, v: DraftVendor): VendorPrefs =>
+    withoutAgyFullAccessDefault(sanitizeVendorPrefsRaw(p, v), v);
+  const sanitizeVendorPrefsRaw = (p: Partial<VendorPrefs> | undefined, v: DraftVendor): VendorPrefs => {
     const fallback = { ...defaultVendorPrefs(v), permissionMode: newChatDefaultPermissionMode ?? 'auto' };
     const permissionModeCustomized = p?.permissionModeCustomized === true ||
       (p?.permissionModeCustomized === undefined && typeof p?.permissionMode === 'string' &&
@@ -914,6 +916,28 @@ export function setWorktreePreference(enabled: boolean): void {
     worktreeEnabled,
     worktreePreferenceCustomized,
   };
+  emit();
+}
+
+/**
+ * Antigravity's Full access removes all file and network isolation, so it is never a starting
+ * value (cindy#1, PG 2026-11-19): not from the global new-task default, not from a remembered
+ * choice. The user can still pick it for the task they are about to create or switch inside a
+ * task; it just does not carry over to the next new task.
+ */
+function withoutAgyFullAccessDefault(prefs: VendorPrefs, vendor: DraftVendor): VendorPrefs {
+  return vendor === 'agy' && prefs.permissionMode === 'bypassPermissions'
+    ? { ...prefs, permissionMode: 'auto', permissionModeCustomized: false }
+    : prefs;
+}
+
+/** Call once an Antigravity task has been created from the draft: the next draft starts isolated again. */
+export function resetAgyDraftFullAccess(): void {
+  const current = currentDraft.lastByVendor.agy;
+  const next = withoutAgyFullAccessDefault(current, 'agy');
+  if (next === current) return;
+  currentDraft = { ...currentDraft, lastByVendor: { ...currentDraft.lastByVendor, agy: next } };
+  scheduleWrite({ preserveStoredDefaultTuplePreference: true });
   emit();
 }
 

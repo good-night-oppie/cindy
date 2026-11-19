@@ -35,7 +35,7 @@ export function localCliDisplayName(cli: LocalCliId): string {
 }
 
 /** 登录态探测方式:文件存在性 / Claude 跨平台凭证存(Keychain + 文件)。 */
-export type CredentialProbe = 'file' | 'claude-oauth';
+export type CredentialProbe = 'file' | 'claude-oauth' | 'agy-login';
 
 /** 单条检测结果:CLI 是否安装 / 是否已登录 + 建议接入的供应商 id。 */
 export interface LocalCliDetection {
@@ -103,7 +103,7 @@ export const LOCAL_CLI_DETECT_MAP: ReadonlyArray<{
     providerId: 'antigravity',
     homeBase: 'home',
     configDirSegments: ANTIGRAVITY_CLI_DIR_SEGMENTS,
-    credentialProbe: 'file',
-    credentialFileSegments: [...ANTIGRAVITY_CLI_DIR_SEGMENTS, 'antigravity-oauth-token'],
+    // 登录态按平台不同:Linux 是目录下的文件,Windows 在系统凭据管理器里 —— 交给 host 判断。
+    credentialProbe: 'agy-login',
   },
 ];
