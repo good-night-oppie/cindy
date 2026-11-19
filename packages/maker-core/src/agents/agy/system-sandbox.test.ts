@@ -66,6 +66,11 @@ describe('buildAgySandboxLaunch', () => {
     for (const f of ['-t', '-u', '-T', '-U']) expect(pasta[pasta.indexOf(f) + 1]).toBe('none');
     expect(pasta.slice(pasta.indexOf('--dns-forward'), pasta.indexOf('--dns-forward') + 4))
       .toEqual(['--dns-forward', '169.254.1.53', '--dns-host', '172.26.0.2']);
+    // With setpriv, pasta is tied to Cindy's life; the rest of the command line is unchanged.
+    const tied = buildAgySandboxLaunch({ ...base, setprivPath: '/usr/bin/setpriv' });
+    expect(tied.command).toBe('/usr/bin/setpriv');
+    expect(tied.args.slice(0, 3)).toEqual(['--pdeathsig', 'KILL', '/usr/bin/pasta']);
+    expect(tied.args.slice(3)).toEqual(l.args);
     // Sharing the CLI login is off unless asked for.
     expect(l.args.join(' ')).not.toContain('antigravity-oauth-token');
     // Asked for: exactly the token file, read-only, and nothing else from the real ~/.gemini.
