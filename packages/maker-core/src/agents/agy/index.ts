@@ -54,7 +54,7 @@ import { assertAgyModelAllowed } from './models.js';
 import { agyRpcDiagnostic, type AgyRpcDiagnostic } from './diagnostics.js';
 import { assertAgyBinaryUsable, AgyBinaryUnavailableError, type AgyVersionReader } from './version.js';
 import {
-  AGY_SANDBOX_USER_COPY_DRAFT, AgySandboxUnavailableError, agyPrivateStateMounts, prepareAgySandboxedLaunch,
+  AGY_SANDBOX_USER_COPY_DRAFT, AgySandboxUnavailableError, agyPrivateStateMounts, prepareAgySandboxedLaunch, prepareAgyFullAccessLaunch,
   filterAgyUnsandboxedEnv,
   type AgySandboxProbe,
 } from './system-sandbox.js';
@@ -74,6 +74,8 @@ const no = { supported: false, reason: 'not-implemented' } as const;
 const NATIVE_PERMISSION_DESCRIPTION = 'Antigravity runs inside Cindy\'s file isolation: it can only read and change files in this task\'s folder, and it may change files there without asking. Cindy answers the approval requests agy sends (typically shell commands).';
 // Used only where no system-level isolation exists (Windows, macOS). Wording pending JJ.
 const UNSANDBOXED_PERMISSION_DESCRIPTION = 'Antigravity runs without system-level file isolation on this computer: it can reach any file your user account can, limited only by the approval requests it sends to Cindy. Requests outside this task\'s folder are worth reading before you allow them.';
+// Same meaning as Full access on the other engines: no file isolation, network commands allowed, no questions.
+const FULL_ACCESS_PERMISSION_DESCRIPTION = 'Antigravity runs without Cindy\x27s file isolation: it can read and change any file your account can, including outside this task\x27s folder, and run network commands. Cindy allows the approval requests agy sends without confirmation.';
 const CONTROL_TIMEOUT = 30_000;
 const CANCEL_TIMEOUT = 10_000;
 const PROMPT_REQUEST_TIMEOUT = 24 * 60 * 60 * 1000;
@@ -105,6 +107,8 @@ export interface AgyAgentDeps extends AgentDeps {
      * path still never falls back to this on its own (cindy#1, owner decision 2026-11-17).
      */
     allowWithoutSystemSandbox?: boolean;
+    /** Expose the CLI's existing Google sign-in file read-only inside the sandbox (see system-sandbox). */
+    shareCliLogin?: boolean;
   };
   /** UI locale for agy user notices (JJ's wording exists in zh-CN and en). */
   uiLocale?: () => string | null | undefined;
@@ -119,7 +123,7 @@ export class AgyAgent extends BaseAgent {
       { id: 'ask', displayName: 'Default permissions', description: NATIVE_PERMISSION_DESCRIPTION },
       { id: 'default', displayName: 'Default permissions', description: NATIVE_PERMISSION_DESCRIPTION },
       { id: 'auto', displayName: 'Auto-review', description: `Cindy automatically reviews the approval requests agy sends. ${NATIVE_PERMISSION_DESCRIPTION}` },
-      { id: 'bypassPermissions', displayName: 'Full access', description: `Cindy allows the approval requests agy sends without confirmation. ${NATIVE_PERMISSION_DESCRIPTION}` },
+      { id: 'bypassPermissions', displayName: 'Full access', description: FULL_ACCESS_PERMISSION_DESCRIPTION },
     ],
     setPermissionModeMidSession: yes,
     // ACP approvals cover only the requests agy chooses to send; Cindy cannot enforce a
@@ -288,10 +292,14 @@ export class AgyAgent extends BaseAgent {
     const unsandboxedByPlatform = wantsIsolation && process.platform !== 'linux'
       && this.deps.agySandbox?.allowWithoutSystemSandbox === true;
     const useSandbox = wantsIsolation && !unsandboxedByPlatform;
+    // Full access follows the other engines (Codex danger-full-access): no file or network
+    // isolation. The choice is fixed for this process; the host relaunches agy (resume) when the
+    // mode later crosses this line, so `mode` here is the mode this process was started with.
+    const fullAccessLaunch = useSandbox && mode === 'bypassPermissions';
     const sandboxStateRoot = this.deps.agySandbox?.stateRoot ?? path.join(os.homedir(), '.cindy', 'agy-sandbox', 'state');
     // agy sees the task folder by its real path inside the sandbox; a symlinked workingDir does not exist there.
     const agyWorkingDir = wantsIsolation ? realpathOr(opts.workingDir) : opts.workingDir;
-    const translator = new AgyTranslator(emit, wantsIsolation ? {
+    const translator = new AgyTranslator(emit, wantsIsolation && !fullAccessLaunch ? {
       taskDir: agyWorkingDir, homeDir: os.homedir(),
       visibleDirs: useSandbox
         ? agyPrivateStateMounts(sandboxStateRoot, os.homedir()).map(mount => mount.target)
@@ -577,9 +585,14 @@ export class AgyAgent extends BaseAgent {
       if (unsandboxedByPlatform) {
         emit({ type: 'error', data: { message: agyNoSystemIsolationText(this.deps.uiLocale), isTerminal: false } });
       }
-      const launch = useSandbox
+      const launch = fullAccessLaunch
+        ? await prepareAgyFullAccessLaunch({ binaryPath: this.deps.binaryPath, args: AGY_ACP_ARGS, taskDir: agyWorkingDir,
+          homeDir: os.homedir(), stateRoot: sandboxStateRoot, env, passEnvKeys: Object.keys(authEnv), probe: this.deps.agySandbox?.probe,
+          shareCliLogin: this.deps.agySandbox?.shareCliLogin === true })
+        : useSandbox
         ? await prepareAgySandboxedLaunch({ binaryPath: this.deps.binaryPath, args: AGY_ACP_ARGS, taskDir: agyWorkingDir,
-          homeDir: os.homedir(), stateRoot: sandboxStateRoot, env, passEnvKeys: Object.keys(authEnv), probe: this.deps.agySandbox?.probe })
+          homeDir: os.homedir(), stateRoot: sandboxStateRoot, env, passEnvKeys: Object.keys(authEnv), probe: this.deps.agySandbox?.probe,
+          shareCliLogin: this.deps.agySandbox?.shareCliLogin === true })
         : { command: this.deps.binaryPath, args: [...AGY_ACP_ARGS],
             // issue #13: the branch that runs without the sandbox must never hand agy the full
             // process env. On the test-transport seam it stays exactly as before.
