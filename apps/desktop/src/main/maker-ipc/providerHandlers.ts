@@ -1,5 +1,6 @@
 import { isProviderShareAgentDeviceId } from '../../shared/providerShare.js';
-import { remoteProviderDisableKey } from '@cindy/model-providers';
+import { remoteProviderDisableKey, ANTIGRAVITY_PROVIDER_ID } from '@cindy/model-providers';
+import { hasAntigravityCliLogin } from '../maker-host/antigravity-cli-login.js';
 import { withoutProviderHeaderCredentials } from '../maker-host/provider-public-view.js';
 import { withAvailabilityPolicyMutation } from '../device-link/providerShareAvailabilityPolicy.js';
 import { bindModelSourceSnapshot, acceptsModelSourceSnapshot, modelSourceRequestSignature, issueModelSourceSnapshot } from '../maker-host/model-source-snapshots.js';
@@ -3046,6 +3047,14 @@ export function registerProviderHandlers(
       if (deps.isOrganizationManagedProviderId(id)) {
         throwIpcError('PERMISSION_DENIED', 'Enterprise connections are managed by your organization');
       }
+      if (id === ANTIGRAVITY_PROVIDER_ID) {
+        // The Antigravity CLI owns the Google sign-in and Cindy runs no Google OAuth of its own.
+        // Adding this provider only records that the user wants the CLI's account used here.
+        if (!hasAntigravityCliLogin()) return { ok: false, reason: 'antigravity_cli_not_signed_in' };
+        await setProviderPresentation(id, { removed: false });
+        deps.broadcastChanged();
+        return { ok: true };
+      }
       const { ownerId, method } = requireProviderOAuthLoginOptions(rawOptions);
       const sender = providerOAuthRendererSender(event);
       if (method === 'device' && !ownerId)
@@ -3186,6 +3195,12 @@ export function registerProviderHandlers(
     const id = requireProviderId(providerId);
     if (deps.isOrganizationManagedProviderId(id)) {
       throwIpcError('PERMISSION_DENIED', 'Enterprise connections are managed by your organization');
+    }
+    if (id === ANTIGRAVITY_PROVIDER_ID) {
+      // Nothing to revoke: the sign-in stays with the CLI. Cindy just stops using it.
+      await setProviderPresentation(id, { removed: true });
+      deps.broadcastChanged();
+      return { ok: true };
     }
     const ownerAtIngress = captureProviderOwnerSession();
     let generation: symbol | null = null;

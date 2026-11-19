@@ -4340,6 +4340,8 @@
         "metaApiKey": "API key",
         "metaNoAuth": "本機 / 自行託管 · 無需驗證",
         "customAction": "找不到？新增自訂",
+        "antigravityDesc": "使用這台電腦上 Antigravity CLI 已登入的 Google 帳號，無需 API key。",
+        "antigravityNotSignedIn": "這台電腦上的 Antigravity CLI 尚未登入。請在終端機執行 agy 並以 Google 帳號登入，然後重試。",
         "oauthDesc": "在瀏覽器中登入帳號，無需 API key。",
         "deviceOAuthDesc": "使用一次性裝置碼，在供應商驗證頁面完成授權",
         "authorizeInBrowser": "在瀏覽器中授權",

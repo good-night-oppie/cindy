@@ -17,13 +17,17 @@
  *     `claude auth status` 结果,只返 boolean,Cindy 不读凭证。
  */
 
+/** Antigravity CLI 的状态目录(相对 home)。 */
+export const ANTIGRAVITY_CLI_DIR_SEGMENTS = ['.gemini', 'antigravity-cli'] as const;
+
 /** 可检测的本机 CLI 标识。 */
-export type LocalCliId = 'claude-cli' | 'codex-cli';
+export type LocalCliId = 'claude-cli' | 'codex-cli' | 'agy-cli';
 
 /** 插进「检测到 {{cli}}」等句子的商品名；各语言共用，不走 i18n。 */
 const LOCAL_CLI_DISPLAY_NAME: Record<LocalCliId, string> = {
   'claude-cli': 'Claude Code CLI',
   'codex-cli': 'Codex CLI',
+  'agy-cli': 'Antigravity CLI',
 };
 
 export function localCliDisplayName(cli: LocalCliId): string {
@@ -92,5 +96,14 @@ export const LOCAL_CLI_DETECT_MAP: ReadonlyArray<{
     configDirSegments: [],
     credentialProbe: 'file',
     credentialFileSegments: ['auth.json'],
+  },
+  {
+    // Antigravity CLI 把自己的 Google 登录存在 ~/.gemini/antigravity-cli 下;只 stat 不读。
+    cli: 'agy-cli',
+    providerId: 'antigravity',
+    homeBase: 'home',
+    configDirSegments: ANTIGRAVITY_CLI_DIR_SEGMENTS,
+    credentialProbe: 'file',
+    credentialFileSegments: [...ANTIGRAVITY_CLI_DIR_SEGMENTS, 'antigravity-oauth-token'],
   },
 ];

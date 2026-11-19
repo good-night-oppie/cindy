@@ -32,7 +32,7 @@ function depsWith(
 describe('scanLocalCliAuth', () => {
   it('都未安装未登录 → installed/loggedIn 全 false', async () => {
     const r = await scanLocalCliAuth(depsWith([], [], false));
-    expect(r).toHaveLength(2);
+    expect(r).toHaveLength(3);
     expect(r.every((d) => !d.installed && !d.loggedIn)).toBe(true);
   });
 
@@ -62,6 +62,18 @@ describe('scanLocalCliAuth', () => {
     const r = await scanLocalCliAuth(depsWith([], [join('.codex', 'auth.json')], false));
     const codex = r.find((d) => d.cli === 'codex-cli');
     expect(codex).toMatchObject({ installed: false, loggedIn: false });
+  });
+
+  it('Antigravity CLI: installed without a sign-in file, then signed in', async () => {
+    const dir = join('.gemini', 'antigravity-cli');
+    const installedOnly = await scanLocalCliAuth(depsWith([dir], [], false));
+    expect(installedOnly.find((d) => d.cli === 'agy-cli')).toMatchObject({
+      providerId: 'antigravity', installed: true, loggedIn: false, sharedWithCindy: false,
+    });
+    const signedIn = await scanLocalCliAuth(depsWith([dir], [join(dir, 'antigravity-oauth-token')], false));
+    expect(signedIn.find((d) => d.cli === 'agy-cli')).toMatchObject({
+      providerId: 'antigravity', installed: true, loggedIn: true, sharedWithCindy: true,
+    });
   });
 
   it('codex 已安装已登录', async () => {
