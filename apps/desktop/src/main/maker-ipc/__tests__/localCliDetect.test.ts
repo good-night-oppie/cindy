@@ -16,6 +16,7 @@ function depsWith(
   claudeLogin = false,
   shared: (cli: string) => boolean = () => true,
   codexHome = join(HOME, '.codex'),
+  agyLogin = false,
 ): LocalCliScanDeps {
   const dirSet = new Set(dirs.map((d) => join(HOME, d)));
   const fileSet = new Set(files.map((f) => join(HOME, f)));
@@ -25,6 +26,7 @@ function depsWith(
     isDirectory: async (p) => dirSet.has(p),
     isFile: async (p) => fileSet.has(p),
     hasClaudeLogin: () => claudeLogin,
+    hasAgyLogin: () => agyLogin,
     isCredentialSharedWithCindy: (cli) => shared(cli),
   };
 }
@@ -64,16 +66,19 @@ describe('scanLocalCliAuth', () => {
     expect(codex).toMatchObject({ installed: false, loggedIn: false });
   });
 
-  it('Antigravity CLI: installed without a sign-in file, then signed in', async () => {
+  it('Antigravity CLI: installed but signed out, then signed in (file or OS credential store)', async () => {
     const dir = join('.gemini', 'antigravity-cli');
     const installedOnly = await scanLocalCliAuth(depsWith([dir], [], false));
     expect(installedOnly.find((d) => d.cli === 'agy-cli')).toMatchObject({
       providerId: 'antigravity', installed: true, loggedIn: false, sharedWithCindy: false,
     });
-    const signedIn = await scanLocalCliAuth(depsWith([dir], [join(dir, 'antigravity-oauth-token')], false));
+    const signedIn = await scanLocalCliAuth(depsWith([dir], [], false, () => true, join(HOME, '.codex'), true));
     expect(signedIn.find((d) => d.cli === 'agy-cli')).toMatchObject({
       providerId: 'antigravity', installed: true, loggedIn: true, sharedWithCindy: true,
     });
+    // Not installed: a leftover credential alone does not count.
+    const notInstalled = await scanLocalCliAuth(depsWith([], [], false, () => true, join(HOME, '.codex'), true));
+    expect(notInstalled.find((d) => d.cli === 'agy-cli')).toMatchObject({ installed: false, loggedIn: false });
   });
 
   it('codex 已安装已登录', async () => {
@@ -91,7 +96,7 @@ describe('scanLocalCliAuth', () => {
       codexHomeDir: custom,
       isDirectory: async (p) => p === custom,
       isFile: async (p) => p === join(custom, 'auth.json'),
-      hasClaudeLogin: () => false,
+      hasClaudeLogin: () => false, hasAgyLogin: () => false,
       isCredentialSharedWithCindy: () => true,
     };
     const codex = (await scanLocalCliAuth(deps)).find((d) => d.cli === 'codex-cli');
@@ -106,7 +111,7 @@ describe('scanLocalCliAuth', () => {
       isFile: async () => {
         throw new Error('EACCES');
       },
-      hasClaudeLogin: () => false,
+      hasClaudeLogin: () => false, hasAgyLogin: () => false,
       isCredentialSharedWithCindy: () => true,
     };
     await expect(scanLocalCliAuth(deps)).rejects.toThrow('EACCES');

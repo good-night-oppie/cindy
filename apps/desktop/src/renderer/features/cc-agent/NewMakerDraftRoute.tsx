@@ -108,6 +108,7 @@ import { useAttachments } from '@/hooks/useAttachments';
 import {
   useNewMakerDraft,
   switchVendor,
+  resetAgyDraftFullAccess,
   getDraft,
   patchDraft,
   patchCollab,
