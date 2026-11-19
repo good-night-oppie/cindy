@@ -20488,7 +20488,8 @@ export function registerMakerIpc(maker: Maker, options: RegisterMakerIpcOptions)
     if (
       msg.createOpts.agentKind !== 'claude-code' &&
       msg.createOpts.agentKind !== 'codex' &&
-      msg.createOpts.agentKind !== 'pi'
+      msg.createOpts.agentKind !== 'pi' &&
+      msg.createOpts.agentKind !== 'agy'
     ) {
       throwIpcError('INVALID_PARAMS', 'queued.createOpts.agentKind invalid');
     }
@@ -22798,6 +22799,27 @@ export function registerMakerIpc(maker: Maker, options: RegisterMakerIpcOptions)
           });
         }
         throw error;
+      }
+      // Antigravity on Linux: Full access is a different launch (no file/network isolation) from
+      // the other modes, and the isolation is fixed per process. Crossing that line recycles the
+      // runtime; the next message starts agy again in the new mode and resumes the conversation.
+      // Same rule as Codex: loosening waits for the running turn, tightening stops it now.
+      if (sess && sess.agentKind === 'agy' && process.platform === 'linux'
+        && (row.permissionMode === 'bypassPermissions') !== (mode === 'bypassPermissions')) {
+        const loosening = mode === 'bypassPermissions';
+        // Tightening: stop the running reply the way the Stop button does first, so the user sees a
+        // stopped turn rather than a failed one when the runtime is then recycled.
+        if (!loosening && sess.isTurnRunning()) {
+          await sess.abort().catch((error) => {
+            log.warn('agy access-mode tighten: stopping the running turn failed', { sessionId, error: String(error) });
+          });
+        }
+        await (loosening && sess.isTurnRunning()
+          ? maker.closeSessionIfCurrent(sess, 'runtime-refresh', { afterCurrentTurn: true })
+          : maker.closeSession(sessionId, 'runtime-refresh')
+        ).catch((error) => {
+          log.warn('agy access-mode relaunch failed', { sessionId, error: String(error) });
+        });
       }
       // 分享供应商的「本任务总是允许」随权限档变化失效；Agent 实例被回收时执行器收不到这次切换。
       if (row.permissionMode !== mode) forgetCredentialGrants(sessionId);

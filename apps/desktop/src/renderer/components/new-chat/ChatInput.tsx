@@ -369,6 +369,7 @@ import {
   plainTextToComposerDocument,
 } from '@/lib/composerListDocument';
 import { probeAgyModelsIfNeeded, useAgentCapabilities, type AgentKind } from '@/hooks/useAgentCapabilities';
+import { withAntigravityModels } from './unifiedModelSelection';
 import { useAvailableAgents } from '@/hooks/useAvailableAgents';
 import { useConnectedSource } from '@/hooks/useConnectedSource';
 import { useProviders } from '@/hooks/useProviders';
@@ -2012,6 +2013,7 @@ export function ChatInput({
   const ccCaps = useAgentCapabilities('claude-code', catalogDeviceId);
   const codexCaps = useAgentCapabilities('codex', catalogDeviceId);
   const piCaps = useAgentCapabilities('pi', catalogDeviceId);
+  const agyCaps = useAgentCapabilities('agy', catalogDeviceId);
   const activeAgentCapabilities =
     agentKind === 'codex'
       ? codexCaps.capabilities
@@ -2157,8 +2159,11 @@ export function ChatInput({
     if ((piCaps.capabilities?.availableModels ?? []).some((m) => m.id === activeModel)) {
       return 'pi';
     }
+    if ((agyCaps.capabilities?.availableModels ?? []).some((m) => m.id === activeModel)) {
+      return 'agy';
+    }
     return null;
-  }, [activeModel, agentKind, runtimeEffective, composerSelection.pending, composerSelection.display.agentKind, ccCaps.capabilities, codexCaps.capabilities, piCaps.capabilities]);
+  }, [activeModel, agentKind, runtimeEffective, composerSelection.pending, composerSelection.display.agentKind, ccCaps.capabilities, codexCaps.capabilities, piCaps.capabilities, agyCaps.capabilities]);
   // 供应商连接态。effectiveSourceId / sendProviderId / dispatchSend 预检用它。device-link 远程会话 /
   // 草稿用**被控端**供应商目录(隧道),否则用本机(两 hook 都无条件调用,按 deviceLinkDeviceId 取)。
   // SSH 项目:Codex 只走远端主机的原生连接,模型清单读远端;Claude Code / Pi 仍用本机目录。
@@ -2216,8 +2221,14 @@ export function ChatInput({
     () => withFollowedAccountSource(localProviders.providers, taskSourceProvider),
     [localProviders.providers, taskSourceProvider],
   );
-  const providers = catalogDeviceId ? remoteProviders.providers
+  // 与模型面板同口径:已连接的「Google Gemini」订阅来源挂上 agy 的 ACP 清单,
+  // 否则选中其模型后发送门禁判「没有已连接来源」,Send 一直置灰。
+  const providersBase = catalogDeviceId ? remoteProviders.providers
     : sshCatalogProviders ?? localTaskProviders;
+  const providers = useMemo(
+    () => withAntigravityModels(providersBase, agyCaps.capabilities?.availableModels ?? []),
+    [agyCaps.capabilities, providersBase],
+  );
   const sendProviders = filterChatBridgedCodexProviders(
     providers,
     currentModelAgentKind ?? 'codex',

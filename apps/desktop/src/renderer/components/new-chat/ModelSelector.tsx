@@ -1,5 +1,5 @@
 import { useRemoteProviderDisable } from '@/lib/remoteProviderDisable';
-import { sameRunLocationProvider, duplicateSubscriptionProviders, subscriptionModelsCoveredBy } from '@cindy/model-providers';
+import { ANTIGRAVITY_PROVIDER_ID, sameRunLocationProvider, duplicateSubscriptionProviders, subscriptionModelsCoveredBy } from '@cindy/model-providers';
 import { deviceDisplayName } from '@/lib/deviceName';
 import { ProviderShareQuotaViewingContext, useProviderShareQuotaViewing } from '@/features/provider-share/useProviderShareWeeklyQuota';
 import { SpeedIcon } from './SpeedIcon';
@@ -107,7 +107,7 @@ import { useDevicesProviders } from '@/hooks/useDevicesProviders';
 import { effectiveRunLocation, RUN_LOCATION_LOCAL } from '@/lib/providerRunLocation';
 import { modelCatalogKey, type ControlledModelFavoriteSource } from '../../../shared/controlledModelCatalog';
 import { RemoteSourceMark } from '@/components/icons/RemoteSourceMark';
-import { AGY_PROVIDER_ID, buildAgyProviderView, buildUnifiedRail, remoteAgentProviders } from './unifiedModelSelection';
+import { withAntigravityModels, buildUnifiedRail, remoteAgentProviders } from './unifiedModelSelection';
 import {
   collectRemoteProviderGroups,
   providerGroupMemberOfRoute,
@@ -1491,18 +1491,13 @@ function ModelSelectorContentView({
     () => withFollowedAccountSource(localProviders.providers, taskSourceProvider ?? null),
     [localProviders.providers, taskSourceProvider],
   );
-  // agy 没有供应商目录:把 ACP catalog 伪装成一条 ProviderView 排到最前——
-  // unifiedModelEntries 按 UNIFIED_AGENT_PRIORITY 末位遍历 agy,不碰三引擎既有行序。
-  const agyProviderView = useMemo(
-    () => buildAgyProviderView(agy.capabilities?.availableModels ?? []),
-    [agy.capabilities],
-  );
+  // 已连接的「Google Gemini」订阅来源挂上 agy 的 ACP 清单;未添加该来源时 agy 模型不出现。
   const providersBase = deviceId
     ? remoteCatalogProviders
     : providersOverride ?? sshCatalogProviders ?? localTaskProviders;
   const providers = useMemo<ProviderView[]>(
-    () => (agyProviderView ? [agyProviderView, ...(providersBase as ProviderView[])] : (providersBase as ProviderView[])),
-    [agyProviderView, providersBase],
+    () => withAntigravityModels(providersBase as ProviderView[], agy.capabilities?.availableModels ?? []),
+    [agy.capabilities, providersBase],
   );
   // SSH 目录里 Codex 来自远端主机：本机账号用量、本机供应商组都不能代表它。
   const sshCodexActive = sshCodex !== undefined;
@@ -4476,6 +4471,7 @@ export function ModelSelector({
   const cc = useAgentCapabilities('claude-code', deviceId);
   const codex = useAgentCapabilities('codex', deviceId);
   const pi = useAgentCapabilities('pi', deviceId);
+  const agyTrigger = useAgentCapabilities('agy', deviceId);
   const gatewayPricing = useGatewayModelPricing();
   const referencePricing = useReferenceModelPricing();
   const { accountTier: modelAccessAccountTier } = useModelAccessStatus();
@@ -4492,9 +4488,14 @@ export function ModelSelector({
     () => withFollowedAccountSource(localProviders.providers, taskSourceProvider ?? null),
     [localProviders.providers, taskSourceProvider],
   );
-  const providers = deviceId
+  // trigger 与面板同口径:否则选中 agy 模型后显示「模型信息暂不可用」。
+  const providersBaseTrigger = deviceId
     ? remoteProviders.providers
     : providersOverride ?? sshCatalogProviders ?? localTaskProviders;
+  const providers = useMemo<ProviderView[]>(
+    () => withAntigravityModels(providersBaseTrigger as ProviderView[], agyTrigger.capabilities?.availableModels ?? []),
+    [agyTrigger.capabilities, providersBaseTrigger],
+  );
   // 当前是 SSH Codex 时 trigger 的加载 / 失败 / 来源都以远端清单为准;其余引擎仍看本机目录。
   const sshCodexCurrent = sshCodex !== undefined && agentKind === 'codex';
   // Old device-link hosts expose capabilities only. Never substitute local routes.
@@ -4539,15 +4540,20 @@ export function ModelSelector({
     ],
   );
 
-  const routeProvider = currentProviderId ? providers.find((p) => p.id === currentProviderId) : undefined;
-  const routeModel = routeProvider && agentKind ? getModel(routeProvider, modelId, agentKind) : undefined;
+  // An Antigravity task stores no provider route (the CLI signs itself in) and is kept out of
+  // the in-task engine identity, but its models only ever come from the Google Gemini
+  // subscription source: name the current model through it. Display only.
+  const labelAgentKind = agentKind ?? (currentSelection?.agentKind === 'agy' ? 'agy' as const : null);
+  const labelProviderId = currentProviderId ?? (labelAgentKind === 'agy' ? ANTIGRAVITY_PROVIDER_ID : undefined);
+  const routeProvider = labelProviderId ? providers.find((p) => p.id === labelProviderId) : undefined;
+  const routeModel = routeProvider && labelAgentKind ? getModel(routeProvider, modelId, labelAgentKind) : undefined;
   const currentModel = routeModel
     ? { ...routeModel, displayName: routeModel.name, id: modelId }
     : visibleModels.find((m) => m.id === modelId);
   // Wire IDs can differ from catalog IDs during a switch. Resolve display metadata
   // through the existing alias lookup without changing routing/capability decisions.
-  const displayProvider = agentKind
-    ? modelDisplayProvider(providers, currentProviderId, modelId, agentKind, actualRoute)
+  const displayProvider = labelAgentKind
+    ? modelDisplayProvider(providers, labelProviderId, modelId, labelAgentKind, actualRoute)
     : undefined;
   // 目标目录(另一台电脑 / 共享供应商)已就绪却没有这个模型:新建草稿此刻回落到本机默认
   // 模型(PR #9369 review),名称也回本机目录取 —— trigger 显示真实名字而不是
@@ -4561,7 +4567,7 @@ export function ModelSelector({
         .map((provider) => findCatalogModel(provider, modelId, agentKind, { exact: true })?.name)
         .find((name) => name !== undefined)
     : undefined;
-  const catalogName = (agentKind ? findCatalogModel(displayProvider, modelId, agentKind)?.name : undefined)
+  const catalogName = (labelAgentKind ? findCatalogModel(displayProvider, modelId, labelAgentKind)?.name : undefined)
     ?? currentModel?.displayName;
   const labelKey = JSON.stringify([deviceId ?? null, currentProviderId ?? null, agentKind, modelId]);
   const lastModelName = useRef<{ key: string; name: string | undefined } | null>(null);
