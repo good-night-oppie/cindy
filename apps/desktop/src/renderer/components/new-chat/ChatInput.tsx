@@ -1325,7 +1325,9 @@ function resolveModelThinkingIntent(input: {
   return remembered ?? true;
 }
 
-const AGY_NEW_TASK_PERMISSION_MODES = ['ask', 'default', 'auto'] as const;
+// 'ask' and 'default' are the same mode under two ids; listing one avoids a duplicate row.
+const AGY_NEW_TASK_PERMISSION_MODES = ['ask', 'auto'] as const;
+const AGY_TASK_PERMISSION_MODES = ['ask', 'auto', 'bypassPermissions'] as const;
 
 export function ChatInput({
   sessionModelPickRef,
@@ -10124,10 +10126,13 @@ export function ChatInput({
                     footer={sessionId && !getSessionDeviceId(sessionId) && !deviceLinkDeviceId && !sharedGuest ? <PluginWriteAccessRecovery key={sessionId} sessionId={sessionId} onGranted={onPermissionModeDidChange} /> : undefined}
                     permissionMode={activePermissionMode}
                     onPermissionModeChange={handlePermissionModeChange}
-                    vendorKey={vendorKey}
+                    // An Antigravity task keeps its engine out of the model-panel identity, so the
+                    // selector must be told the engine here or it shows Claude Code's modes and wording.
+                    vendorKey={runtimeAgentKind === 'agy' ? 'agy' : vendorKey}
                     // A new Antigravity task never starts in Full access (it removes all isolation): the
                     // option is offered only inside a task, where switching is a deliberate act (cindy#1).
-                    allowedModes={!sessionId && vendorKey === 'agy' ? AGY_NEW_TASK_PERMISSION_MODES : undefined}
+                    allowedModes={runtimeAgentKind === 'agy' ? AGY_TASK_PERMISSION_MODES
+                      : !sessionId && vendorKey === 'agy' ? AGY_NEW_TASK_PERMISSION_MODES : undefined}
                     deviceId={deviceLinkDeviceId ?? undefined}
                     disabled={composerEditorLocked || settingsLocked || sharedGuest}
                     dense={effectiveDenseToolbar}
