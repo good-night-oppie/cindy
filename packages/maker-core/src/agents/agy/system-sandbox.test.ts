@@ -20,6 +20,7 @@ import {
   AGY_NO_SYSTEM_ISOLATION_ENV,
   parseBwrapVersion,
   prepareAgySandboxedLaunch,
+  buildAgyFullAccessLaunch,
   probeAgySystemSandbox,
   scanTaskDirForHardlinks,
   type AgySandboxFsView,
@@ -65,6 +66,22 @@ describe('buildAgySandboxLaunch', () => {
     for (const f of ['-t', '-u', '-T', '-U']) expect(pasta[pasta.indexOf(f) + 1]).toBe('none');
     expect(pasta.slice(pasta.indexOf('--dns-forward'), pasta.indexOf('--dns-forward') + 4))
       .toEqual(['--dns-forward', '169.254.1.53', '--dns-host', '172.26.0.2']);
+    // Sharing the CLI login is off unless asked for.
+    expect(l.args.join(' ')).not.toContain('antigravity-oauth-token');
+    // Asked for: exactly the token file, read-only, and nothing else from the real ~/.gemini.
+    const token = '/home/u/.gemini/antigravity-cli/antigravity-oauth-token';
+    const shared = buildAgySandboxLaunch({ ...base, shareCliLogin: true, fs: fakeFs({ existing: ['/etc/hosts', token] }) });
+    // Not signed in on this computer: nothing is mounted.
+    expect(buildAgySandboxLaunch({ ...base, shareCliLogin: true }).args.join(' ')).not.toContain('antigravity-oauth-token');
+    expect(pairs(shared.args, '--ro-bind').filter(([src]) => src!.startsWith('/home/u/.gemini'))).toEqual([[token, token]]);
+    expect(pairs(shared.args, '--bind').some(([src]) => src!.startsWith('/home/u/.gemini'))).toBe(false);
+    // pasta builds without --dns-host (Ubuntu 24.04) keep the forward and drop only that option.
+    const older = buildAgySandboxLaunch({ ...base, pastaSupportsDnsHost: false });
+    const olderPasta = older.args.slice(0, older.args.indexOf('--'));
+    expect(olderPasta).not.toContain('--dns-host');
+    expect(olderPasta.slice(olderPasta.indexOf('--dns-forward'), olderPasta.indexOf('--dns-forward') + 2))
+      .toEqual(['--dns-forward', '169.254.1.53']);
+    for (const f of ['-t', '-u', '-T', '-U']) expect(olderPasta[olderPasta.indexOf(f) + 1]).toBe('none');
     expect(l.args.slice(sep + 1, sep + 7)).toEqual([...agyNetGuardCommand('/usr/sbin/ip'), '/usr/bin/bwrap']);
     expect(pairs(l.args, '--ro-bind')).toContainEqual(['/tmp/cindy-agy-sandbox-1000/resolv.conf', '/etc/resolv.conf']);
     expect(l.args.slice(l.args.indexOf('--uid'), l.args.indexOf('--uid') + 4)).toEqual(['--uid', '1000', '--gid', '1000']);
@@ -427,7 +444,8 @@ describe.runIf(probe.ok)('real bubblewrap decoy check', () => {
     hostSrv.close();
     anySrv.close();
     absSrv.close();
-    expect(res.stderr).toBe('');
+    // Older pasta prints this notice on hosts without IPv6 even with --quiet; it is not an error.
+    expect(res.stderr.replace(/^No routable interface for IPv6.*\n/m, '')).toBe('');
     const r = JSON.parse(res.stdout) as Record<string, string> & { hostIfs: Record<string, string> };
     expect(r.readDecoy).not.toBe('ok');
     expect(r.writeDecoy).not.toBe('ok');
@@ -462,5 +480,27 @@ describe.runIf(probe.ok)('real bubblewrap decoy check', () => {
     linkSync(path.join(root, 'o.txt'), path.join(task, 'h.txt'));
     await expect(prepareAgySandboxedLaunch({ binaryPath: '/bin/true', args: [], taskDir: task, homeDir: os.homedir(), env: {}, probe }))
       .rejects.toMatchObject({ reason: 'task-dir-unsafe' });
+  });
+});
+
+describe('buildAgyFullAccessLaunch (Full access = no isolation, like the other engines)', () => {
+  const token = '/home/u/.gemini/antigravity-cli/antigravity-oauth-token';
+  const launch = buildAgyFullAccessLaunch({
+    bwrapPath: '/usr/bin/bwrap', binaryPath: base.binaryPath, args: base.args, taskDir: base.taskDir, homeDir: base.homeDir,
+    stateMounts: [{ source: '/home/u/.cindy/agy-sandbox/state/gemini', target: '/home/u/.gemini' }],
+    shareCliLogin: true, env: base.env, passEnvKeys: base.passEnvKeys, fs: fakeFs({ existing: [token] }),
+  });
+  it('exposes the whole disk and the host network, and only remaps agy state', () => {
+    expect(launch.command).toBe('/usr/bin/bwrap');
+    expect(pairs(launch.args, '--bind')).toEqual([['/', '/'], ['/home/u/.cindy/agy-sandbox/state/gemini', '/home/u/.gemini']]);
+    expect(pairs(launch.args, '--ro-bind')).toEqual([[token, token]]);
+    expect(launch.args.some(arg => arg.startsWith('--unshare'))).toBe(false);
+    expect(launch.args).not.toContain('--tmpfs');
+    expect(launch.args.slice(launch.args.indexOf('--') + 1)).toEqual([base.binaryPath, ...base.args]);
+  });
+  it('still filters secrets out of the environment', () => {
+    expect(launch.env.GITHUB_TOKEN).toBeUndefined();
+    expect(launch.env.OPENAI_API_KEY).toBeUndefined();
+    expect(launch.env.AUTH_X).toBe('tok');
   });
 });
