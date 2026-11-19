@@ -64,6 +64,8 @@ export interface AgySandboxProbeOk {
   ipPath: string;
   /** This pasta build accepts --dns-host (absent on older builds; see pastaNetArgs). */
   pastaSupportsDnsHost?: boolean;
+  /** util-linux `setpriv`, used to tie pasta's life to Cindy's (see buildAgySandboxLaunch). */
+  setprivPath?: string;
 }
 export interface AgySandboxProbeFailed {
   ok: false;
@@ -199,8 +201,9 @@ export function probeAgySystemSandbox(deps: AgySandboxProbeDeps = {}): AgySandbo
   const pastaHelp = run(pastaPath, ['--help']);
   const pastaSupportsDnsHost = `${pastaHelp.stdout}
 ${pastaHelp.stderr}`.includes('--dns-host');
+  const setprivPath = ['/usr/bin/setpriv', '/bin/setpriv'].find(p => exists(p));
   return { ok: true, bwrapPath, pastaPath, ipPath, version: parsed.join('.'), supportsDisableUserns: maj > 0 || min >= 8,
-    pastaSupportsDnsHost };
+    pastaSupportsDnsHost, ...(setprivPath ? { setprivPath } : {}) };
 }
 
 // ---------------------------------------------------------------------------
@@ -311,6 +314,8 @@ export interface AgySandboxLaunchInput {
   dnsHost: string | null;
   /** False on pasta builds without --dns-host; undefined keeps the option (see pastaNetArgs). */
   pastaSupportsDnsHost?: boolean;
+  /** When set, pasta is started through `setpriv --pdeathsig KILL`. */
+  setprivPath?: string;
   /**
    * Owner decision 2026-11-18 (cindy#1): let the sandboxed CLI use the Google sign-in the user
    * already has in the real home. Exactly one file is exposed, read-only: the CLI's OAuth token.
@@ -467,9 +472,13 @@ export function buildAgySandboxLaunch(input: AgySandboxLaunchInput): AgySandboxL
 
   const login = input.login ?? { kind: 'private-state' };
   const loginEnv = login.kind === 'api-key' ? login.env : {};
+  const pastaArgs = [...pastaNetArgs(input.dnsHost, input.pastaSupportsDnsHost !== false), '--', ...agyNetGuardCommand(input.ipPath), input.bwrapPath, ...a];
+  // bwrap dies with its parent, but its parent is pasta, and pasta outlives a Cindy that is
+  // killed or crashes: the sandboxed agy then keeps running with nobody attached. The parent
+  // death signal ends pasta with Cindy, and bwrap follows.
   return {
-    command: input.pastaPath,
-    args: [...pastaNetArgs(input.dnsHost, input.pastaSupportsDnsHost !== false), '--', ...agyNetGuardCommand(input.ipPath), input.bwrapPath, ...a],
+    command: input.setprivPath ?? input.pastaPath,
+    args: input.setprivPath ? ['--pdeathsig', 'KILL', input.pastaPath, ...pastaArgs] : pastaArgs,
     env: filterAgySandboxEnv({ ...input.env, ...loginEnv }, homeDir, taskDir,
       [...(input.passEnvKeys ?? []), ...Object.keys(loginEnv)]),
   };
@@ -573,6 +582,7 @@ export async function prepareAgySandboxedLaunch(
   const launch = buildAgySandboxLaunch({ ...input, writableDirs: [...stateMounts, ...(input.writableDirs ?? [])],
     bwrapPath: probe.bwrapPath, pastaPath: probe.pastaPath, ipPath: probe.ipPath,
     supportsDisableUserns: probe.supportsDisableUserns, pastaSupportsDnsHost: probe.pastaSupportsDnsHost,
+    setprivPath: probe.setprivPath,
     dnsHost, resolvConfPath });
   return { ...launch, hardlinkScan };
 }
