@@ -25,6 +25,7 @@ import {
   type ProviderView,
   type Provider,
   isCustomRoutedProvider,
+  ANTIGRAVITY_PROVIDER_ID,
   type AgentKind,
 } from '@cindy/model-providers';
 
@@ -110,6 +111,11 @@ export interface ProviderServiceDeps {
    * 缺省 = 一律未连接。
    */
   builtinApiKeyConnected?: (providerId: string) => boolean;
+  /**
+   * Google Gemini 订阅(只经 Antigravity CLI):连接 = 用户已添加该来源且 CLI 自己已登录。
+   * 缺省 = 未连接。
+   */
+  antigravityConnected?: () => boolean;
   /** Saved custom configuration is not evidence that its credential still exists. */
   customApiKeyConnected?: (provider: Provider) => boolean;
   /** Runtime-owned media readiness, not inferred from chat authentication. */
@@ -174,7 +180,9 @@ export function createProviderService(deps: ProviderServiceDeps): ProviderServic
     for (const p of catalog.providers) {
       // 无鉴权供应商无需任何登录或密钥：只要目录声明有效，就可立即参与模型选择。
       // 该规则与 source 无关，覆盖远端目录下发的 built-in/self-hosted 条目。
-      if (p.auth.method === 'none') {
+      if (p.id === ANTIGRAVITY_PROVIDER_ID && p.source === 'builtin') {
+        connected[p.id] = deps.antigravityConnected?.() ?? false;
+      } else if (p.auth.method === 'none') {
         connected[p.id] = p.agents.some((agent) => {
           const routing = p.routing[agent];
           return routing !== undefined && routing.disabled !== true;

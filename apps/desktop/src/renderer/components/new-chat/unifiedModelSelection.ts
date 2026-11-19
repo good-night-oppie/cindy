@@ -18,7 +18,7 @@
  */
 
 import type { ProviderView, UnifiedAgentCapability, UnifiedModelEntry } from '@cindy/model-providers';
-import { remoteInvocationModels, resolveStoredModelEntry, displayNameOfStoredModelId } from '@cindy/model-providers';
+import { ANTIGRAVITY_PROVIDER_ID, remoteInvocationModels, resolveStoredModelEntry, displayNameOfStoredModelId } from '@cindy/model-providers';
 
 import type { AgentKind } from '@/hooks/useAgentCapabilities';
 import type { SelectableVendor } from '@/lib/agentVendors';
@@ -30,40 +30,37 @@ import type { RecentModelItem } from '@/state/recentModels';
 
 export { resolveStoredModelEntry };
 
-/** agy 的原生入口 —— Antigravity 自登录,无供应商目录;模型全部来自 ACP catalog。 */
-export const AGY_PROVIDER_ID = 'agy';
-export const AGY_PROVIDER_NAME = 'Antigravity';
+/** Google Gemini 订阅来源(只经 Antigravity CLI)的供应商 id。 */
+export const AGY_PROVIDER_ID = ANTIGRAVITY_PROVIDER_ID;
+
+type AgyCapabilityModel = { id: string; displayName: string; description?: string; contextWindow: number; efforts: readonly string[]; defaultEffort: string | null };
 
 /**
- * 把 agy 的 ACP catalog 伪装成一条 ProviderView,让统一面板的聚合层
- * (unifiedModelEntries 按 (provider, 模型) 聚合)能像老引擎那样列出它。
- * 必须排第一(调用方拼到 providers 头部):聚合层按 activeAgents 序遍历,
- * agy 排最后才不会改变三引擎既有行的首见序与 bridge 回落。
+ * agy 的模型清单只存在于它的 ACP 会话里(探活后进 capabilities),供应商目录里恒为空。
+ * 用户已添加并连接「Google Gemini」订阅来源时,把这份清单挂到该来源上,统一面板就能像
+ * 其它供应商一样列出它;来源未添加 / 未连接时原样返回(同一数组引用),agy 模型不可选。
  */
-export function buildAgyProviderView(
-  models: readonly { id: string; displayName: string; description?: string; contextWindow: number; efforts: readonly string[]; defaultEffort: string | null }[],
-): ProviderView | null {
-  if (!models.length) return null;
-  return {
-    id: AGY_PROVIDER_ID,
-    name: AGY_PROVIDER_NAME,
-    source: 'builtin',
-    agents: ['agy'],
-    auth: { method: 'oauth' },
-    routing: { agy: { upstream: 'agy://acp', authStrategy: 'none' } },
-    models: {
-      agy: models.map((m) => ({
-        id: m.id,
-        name: m.displayName,
-        ...(m.description ? { description: m.description } : {}),
-        mode: 'chat',
-        contextWindow: m.contextWindow,
-        efforts: [...m.efforts] as never,
-        defaultEffort: m.defaultEffort as never,
-      })),
-    },
-    connected: true,
-  } as ProviderView;
+export function withAntigravityModels<T extends ProviderView>(
+  providers: readonly T[],
+  models: readonly AgyCapabilityModel[],
+): T[] {
+  if (!models.length || !providers.some((p) => p.id === ANTIGRAVITY_PROVIDER_ID && p.connected)) {
+    return providers as T[];
+  }
+  const agy = models.map((m) => ({
+    id: m.id,
+    name: m.displayName,
+    ...(m.description ? { description: m.description } : {}),
+    mode: 'chat',
+    contextWindow: m.contextWindow,
+    efforts: [...m.efforts] as never,
+    defaultEffort: m.defaultEffort as never,
+  }));
+  return providers.map((p) =>
+    p.id === ANTIGRAVITY_PROVIDER_ID && p.connected
+      ? ({ ...p, models: { ...p.models, agy } } as T)
+      : p,
+  );
 }
 
 /** 引擎在**选择器 / 草稿链路**里的口径(vendor);catalog / capabilities 侧是 AgentKind。 */

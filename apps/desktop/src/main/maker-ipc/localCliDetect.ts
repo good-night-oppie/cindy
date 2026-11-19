@@ -73,6 +73,8 @@ export function createLocalCliScanDeps(): LocalCliScanDeps {
     },
     isCredentialSharedWithCindy: (cli) => {
       try {
+        // agy:Cindy 没有自己的 Google 登录,用的只能是 CLI 这一份。
+        if (cli === 'agy-cli') return true;
         const providerId = cli === 'claude-cli' ? 'anthropic' : 'openai';
         // 用户在 Cindy 里**亲自授权过**这家 → 不是继承,无论凭证此刻是否与本机共用。
         // 少了这道判据，「在 Cindy 里点过 Claude 授权」的用户下次进新建页会被告知
