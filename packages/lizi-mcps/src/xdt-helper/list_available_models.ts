@@ -72,7 +72,8 @@ export interface ListAvailableModelsDeps {
   /** 调用方任务(可选)：它的 Agent 在另一台电脑运行时，按那台的模型目录列出。 */
   getSessionContext?: () => { sessionId?: string };
   listAvailableModels: (params: {
-    agent?: 'claude-code' | 'codex' | 'pi';
+    /** 'agy' is accepted for callers that can run Antigravity (schedules). Workers cannot yet: the worker tool's own schema below stays three-engine and the host refuses it. */
+    agent?: 'claude-code' | 'codex' | 'pi' | 'agy';
     callerSessionId?: string;
     executionDeviceId?: string;
     /** 列哪里的模型：省略 = Lead 所在位置；null = 任务所在电脑；string = 那台电脑或分享。 */
@@ -85,6 +86,8 @@ export interface ListAvailableModelsDeps {
     codex?: ModelDescriptor[];
     claude_code?: ModelDescriptor[];
     pi?: ModelDescriptor[];
+    /** Antigravity models; only when asked for with agent='agy', and only for this computer. */
+    agy?: ModelDescriptor[];
   }, string>>;
 }
 
@@ -132,7 +135,7 @@ export function registerListAvailableModelsTool(
       device: z.string().trim().min(1).max(128).optional().describe('任务所在电脑，取 list_machines 的 machines.computers[].deviceId；查询在这台电脑创建任务可用的模型。省略保持当前任务的位置。'),
       provider_device_id: z.string().trim().min(1).max(128).optional().describe('模型供应商所在电脑；local 相对 device 指定的任务电脑。agent_device_id 为兼容旧名。'),
       agent: z
-        .enum(['codex', 'claude-code', 'pi'])
+        .enum(['codex', 'claude-code', 'pi', 'agy'])
         .optional()
         .describe('可选, 只查某一 agent 的 model 列表; 不传返三者'),
       agent_device_id: z

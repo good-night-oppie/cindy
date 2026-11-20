@@ -9,6 +9,7 @@ import {
   ORCA_WORKER_ROLES_APPLY,
   ORCA_WORKER_ROLES_GET,
   parseOrcaWorkerRoles,
+  type OrcaWorkerRoleModel,
   type OrcaWorkerRolesMutation,
 } from '@cindy/device-link';
 import { orcaWorkflowsForDevice } from '@/lib/makerTransport';
@@ -105,7 +106,7 @@ const LOCAL_WORKER_MODEL_MEMORY = {
 
 export interface CreateWorkerForm {
   role: string;
-  agent: 'claude-code' | 'codex' | 'pi';
+  agent: 'claude-code' | 'codex' | 'pi' | 'agy';
   model: string;
   effort?: Effort;
   fast?: boolean | 'ultrafast';
@@ -231,7 +232,7 @@ export function CreateWorkerPopover({
     memory: 'host' | 'controller' | 'none';
   } | null>(null);
   const [remoteRolesRequest, setRemoteRolesRequest] = useState(0);
-  const [agent, setAgent] = useState<'claude-code' | 'codex' | 'pi'>('codex');
+  const [agent, setAgent] = useState<'claude-code' | 'codex' | 'pi' | 'agy'>('codex');
   const [model, setModel] = useState(DEFAULT_WORKER_CREATION_PREFS.codex.model);
   const [modelPickerOpenRequest, setModelPickerOpenRequest] = useState(0);
   const modelPickerRequestSequence = useRef(0);
@@ -281,7 +282,7 @@ export function CreateWorkerPopover({
   const ccCaps = useAgentCapabilities('claude-code', catalogDeviceId);
   const codexCaps = useAgentCapabilities('codex', catalogDeviceId);
   const piCaps = useAgentCapabilities('pi', catalogDeviceId);
-  const pickerAgents = useModelPickerAgents(agent, catalogDeviceId);
+  const pickerAgents = useModelPickerAgents(agent, catalogDeviceId, { agy: true });
   const localProviders = useProviders();
   const remoteProviders = useDeviceProviders(catalogDeviceId);
   // Agent 在另一台电脑运行时只能用那台允许被远程调用的供应商(那台是最终裁决方)。
@@ -650,7 +651,7 @@ export function CreateWorkerPopover({
 
   const vendorKey = agentKindToVendor(agent);
   const updateAgent = useCallback(
-    (nextAgent: 'claude-code' | 'codex' | 'pi') => {
+    (nextAgent: 'claude-code' | 'codex' | 'pi' | 'agy') => {
       if (nextAgent === agent) return;
       modelSelectionChosenRef.current = true;
       restoredModelSelectionRef.current = false;
@@ -1087,20 +1088,21 @@ export function CreateWorkerPopover({
         writeWorkerCreationPrefs(merged);
       };
       if (memoryHome === 'controller') rememberHere();
-      else {
+      // Antigravity is only offered for a lead on this computer, where the memory is local.
+      else if (agent !== 'agy') {
         const mutation: OrcaWorkerRolesMutation = {
           kind: 'remember',
           role: activeRole,
           ...(rememberedTask !== undefined && rememberedTask.trim() !== '' ? { task: rememberedTask } : {}),
           ...(rememberedPermission ? { permission: rememberedPermission } : {}),
-          ...(rememberedModel ? { model: rememberedModel } : {}),
+          ...(rememberedModel ? { model: rememberedModel as OrcaWorkerRoleModel } : {}),
           choice: {
             agent,
             // 逐 Agent 的模型只在它属于那台电脑自己的目录时记：Agent 就在那台电脑上，也没选运行设备。
             ...(agentDeviceId === null && !executionDevice
               ? { agentModel: { model, effort, fast, providerId: submitProviderId } }
               : {}),
-            ...(rememberedModel ? { route: rememberedModel } : {}),
+            ...(rememberedModel ? { route: rememberedModel as OrcaWorkerRoleModel } : {}),
           },
         };
         void Promise.resolve()
@@ -1369,7 +1371,7 @@ export function CreateWorkerPopover({
               value={vendorKey}
               width={220}
               ariaLabel={t('orca.createWorker.agentLabel')}
-              onChange={(next) => updateAgent(next === 'codex' ? 'codex' : next === 'pi' ? 'pi' : 'claude-code')}
+              onChange={(next) => updateAgent(next === 'codex' ? 'codex' : next === 'pi' ? 'pi' : next === 'agy' ? 'agy' : 'claude-code')}
             />
           </div>
         )}
@@ -1428,8 +1430,6 @@ export function CreateWorkerPopover({
                 unifiedAgents={pickerAgents}
                 onUnifiedSelect={deviceId && remoteProviders.unsupported ? undefined : (selection) => {
                   if (selection.agentDevice !== undefined && executionDeviceId && !agentLocationSelectable) return;
-                  // Worker 只支持三种既有引擎(agy 不在协同 worker 范围内)。
-                  if (selection.engine === 'agy') return;
                   modelSelectionChosenRef.current = true;
                   restoredModelSelectionRef.current = false;
                   const nextAgent = selection.engine === 'cc' ? 'claude-code' : selection.engine;

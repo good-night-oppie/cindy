@@ -329,7 +329,7 @@ export function createLiziMcpProviders(
 
   if (opts.scheduler && selected(enabled, 'cindy_scheduler')) {
     const createServer = (ctx: LiziMcpSessionContext) => createSchedulerMcpServer(opts.scheduler!, {
-      agentKind: ctx.agentKind === 'codex' ? 'codex' : ctx.agentKind === 'pi' ? 'pi' : 'claude-code',
+      agentKind: ctx.agentKind === 'codex' ? 'codex' : ctx.agentKind === 'pi' ? 'pi' : ctx.agentKind === 'agy' ? 'agy' : 'claude-code',
       workingDir: ctx.workingDir,
       ...(ctx.getSessionContext ? { getSessionContext: ctx.getSessionContext } : {}),
       sessionId: ctx.sessionId,
@@ -370,7 +370,7 @@ export function createLiziMcpProviders(
 
   if (opts.xdtHelper && selected(enabled, 'cindy_helper')) {
     const createServer = (ctx: LiziMcpSessionContext) => createXdtHelperMcpServer(opts.xdtHelper!, {
-      agentKind: ctx.agentKind === 'codex' ? 'codex' : ctx.agentKind === 'pi' ? 'pi' : 'claude-code',
+      agentKind: ctx.agentKind === 'codex' ? 'codex' : ctx.agentKind === 'pi' ? 'pi' : ctx.agentKind === 'agy' ? 'agy' : 'claude-code',
       workingDir: ctx.workingDir,
       ...(ctx.getSessionContext ? { getSessionContext: ctx.getSessionContext } : {}),
       sessionId: ctx.sessionId,
@@ -398,7 +398,7 @@ export function createLiziMcpProviders(
 
   if (opts.docs && selected(enabled, 'cindy_docs')) {
     const createServer = (ctx: LiziMcpSessionContext) => createCindyDocsMcpServer(opts.docs!, {
-      agentKind: ctx.agentKind === 'codex' ? 'codex' : ctx.agentKind === 'pi' ? 'pi' : 'claude-code',
+      agentKind: ctx.agentKind === 'codex' ? 'codex' : ctx.agentKind === 'pi' ? 'pi' : ctx.agentKind === 'agy' ? 'agy' : 'claude-code',
       workingDir: ctx.workingDir,
       ...(ctx.getSessionContext ? { getSessionContext: ctx.getSessionContext } : {}),
       sessionId: ctx.sessionId, vendorOptions: ctx.vendorOptions, hostCaller: ctx.hostCaller,
@@ -432,7 +432,7 @@ export function createLiziMcpProviders(
         type: 'sdk',
         name: 'cindy_orca',
         instance: createOrcaMcpServer(opts.orca!, {
-          agentKind: ctx.agentKind === 'codex' ? 'codex' : ctx.agentKind === 'pi' ? 'pi' : 'claude-code',
+          agentKind: ctx.agentKind === 'codex' ? 'codex' : ctx.agentKind === 'pi' ? 'pi' : ctx.agentKind === 'agy' ? 'agy' : 'claude-code',
           workingDir: ctx.workingDir,
           ...(ctx.getSessionContext ? { getSessionContext: ctx.getSessionContext } : {}),
           sessionId: ctx.sessionId,

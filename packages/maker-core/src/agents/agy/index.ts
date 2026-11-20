@@ -26,6 +26,7 @@ import {
   BaseAgent, PINNED_SKILL_INVOCATION, AgentNotAuthenticatedError, AgentStartupStoppedError,
   AgentStartupCleanupPendingError, TurnPermissionPolicyUnsupportedError,
   type AgentDeps, type AgentSessionHandle, type StartSessionOptions, type SendOptions,
+  isolatedBotProfile,
 } from '../base-agent.js';
 import { LIBRARY_READ_ROOT } from '../shared/library-native-read.js';
 import { AcpClient, AcpRpcError } from '../acp/client.js';
@@ -54,7 +55,7 @@ import { assertAgyModelAllowed } from './models.js';
 import { agyRpcDiagnostic, type AgyRpcDiagnostic } from './diagnostics.js';
 import { assertAgyBinaryUsable, AgyBinaryUnavailableError, type AgyVersionReader } from './version.js';
 import {
-  AGY_SANDBOX_USER_COPY_DRAFT, AgySandboxUnavailableError, agyPrivateStateMounts, prepareAgySandboxedLaunch,
+  AGY_SANDBOX_USER_COPY_DRAFT, AgySandboxUnavailableError, agyPrivateStateMounts, prepareAgySandboxedLaunch, prepareAgyFullAccessLaunch,
   filterAgyUnsandboxedEnv,
   type AgySandboxProbe,
 } from './system-sandbox.js';
@@ -74,6 +75,8 @@ const no = { supported: false, reason: 'not-implemented' } as const;
 const NATIVE_PERMISSION_DESCRIPTION = 'Antigravity runs inside Cindy\'s file isolation: it can only read and change files in this task\'s folder, and it may change files there without asking. Cindy answers the approval requests agy sends (typically shell commands).';
 // Used only where no system-level isolation exists (Windows, macOS). Wording pending JJ.
 const UNSANDBOXED_PERMISSION_DESCRIPTION = 'Antigravity runs without system-level file isolation on this computer: it can reach any file your user account can, limited only by the approval requests it sends to Cindy. Requests outside this task\'s folder are worth reading before you allow them.';
+// Same meaning as Full access on the other engines: no file isolation, network commands allowed, no questions.
+const FULL_ACCESS_PERMISSION_DESCRIPTION = 'Antigravity runs without Cindy\x27s file isolation: it can read and change any file your account can, including outside this task\x27s folder, and run network commands. Cindy allows the approval requests agy sends without confirmation.';
 const CONTROL_TIMEOUT = 30_000;
 const CANCEL_TIMEOUT = 10_000;
 const PROMPT_REQUEST_TIMEOUT = 24 * 60 * 60 * 1000;
@@ -105,9 +108,23 @@ export interface AgyAgentDeps extends AgentDeps {
      * path still never falls back to this on its own (cindy#1, owner decision 2026-11-17).
      */
     allowWithoutSystemSandbox?: boolean;
+    /** Expose the CLI's existing Google sign-in file read-only inside the sandbox (see system-sandbox). */
+    shareCliLogin?: boolean;
   };
   /** UI locale for agy user notices (JJ's wording exists in zh-CN and en). */
   uiLocale?: () => string | null | undefined;
+}
+
+/** Loopback ports of Cindy's tool bridge, read from the server URLs handed to agy. */
+function bridgeLoopbackPorts(servers: readonly { url: string }[]): number[] {
+  const ports = new Set<number>();
+  for (const server of servers) {
+    try {
+      const url = new URL(server.url);
+      if ((url.hostname === '127.0.0.1' || url.hostname === 'localhost') && url.port) ports.add(Number(url.port));
+    } catch { /* not a URL: nothing to forward */ }
+  }
+  return [...ports];
 }
 
 export class AgyAgent extends BaseAgent {
@@ -119,7 +136,7 @@ export class AgyAgent extends BaseAgent {
       { id: 'ask', displayName: 'Default permissions', description: NATIVE_PERMISSION_DESCRIPTION },
       { id: 'default', displayName: 'Default permissions', description: NATIVE_PERMISSION_DESCRIPTION },
       { id: 'auto', displayName: 'Auto-review', description: `Cindy automatically reviews the approval requests agy sends. ${NATIVE_PERMISSION_DESCRIPTION}` },
-      { id: 'bypassPermissions', displayName: 'Full access', description: `Cindy allows the approval requests agy sends without confirmation. ${NATIVE_PERMISSION_DESCRIPTION}` },
+      { id: 'bypassPermissions', displayName: 'Full access', description: FULL_ACCESS_PERMISSION_DESCRIPTION },
     ],
     setPermissionModeMidSession: yes,
     // ACP approvals cover only the requests agy chooses to send; Cindy cannot enforce a
@@ -139,6 +156,7 @@ export class AgyAgent extends BaseAgent {
     promise?: Promise<void>;
   }>();
   private disposed = false;
+  private probePromise: Promise<void> | null = null;
 
   constructor(protected override deps: AgyAgentDeps) {
     super(deps);
@@ -166,6 +184,46 @@ export class AgyAgent extends BaseAgent {
       this.failedStartupCleanups.delete(key);
       entry.confirmStopped();
     }
+  }
+
+  /**
+   * One-shot, unsandboxed ACP probe so the model picker can list agy models before a task
+   * exists. Spawns `agy acp` in the current working directory, reads session/new's catalog
+   * into capabilities, then closes. Cached after the first success; a failed probe is not
+   * cached, so a later call retries. Never runs inside a sandbox and never prompts.
+   */
+  async probeModels(cwd: string): Promise<void> {
+    if (this.capabilities.availableModels.length) return;
+    if (this.probePromise) return this.probePromise;
+    this.probePromise = (async () => {
+      const binaryPath = this.deps.binaryPath;
+      if (!binaryPath) throw new Error('agy binary path is not configured');
+      await assertAgyBinaryUsable(binaryPath, this.deps.readAgyVersion);
+      const authEnv = await this.deps.auth.getAuthEnv();
+      const env = filterAgyUnsandboxedEnv({ ...process.env, ...authEnv }, os.homedir(), cwd, Object.keys(authEnv ?? {}));
+      const transport = (this.deps.createAgyTransport ?? spawnAcpTransport)({
+        binaryPath, args: [...AGY_ACP_ARGS], cwd, env,
+      });
+      const client = new AcpClient(transport, { requestTimeoutMs: CONTROL_TIMEOUT });
+      try {
+        const init = record(await client.request('initialize', {
+          protocolVersion: 1,
+          clientCapabilities: { fs: { readTextFile: false, writeTextFile: false }, terminal: false },
+          clientInfo: { name: 'cindy', version: '1.0.0' },
+        }));
+        if (init.protocolVersion !== 1) throw new Error('agy ACP protocol version is unsupported');
+        const result = record(await client.request('session/new', { cwd, mcpServers: [] }));
+        const catalog = readAgyCatalog(result);
+        this.capabilities.availableModels = catalog.models;
+        this.capabilities.switchModel = catalog.models.length ? yes : no;
+        this.capabilities.effort = catalog.currentEfforts.length ? yes : no;
+        this.capabilities.effortLevels = catalog.currentEfforts.map(id => ({ id, displayName: id }));
+        this.capabilities.planMode = catalog.modes.includes(AGY_PLAN_MODE) ? yes : no;
+      } finally {
+        await client.close().catch(() => {});
+      }
+    })();
+    try { await this.probePromise; } catch (error) { this.probePromise = null; throw error; }
   }
 
   override async dispose(): Promise<void> {
@@ -228,6 +286,8 @@ export class AgyAgent extends BaseAgent {
     let turnOptions: SendOptions | undefined;
     let promptCapabilities: AcpRecord = {};
     let firstPrompt = !opts.resumeSessionId;
+    let mcpServers: { type: 'http'; name: string; url: string; headers: { name: string; value: string }[] }[] = [];
+    let disposeMcp: (() => void) | undefined;
     let context = '';
     let closePromise: Promise<void> | undefined;
     let fenced = false;
@@ -247,10 +307,14 @@ export class AgyAgent extends BaseAgent {
     const unsandboxedByPlatform = wantsIsolation && process.platform !== 'linux'
       && this.deps.agySandbox?.allowWithoutSystemSandbox === true;
     const useSandbox = wantsIsolation && !unsandboxedByPlatform;
+    // Full access follows the other engines (Codex danger-full-access): no file or network
+    // isolation. The choice is fixed for this process; the host relaunches agy (resume) when the
+    // mode later crosses this line, so `mode` here is the mode this process was started with.
+    const fullAccessLaunch = useSandbox && mode === 'bypassPermissions';
     const sandboxStateRoot = this.deps.agySandbox?.stateRoot ?? path.join(os.homedir(), '.cindy', 'agy-sandbox', 'state');
     // agy sees the task folder by its real path inside the sandbox; a symlinked workingDir does not exist there.
     const agyWorkingDir = wantsIsolation ? realpathOr(opts.workingDir) : opts.workingDir;
-    const translator = new AgyTranslator(emit, wantsIsolation ? {
+    const translator = new AgyTranslator(emit, wantsIsolation && !fullAccessLaunch ? {
       taskDir: agyWorkingDir, homeDir: os.homedir(),
       visibleDirs: useSandbox
         ? agyPrivateStateMounts(sandboxStateRoot, os.homedir()).map(mount => mount.target)
@@ -473,6 +537,7 @@ export class AgyAgent extends BaseAgent {
         await client?.close();
         await active?.catch(() => {});
         releaseTaskDir?.(); releaseTaskDir = undefined;
+        try { disposeMcp?.(); } catch { /* the bridge lease is best-effort on close */ } disposeMcp = undefined;
         if (!closed) queue.end();
         closed = true;
         running = false;
@@ -509,10 +574,19 @@ export class AgyAgent extends BaseAgent {
     try {
       assertCurrent();
       assertAgyModelAllowed(requestedModel, allowedModels);
-      if (opts.extraDirs?.length || opts.writableDirs?.length || opts[LIBRARY_READ_ROOT]) {
+      // Where agy runs without system isolation (Windows, macOS, Full access) it already reaches
+      // every folder the user can, so a teammate's own folders and the Library need no grant (and
+      // read-only cannot be enforced there, as for any agy task). Inside the Linux sandbox they
+      // would be silently unreachable, so that case is refused.
+      const directoryGrantsEnforced = useSandbox && !fullAccessLaunch;
+      if (directoryGrantsEnforced && (opts[LIBRARY_READ_ROOT] || opts.extraDirs?.length || opts.writableDirs?.length)) {
         throw new Error('agy ACP cannot enforce additional directory grants or a read-only Library root');
       }
-      if (opts.reviewMode || opts.botRuntimeProfile) throw new Error('agy ACP does not support restricted Reviewer or Bot runtime profiles');
+      if (opts.reviewMode) throw new Error('agy ACP does not support the restricted Reviewer runtime');
+      // A teammate works in its own folders under the home directory, which the sandbox hides.
+      if (opts.botRuntimeProfile && directoryGrantsEnforced) {
+        throw new Error('agy teammates cannot reach their own folders inside the Linux sandbox yet; use Full access');
+      }
       if (opts.remoteHostId || opts.deviceHosted) throw new Error('agy currently runs only on the task host computer');
       if (!path.isAbsolute(opts.workingDir)) throw new Error('agy ACP requires an absolute working directory');
       if (!this.capabilities.permissionModes.some(option => option.id === mode)) throw new NotSupportedError('permissionMode', no);
@@ -523,12 +597,14 @@ export class AgyAgent extends BaseAgent {
       const authEnv = await this.deps.auth.getAuthEnv();
       const env = { ...process.env, ...authEnv };
       const memoryEnabled = (opts.makerMemoryEnabled ?? this.deps.runtimeConfig.makerMemoryEnabled) === true;
-      if (firstPrompt) {
+      {
         const scope = await resolveMemoryScopeKey(opts.makerMemoryScopeKey ?? opts.workingDir);
         const memory = memoryEnabled ? opts.makerMemoryIndexSnapshot
           ?? (this.deps.makerMemory ? await (await this.deps.makerMemory.getStore(scope)).getIndex() : '') : '';
         // ACP has no system-message API. Pass caller-owned context once with the first user prompt.
-        context = [opts.botProfilePrompt, opts.botProfileContextPrompt, memory, opts.userPrompt].filter(Boolean).join('\n\n');
+        // A classic teammate has its own identity and does not inherit the owner's user prompt.
+        const ownerPrompt = isolatedBotProfile(opts.botRuntimeProfile) ? undefined : opts.userPrompt;
+        context = [opts.botProfilePrompt, opts.botProfileContextPrompt, memory, opts.botUserProfilePrompt, ownerPrompt].filter(Boolean).join('\n\n');
       }
       assertCurrent();
       // System-level isolation: agy only touches the task folder and its private state; no host
@@ -536,10 +612,51 @@ export class AgyAgent extends BaseAgent {
       if (unsandboxedByPlatform) {
         emit({ type: 'error', data: { message: agyNoSystemIsolationText(this.deps.uiLocale), isTerminal: false } });
       }
-      const launch = useSandbox
-        ? await prepareAgySandboxedLaunch({ binaryPath: this.deps.binaryPath, args: AGY_ACP_ARGS, taskDir: agyWorkingDir,
-          homeDir: os.homedir(), stateRoot: sandboxStateRoot, env, passEnvKeys: Object.keys(authEnv), probe: this.deps.agySandbox?.probe })
-        : { command: this.deps.binaryPath, args: [...AGY_ACP_ARGS],
+      // Cindy's own tools (memory, helper, plugins...) are served by the host's loopback MCP
+      // bridge, the same per-session bridge Pi uses. Inside the Linux sandbox only the bridge's
+      // own port is forwarded (see hostLoopbackPorts); the rest of host loopback stays closed.
+      if (this.deps.preparePiExtraSpawnConfig) {
+        try {
+          const extra = await this.deps.preparePiExtraSpawnConfig(this.deps.mcpProviders ?? [], {
+            agentKind: 'agy',
+            sessionId: opts.sessionId,
+            ...(opts.sessionInstanceId ? { sessionInstanceId: opts.sessionInstanceId } : {}),
+            workingDir: agyWorkingDir,
+            ...(opts.makerMemoryScopeKey ? { memoryScopeKey: opts.makerMemoryScopeKey } : {}),
+            memoryEnabled: (opts.makerMemoryEnabled ?? this.deps.runtimeConfig.makerMemoryEnabled) === true,
+            // The teammate's allowed tool servers; without it a teammate would get every server.
+            ...(isolatedBotProfile(opts.botRuntimeProfile)?.mcpPolicy
+              ? { botMcpPolicy: isolatedBotProfile(opts.botRuntimeProfile)!.mcpPolicy } : {}),
+            vendorOptions: { ...(opts.vendorOptions ?? {}) },
+            mcpCallerKind: 'root',
+            mcpCallerAttested: true,
+          });
+          disposeMcp = extra?.disposeSessionCtx;
+          const bridge = extra?.mcpBridge;
+          if (bridge?.token) {
+            mcpServers = bridge.servers.filter(server => !server.remote).map(server => ({
+              type: 'http', name: server.name, url: server.url,
+              headers: [{ name: 'Authorization', value: `Bearer ${bridge.token}` }],
+            }));
+          }
+        } catch (error) {
+          // Tools are an addition: a bridge that cannot start must not stop the task.
+          this.deps.logger.warn('agy: Cindy MCP bridge is unavailable; starting without Cindy tools', { error: String(error) });
+        }
+        assertCurrent();
+      }
+      // The CLI serves HTTP MCP only when each session has its own worker process.
+      const acpArgs = mcpServers.length ? [...AGY_ACP_ARGS, '--process-per-session'] : [...AGY_ACP_ARGS];
+      const launch = fullAccessLaunch
+        ? await prepareAgyFullAccessLaunch({ binaryPath: this.deps.binaryPath, args: acpArgs, taskDir: agyWorkingDir,
+          homeDir: os.homedir(), stateRoot: sandboxStateRoot, env, passEnvKeys: Object.keys(authEnv), probe: this.deps.agySandbox?.probe,
+          shareCliLogin: this.deps.agySandbox?.shareCliLogin === true })
+        : useSandbox
+        ? await prepareAgySandboxedLaunch({ binaryPath: this.deps.binaryPath, args: acpArgs, taskDir: agyWorkingDir,
+          hostLoopbackPorts: bridgeLoopbackPorts(mcpServers),
+          homeDir: os.homedir(), stateRoot: sandboxStateRoot, env, passEnvKeys: Object.keys(authEnv), probe: this.deps.agySandbox?.probe,
+          shareCliLogin: this.deps.agySandbox?.shareCliLogin === true })
+        : { command: this.deps.binaryPath, args: acpArgs,
             // issue #13: the branch that runs without the sandbox must never hand agy the full
             // process env. On the test-transport seam it stays exactly as before.
             env: unsandboxedByPlatform
@@ -580,6 +697,12 @@ export class AgyAgent extends BaseAgent {
       const capabilities = record(init.agentCapabilities);
       promptCapabilities = record(capabilities.promptCapabilities);
       this.capabilities.multimodal.image = promptCapabilities.image === true ? yes : no;
+      // The CLI can append to its system prompt. Caller-owned context (teammate persona, memory
+      // index, the user's prompt) then applies to every turn and to a resumed session, instead of
+      // riding once on the first user message.
+      const systemAppend = record(record(record(capabilities._meta).antigravity).systemPrompt).append === true && context
+        ? { _meta: { antigravity: { systemPrompt: { append: context } } } } : {};
+      if ('_meta' in systemAppend) context = '';
       // Cindy never starts an interactive sign-in from a task; see AgentNotAuthenticatedError below.
       if (opts.resumeSessionId) {
         validateSessionId(opts.resumeSessionId);
@@ -587,14 +710,12 @@ export class AgyAgent extends BaseAgent {
         const sessionCaps = record(capabilities.sessionCapabilities);
         // Prefer resume (no history replay); session/load replays history, which is suppressed while loading.
         if (sessionCaps.resume !== undefined) {
-          updateCatalog(await request('session/resume', { sessionId, cwd: agyWorkingDir, mcpServers: [] }, { signal: startup.signal }));
+          updateCatalog(await request('session/resume', { sessionId, cwd: agyWorkingDir, mcpServers, ...systemAppend }, { signal: startup.signal }));
         } else if (capabilities.loadSession === true) {
-          updateCatalog(await request('session/load', { sessionId, cwd: agyWorkingDir, mcpServers: [] }, { signal: startup.signal }));
+          updateCatalog(await request('session/load', { sessionId, cwd: agyWorkingDir, mcpServers, ...systemAppend }, { signal: startup.signal }));
         } else throw new Error('This agy version cannot resume saved tasks');
       } else {
-        // HTTP MCP is not integrated in this launch mode; the official CLI guide
-        // requires --process-per-session. See protocol-compatibility/antigravity-native-acp.md.
-        const result = record(await request('session/new', { cwd: agyWorkingDir, mcpServers: [] }, { signal: startup.signal }));
+        const result = record(await request('session/new', { cwd: agyWorkingDir, mcpServers, ...systemAppend }, { signal: startup.signal }));
         sessionId = validateSessionId(result.sessionId);
         updateCatalog(result);
       }

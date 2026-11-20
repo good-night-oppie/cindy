@@ -121,7 +121,9 @@ export function spawnAcpTransport(options: AcpTransportOptions): AcpTransport {
       let finished = false;
       const done = (success: boolean) => { if (finished) return; finished = true; clearTimeout(timer); resolve(success); };
       const timer = setTimeout(() => { try { killer.kill(); } catch { /* best effort */ } done(false); }, killWait);
-      killer.once('error', () => done(false)); killer.once('exit', code => done(code === 0));
+      // 128: the root is already gone (it exits on its own once its input closes), which is the
+      // state this call is after; it is not a failure to stop the tree.
+      killer.once('error', () => done(false)); killer.once('exit', code => done(code === 0 || code === 128));
     });
   }
   const transport: AcpTransport = {
@@ -155,7 +157,9 @@ export function spawnAcpTransport(options: AcpTransportOptions): AcpTransport {
       if (closing) return closing;
       disconnect('ACP transport closed');
       closing = (async () => {
-        try { child.stdin.end(); } catch { /* best effort */ }
+        // On Windows the tree is stopped while its root is still alive, so taskkill can see every
+        // descendant; closing the input first lets the root exit and hides them.
+        if (posix) { try { child.stdin.end(); } catch { /* best effort */ } }
         if (posix) {
           signalTree('SIGTERM');
           await waitForExit(grace);
@@ -164,6 +168,7 @@ export function spawnAcpTransport(options: AcpTransportOptions): AcpTransport {
           if (!await waitForExit(killWait)) throw new Error('ACP process exit could not be confirmed');
         } else {
           const treeStopped = !windowsTreeUnconfirmed && await killWindowsTree();
+          try { child.stdin.end(); } catch { /* best effort */ }
           if (!treeStopped) windowsTreeUnconfirmed = true;
           if (!treeStopped) signalTree('SIGKILL');
           if (!await waitForExit(killWait) || !treeStopped) throw new Error('ACP process tree exit could not be confirmed');

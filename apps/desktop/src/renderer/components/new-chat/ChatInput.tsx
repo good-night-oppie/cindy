@@ -368,7 +368,8 @@ import {
   normalizeComposerDocumentJSON,
   plainTextToComposerDocument,
 } from '@/lib/composerListDocument';
-import { useAgentCapabilities, type AgentKind } from '@/hooks/useAgentCapabilities';
+import { probeAgyModelsIfNeeded, useAgentCapabilities, type AgentKind } from '@/hooks/useAgentCapabilities';
+import { withAntigravityModels } from './unifiedModelSelection';
 import { useAvailableAgents } from '@/hooks/useAvailableAgents';
 import { useConnectedSource } from '@/hooks/useConnectedSource';
 import { useProviders } from '@/hooks/useProviders';
@@ -1052,7 +1053,7 @@ function rememberCatalogModelPrefs(
 }
 
 /** 统一模型选择器联合列表的候选引擎全集(与 SELECTABLE_VENDORS 同一顺序)。 */
-const UNIFIED_AGENT_KINDS = ['claude-code', 'codex', 'pi'] as const;
+const UNIFIED_AGENT_KINDS = ['claude-code', 'codex', 'pi', 'agy'] as const;
 
 /** AgentKind → NewMaker vendor(useAvailableAgents 用 vendor 口径)。 */
 function agentKindToVendor(kind: AgentKind): SelectableVendor {
@@ -1323,6 +1324,10 @@ function resolveModelThinkingIntent(input: {
     (!deviceLinkDeviceId ? getProviderModelThinking(kind, providerId, modelId) : undefined);
   return remembered ?? true;
 }
+
+// 'ask' and 'default' are the same mode under two ids; listing one avoids a duplicate row.
+const AGY_NEW_TASK_PERMISSION_MODES = ['ask', 'auto'] as const;
+const AGY_TASK_PERMISSION_MODES = ['ask', 'auto', 'bypassPermissions'] as const;
 
 export function ChatInput({
   sessionModelPickRef,
@@ -1904,7 +1909,7 @@ export function ChatInput({
   // (localStorage,按 agent 分槽、sanitize 恒有种子值)。默认模型/档位偏好已全量本地化,
   // 不再依赖服务端 UserPreferences(登录态失效/离线时模型与档位选择必须照常工作)。
   const localVendorDefaults =
-    getDraft().lastByVendor[vendorKey === 'pi' ? 'pi' : vendorKey === 'codex' ? 'codex' : 'cc'];
+    getDraft().lastByVendor[vendorKey === 'pi' ? 'pi' : vendorKey === 'codex' ? 'codex' : vendorKey === 'agy' ? 'agy' : 'cc'];
   // session-agent-switch 意图制:意图期内 chip / 选择器显示用户选择的目标
   // (model/effort/provider/fast),props(镜像 DB)仍是旧引擎值——真切换在下一条
   // 消息发送时刻 apply,patched 回流后意图清除、显示交回 props。意图存放在
@@ -2012,6 +2017,7 @@ export function ChatInput({
   const ccCaps = useAgentCapabilities('claude-code', catalogDeviceId);
   const codexCaps = useAgentCapabilities('codex', catalogDeviceId);
   const piCaps = useAgentCapabilities('pi', catalogDeviceId);
+  const agyCaps = useAgentCapabilities('agy', catalogDeviceId);
   const activeAgentCapabilities =
     agentKind === 'codex'
       ? codexCaps.capabilities
@@ -2157,8 +2163,11 @@ export function ChatInput({
     if ((piCaps.capabilities?.availableModels ?? []).some((m) => m.id === activeModel)) {
       return 'pi';
     }
+    if ((agyCaps.capabilities?.availableModels ?? []).some((m) => m.id === activeModel)) {
+      return 'agy';
+    }
     return null;
-  }, [activeModel, agentKind, runtimeEffective, composerSelection.pending, composerSelection.display.agentKind, ccCaps.capabilities, codexCaps.capabilities, piCaps.capabilities]);
+  }, [activeModel, agentKind, runtimeEffective, composerSelection.pending, composerSelection.display.agentKind, ccCaps.capabilities, codexCaps.capabilities, piCaps.capabilities, agyCaps.capabilities]);
   // 供应商连接态。effectiveSourceId / sendProviderId / dispatchSend 预检用它。device-link 远程会话 /
   // 草稿用**被控端**供应商目录(隧道),否则用本机(两 hook 都无条件调用,按 deviceLinkDeviceId 取)。
   // SSH 项目:Codex 只走远端主机的原生连接,模型清单读远端;Claude Code / Pi 仍用本机目录。
@@ -2216,8 +2225,14 @@ export function ChatInput({
     () => withFollowedAccountSource(localProviders.providers, taskSourceProvider),
     [localProviders.providers, taskSourceProvider],
   );
-  const providers = catalogDeviceId ? remoteProviders.providers
+  // 与模型面板同口径:已连接的「Google Gemini」订阅来源挂上 agy 的 ACP 清单,
+  // 否则选中其模型后发送门禁判「没有已连接来源」,Send 一直置灰。
+  const providersBase = catalogDeviceId ? remoteProviders.providers
     : sshCatalogProviders ?? localTaskProviders;
+  const providers = useMemo(
+    () => withAntigravityModels(providersBase, agyCaps.capabilities?.availableModels ?? []),
+    [agyCaps.capabilities, providersBase],
+  );
   const sendProviders = filterChatBridgedCodexProviders(
     providers,
     currentModelAgentKind ?? 'codex',
@@ -2265,6 +2280,11 @@ export function ChatInput({
     );
     return kinds.length > 0 ? kinds : undefined;
   }, [runtimeAgentsLoaded, runtimeAvailableVendors, agentKind]);
+  // agy 注册时才探活一次:让主进程真实起 ACP 把模型清单读进 capabilities,
+  // 面板才有 Antigravity 的行。探活失败时清单保持空,入口自然不出现。
+  useEffect(() => {
+    if (runtimeAgentsLoaded && runtimeAvailableVendors.has('agy')) probeAgyModelsIfNeeded();
+  }, [runtimeAgentsLoaded, runtimeAvailableVendors]);
   // 已有 device-link 任务在断链时仍有 pinned deviceId + renderer outbox 可接住发送，
   // 不能因为被控端 provider 目录暂时拉不到就禁用 composer。远程草稿没有既有 session
   // 可以排队，仍与本地任务一样保留来源门禁。
@@ -7014,7 +7034,7 @@ export function ChatInput({
           initialProviderId,
         });
       if (!remoteDeviceId) {
-        const vendor = agentKind === 'codex' ? 'codex' : agentKind === 'pi' ? 'pi' : 'cc';
+        const vendor = agentKind === 'codex' ? 'codex' : agentKind === 'pi' ? 'pi' : agentKind === 'agy' ? 'agy' : 'cc';
         if (modelOnly) {
           // 只保护新建默认的模型 / 来源 / 其思考档；按 (引擎, 模型) 跨来源共享的档位与 Fast 预设
           // 是独立的既有行为，下面照常记录。
@@ -10106,7 +10126,13 @@ export function ChatInput({
                     footer={sessionId && !getSessionDeviceId(sessionId) && !deviceLinkDeviceId && !sharedGuest ? <PluginWriteAccessRecovery key={sessionId} sessionId={sessionId} onGranted={onPermissionModeDidChange} /> : undefined}
                     permissionMode={activePermissionMode}
                     onPermissionModeChange={handlePermissionModeChange}
-                    vendorKey={vendorKey}
+                    // An Antigravity task keeps its engine out of the model-panel identity, so the
+                    // selector must be told the engine here or it shows Claude Code's modes and wording.
+                    vendorKey={runtimeAgentKind === 'agy' ? 'agy' : vendorKey}
+                    // A new Antigravity task never starts in Full access (it removes all isolation): the
+                    // option is offered only inside a task, where switching is a deliberate act (cindy#1).
+                    allowedModes={runtimeAgentKind === 'agy' ? AGY_TASK_PERMISSION_MODES
+                      : !sessionId && vendorKey === 'agy' ? AGY_NEW_TASK_PERMISSION_MODES : undefined}
                     deviceId={deviceLinkDeviceId ?? undefined}
                     disabled={composerEditorLocked || settingsLocked || sharedGuest}
                     dense={effectiveDenseToolbar}

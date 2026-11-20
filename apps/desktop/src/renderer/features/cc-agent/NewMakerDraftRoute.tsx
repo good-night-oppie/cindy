@@ -108,6 +108,7 @@ import { useAttachments } from '@/hooks/useAttachments';
 import {
   useNewMakerDraft,
   switchVendor,
+  resetAgyDraftFullAccess,
   getDraft,
   patchDraft,
   patchCollab,
@@ -3340,8 +3341,7 @@ export function NewMakerDraftRoute() {
   // ChatInput 的 initial* 由父级传入,vendor 切换后 ChatInput 重新 mount(key 变化)
   // 自动 pickup 新 vendor 的 lastByVendor 值。
   const handleVendorChange = useCallback((next: MakerVendor) => {
-    // 新建任务只列原三种引擎;agy 只是历史身份,不进草稿。
-    if (next === 'agy') return;
+    // agy 引擎也进草稿(面板里选到的模型正来自 ACP catalog);走 switchVendor 切槽即可。
     markDefaultTupleCustomized();
     switchVendor(next, { userSelected: true });
   }, []);
@@ -3560,8 +3560,8 @@ export function NewMakerDraftRoute() {
       /** 远程 Agent:这一行属于哪台电脑(null = 本机);未带 = 面板没有远程 Agent 入口。 */
       agentDevice?: { deviceId: string; name: string } | null;
     }) => {
-      // 新建任务只列原三种引擎;面板若带出 agy 行也不写进草稿(不回落成 Claude)。
-      if (rawSelection.vendor === 'agy') return;
+      // 面板里选到的 agy 行同样写进草稿(ACP catalog 的精确模型 id);
+      // createSession 端 requireAgentKind 已认 agy,模型空串不会被当成有效选择落库。
       const selection = { ...rawSelection, vendor: rawSelection.vendor };
       // 收藏锚点写进**目标引擎的槽**(Chris 2026-08-19 起持久化,见 draftFavoriteAnchor 的
       // 说明):记的是 uid + **本次写进草稿的 wire id**,失效判定才有可比的同类值。

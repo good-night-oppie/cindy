@@ -331,6 +331,24 @@ function parseAgentCapabilities(value: unknown): AgentCapabilities {
 interface MakerApiShape {
   getCapabilities: (agentKind: AgentKind) => Promise<AgentCapabilities>;
   listAvailableAgents: () => Promise<readonly AgentKind[]>;
+  probeAgentModels?: (agentKind: AgentKind) => Promise<void>;
+}
+
+let agyProbed = false;
+let agyProbeInFlight: Promise<void> | null = null;
+
+/**
+ * agy 有真实模型清单前必须让 main 真实起一次 ACP 探活(清单写进 capabilities)。
+ * 探活成功才广播刷新三引擎能力快照,让 ModelSelector 下次读到非空清单。
+ */
+export function probeAgyModelsIfNeeded(): void {
+  if (agyProbed || agyProbeInFlight) return;
+  const api = getMakerApi();
+  if (!api?.probeAgentModels) return;
+  agyProbeInFlight = api.probeAgentModels('agy')
+    .then(() => { agyProbed = true; void refreshLocalCapabilities(); })
+    .catch(() => { /* 选择器保持空清单;下次挂载再试 */ })
+    .finally(() => { agyProbeInFlight = null; });
 }
 
 interface DeviceLinkShape {
@@ -676,7 +694,9 @@ export function getCachedCapabilities(
  * 模型下拉 / fast / effort 不为空、modelDefinitions 同步层已热。失败 swallow(轮询/打开会话会再取)。
  */
 export async function prefetchDeviceCapabilities(deviceId: string): Promise<void> {
-  await Promise.allSettled(ALL_AGENT_KINDS.map((agent) => fetchCapabilities(agent, deviceId)));
+  // Antigravity runs only on this computer: another device or a share is never asked for it.
+  await Promise.allSettled(ALL_AGENT_KINDS.filter((agent) => !deviceId || agent !== 'agy')
+    .map((agent) => fetchCapabilities(agent, deviceId)));
 }
 
 export function evictControlledDeviceCapabilities(taskDeviceId: string): void {

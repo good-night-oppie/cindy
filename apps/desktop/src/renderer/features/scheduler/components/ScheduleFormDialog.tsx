@@ -377,14 +377,15 @@ export function ScheduleFormDialog({
       const result = await window.electronAPI.maker.schedule.generatePreRunHook({
         description,
         scheduleName: form.name.trim() || undefined,
-        providerId: providerId ?? undefined,
+        providerId: form.agentKind === 'agy' ? undefined : providerId ?? undefined,
         // Remote selections use the existing local utility-model fallback above.
         modelAgentDeviceId: remoteAgentLocation ? undefined : form.modelAgentDeviceId,
         // bound 任务的缺省模型/来源维度由 main 按绑定会话补齐；provider/model 的显式
         // 覆盖仍原样透传。persistent 任务即使已回写 targetSessionId，也按任务级选择生成。
-        agentKind: remoteAgentLocation || (resolveBoundSessionRoute && form.modelAgentDeviceId !== '')
+        // Antigravity cannot write the script (no one-shot API); it uses the same fallback.
+        agentKind: remoteAgentLocation || form.agentKind === 'agy' || (resolveBoundSessionRoute && form.modelAgentDeviceId !== '')
           ? undefined : form.agentKind,
-        model: inheritsBoundSessionModel || remoteAgentLocation ? undefined : form.model.trim() || undefined,
+        model: inheritsBoundSessionModel || remoteAgentLocation || form.agentKind === 'agy' ? undefined : form.model.trim() || undefined,
         // 绑定会话任务:workingDir 不发(表单残留值可能是改绑前的过期项目目录,
         // 显式值会压过会话解析),真实 cwd 由 main 按会话 meta.workDir 解析 ——
         // 落盘目录/自测环境与生产运行一致
@@ -982,8 +983,6 @@ export function ScheduleFormDialog({
                                     fast,
                                     agentDevice,
                                   }) => {
-                                    // 定时任务不支持 agy(主进程 runner 也会拒绝)。
-                                    if (engine === 'agy') return;
                                     return selectModelConfiguration({
                                       agentKind: engine === 'cc' ? 'claude-code' : engine,
                                       model: modelId,
@@ -998,9 +997,7 @@ export function ScheduleFormDialog({
                                       null,
                                       boundSessionReference?.agentKind === 'cc'
                                         ? 'claude-code'
-                                        : boundSessionReference?.agentKind === 'agy'
-                                          ? undefined
-                                          : boundSessionReference?.agentKind,
+                                        : boundSessionReference?.agentKind,
                                     )
                                   }
                                   agentKind={form.agentKind}

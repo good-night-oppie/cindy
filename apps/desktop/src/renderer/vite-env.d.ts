@@ -5757,9 +5757,11 @@ interface ElectronAPI {
    * apps/desktop/src/main/maker-ipc/ 的 handlers + apps/desktop/src/main/maker-host/。
    */
   maker: {
-    listAvailableAgents: () => Promise<Array<'claude-code' | 'codex' | 'pi'>>;
+    listAvailableAgents: () => Promise<Array<'claude-code' | 'codex' | 'pi' | 'agy'>>;
     onAgentsChanged: (cb: () => void) => () => void;
-    getCapabilities: (agentKind: 'claude-code' | 'codex' | 'pi') => Promise<unknown>;
+    getCapabilities: (agentKind: 'claude-code' | 'codex' | 'pi' | 'agy') => Promise<unknown>;
+    /** Probe a runtime whose catalog only exists after a live session (agy) so its models can be listed before a task exists. */
+    probeAgentModels: (agentKind: 'claude-code' | 'codex' | 'pi' | 'agy') => Promise<void>;
     /** Read-only: the V1 background tasks a teammate chat started (stored rows). */
     listBotDelegations: (
       parentSessionId: string,
@@ -6449,7 +6451,7 @@ interface ElectronAPI {
     enableOrca: (
       leadSessionId: string,
       opts: {
-        workerAgent: 'claude-code' | 'codex' | 'pi';
+        workerAgent: 'claude-code' | 'codex' | 'pi' | 'agy';
         delegateTask?: string;
         role?: string;
         label?: string;

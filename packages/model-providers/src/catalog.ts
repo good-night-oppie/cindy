@@ -32,9 +32,9 @@ import { withVerifiedStaticWindows } from './builtin.js';
 import { findReservedOAuthExtraParam } from './provider-oauth.js';
 import { isProviderRequestPath } from './provider-url.js';
 
-export { BUNDLED_CATALOG, BUILTIN_PROVIDERS, claudeSubscriptionOnlyForClaudeCode } from './builtin.js';
+export { BUNDLED_CATALOG, BUILTIN_PROVIDERS, ANTIGRAVITY_PROVIDER_ID, claudeSubscriptionOnlyForClaudeCode } from './builtin.js';
 
-const AGENT_KINDS: readonly AgentKind[] = ['claude-code', 'codex', 'pi'];
+const AGENT_KINDS: readonly AgentKind[] = ['claude-code', 'codex', 'pi', 'agy'];
 const EFFORTS: readonly Effort[] = ['minimal', 'low', 'medium', 'high', 'xhigh', 'max', 'ultra'];
 const WIRE_PROTOCOLS = ['anthropic-messages', 'openai-responses', 'openai-chat', 'google-generative-ai'] as const;
 
@@ -319,6 +319,12 @@ function validateProvider(p: Provider, allowEmptyModalities = false): void {
   for (const agent of p.agents) {
     const routing = p.routing[agent];
     assert(routing, `provider '${p.id}' declares agent '${agent}' but no routing[${agent}]`);
+    // Antigravity has no HTTP route: the CLI talks to Google itself and Cindy speaks ACP to the
+    // CLI. Its one accepted upstream is that fixed marker, never a URL.
+    if (agent === 'agy') {
+      assert(routing.upstream === 'agy://acp', `provider '${p.id}' routing[agy].upstream invalid`);
+      continue;
+    }
     if (routing.upstream !== undefined) {
       let valid = false;
       try {

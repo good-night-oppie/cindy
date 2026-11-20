@@ -300,11 +300,12 @@ function parseAgentSwitchBoundary(content: string): ParsedAgentSwitchBoundary | 
     if (
       parsed.fromAgentKind !== 'cc' &&
       parsed.fromAgentKind !== 'codex' &&
-      parsed.fromAgentKind !== 'pi'
+      parsed.fromAgentKind !== 'pi' &&
+      parsed.fromAgentKind !== 'agy'
     )
       return null;
     const toAgentKind =
-      parsed.toAgentKind === 'cc' || parsed.toAgentKind === 'codex' || parsed.toAgentKind === 'pi'
+      parsed.toAgentKind === 'cc' || parsed.toAgentKind === 'codex' || parsed.toAgentKind === 'pi' || parsed.toAgentKind === 'agy'
         ? parsed.toAgentKind
         : undefined;
     return {

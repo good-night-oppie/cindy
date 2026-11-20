@@ -18,7 +18,7 @@
  */
 
 import type { ProviderView, UnifiedAgentCapability, UnifiedModelEntry } from '@cindy/model-providers';
-import { remoteInvocationModels, resolveStoredModelEntry, displayNameOfStoredModelId } from '@cindy/model-providers';
+import { ANTIGRAVITY_PROVIDER_ID, remoteInvocationModels, resolveStoredModelEntry, displayNameOfStoredModelId } from '@cindy/model-providers';
 
 import type { AgentKind } from '@/hooks/useAgentCapabilities';
 import type { SelectableVendor } from '@/lib/agentVendors';
@@ -30,17 +30,50 @@ import type { RecentModelItem } from '@/state/recentModels';
 
 export { resolveStoredModelEntry };
 
+/** Google Gemini 订阅来源(只经 Antigravity CLI)的供应商 id。 */
+export const AGY_PROVIDER_ID = ANTIGRAVITY_PROVIDER_ID;
+
+type AgyCapabilityModel = { id: string; displayName: string; description?: string; contextWindow: number; efforts: readonly string[]; defaultEffort: string | null };
+
+/**
+ * agy 的模型清单只存在于它的 ACP 会话里(探活后进 capabilities),供应商目录里恒为空。
+ * 用户已添加并连接「Google Gemini」订阅来源时,把这份清单挂到该来源上,统一面板就能像
+ * 其它供应商一样列出它;来源未添加 / 未连接时原样返回(同一数组引用),agy 模型不可选。
+ */
+export function withAntigravityModels<T extends ProviderView>(
+  providers: readonly T[],
+  models: readonly AgyCapabilityModel[],
+): T[] {
+  if (!models.length || !providers.some((p) => p.id === ANTIGRAVITY_PROVIDER_ID && p.connected)) {
+    return providers as T[];
+  }
+  const agy = models.map((m) => ({
+    id: m.id,
+    name: m.displayName,
+    ...(m.description ? { description: m.description } : {}),
+    mode: 'chat',
+    contextWindow: m.contextWindow,
+    efforts: [...m.efforts] as never,
+    defaultEffort: m.defaultEffort as never,
+  }));
+  return providers.map((p) =>
+    p.id === ANTIGRAVITY_PROVIDER_ID && p.connected
+      ? ({ ...p, models: { ...p.models, agy } } as T)
+      : p,
+  );
+}
+
 /** 引擎在**选择器 / 草稿链路**里的口径(vendor);catalog / capabilities 侧是 AgentKind。 */
 export type UnifiedEngine = SelectableVendor;
 
 /** vendor → AgentKind(查目录 / 能力 / 记忆时用)。 */
 export function agentKindOfEngine(engine: UnifiedEngine): AgentKind {
-  return engine === 'cc' ? 'claude-code' : engine === 'codex' ? 'codex' : 'pi';
+  return engine === 'cc' ? 'claude-code' : engine === 'codex' ? 'codex' : engine === 'agy' ? 'agy' : 'pi';
 }
 
 /** AgentKind → vendor(落 store / draft 时用)。未知值回落 cc,与既有 sanitize 方向一致。 */
 export function engineOfAgentKind(agent: AgentKind): UnifiedEngine {
-  return agent === 'codex' ? 'codex' : agent === 'pi' ? 'pi' : 'cc';
+  return agent === 'codex' ? 'codex' : agent === 'pi' ? 'pi' : agent === 'agy' ? 'agy' : 'cc';
 }
 
 /**

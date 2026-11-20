@@ -3428,10 +3428,12 @@ function CCAgentSessionContent({
         };
         const orcaDeviceId = getStickySessionDeviceId(collabSessionId);
         if (orcaDeviceId) {
+          // Antigravity runs only on this computer; a lead on another computer cannot start one.
+          if (enableOptions.workerAgent === 'agy') throw new Error('Antigravity runs only on this computer');
           await enableRemoteCollabForSession({
             deviceId: orcaDeviceId,
             leadSessionId: collabSessionId,
-            options: enableOptions,
+            options: { ...enableOptions, workerAgent: enableOptions.workerAgent },
             logTag: 'session enable collab',
           });
         } else {
@@ -4160,7 +4162,10 @@ function CCAgentSessionContent({
       if (readOnly) return false;
       if (cindyMakeInputLocked) return false;
       invalidateHistoryRecoveryNavigation();
-      const deliveryMode = opts?.deliveryMode ?? 'queue';
+      // Antigravity cannot take a message into a running turn (no same-turn steer). A message
+      // sent meanwhile is queued and goes out when the current reply ends, like an ordinary send.
+      const deliveryMode = opts?.deliveryMode === 'steer' && sessionRef.current?.agentKind === 'agy'
+        ? 'queue' : opts?.deliveryMode ?? 'queue';
       const originalMessage = message;
       const navigationRequestVersion =
         !opts?.literalText && deliveryMode !== 'steer' && matchNavigationCommandName(message)
@@ -6359,7 +6364,7 @@ function CCAgentSessionContent({
                   queueEditingClientId={activeQueueComposerEdit?.clientId ?? null}
                   onQueueEditSubmit={submitQueueComposerEdit}
                   onQueueEditCancel={cancelQueueComposerEdit}
-                  onQueueSteer={steerQueuedMessage}
+                  onQueueSteer={session?.agentKind === 'agy' ? undefined : steerQueuedMessage}
                   steeringQueueClientIds={steeringQueueClientIds}
                   messages={sideChatMessages}
                   placeholder={

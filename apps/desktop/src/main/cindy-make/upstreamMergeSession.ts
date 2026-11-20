@@ -103,7 +103,7 @@ export async function ensureUpstreamMergeSession(
     if (origin?.agentKind === 'agy') throw new Error('Native Antigravity merge tasks are not supported');
     if (origin?.source === 'cindy-make' && !origin.remoteHostId)
       options = {
-        agentKind: origin.agentKind === 'codex' ? 'codex' : origin.agentKind === 'pi' ? 'pi' : 'cc',
+        agentKind: origin.agentKind === 'codex' ? 'codex' : origin.agentKind === 'pi' ? 'pi' : origin.agentKind === 'agy' ? 'agy' : 'cc',
         model: origin.model ?? undefined,
         providerId: origin.providerId,
         effort: origin.effort ?? undefined,

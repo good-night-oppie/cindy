@@ -151,6 +151,12 @@ export const MAKER_INVOKE = {
   READ_BACKGROUND_TASK_OUTPUT_TAIL: 'maker:background-task:output-tail',
   GET_CAPABILITIES: 'maker:get-capabilities',
   /**
+   * agy 的模型清单只在 ACP 会话里才有;新建任务前经此探活一次(main 真实起 agy acp 读
+   * catalog 写进 capabilities),让模型选择器能在任务创建前列出 Antigravity 的模型。
+   * 入参 = agentKind;只对 'agy' 生效,其他引擎是 no-op。
+   */
+  PROBE_AGENT_MODELS: 'maker:probe-agent-models',
+  /**
    * device-link 远程草稿镜像:控制端为被控设备新建项目草稿时,经隧道读被控端**当前
    * New Maker 草稿**在某 vendor 的完整选择(model/effort/fast/permission/source/是否显式
    * 选过模型),1:1 seed 控制端草稿(绝不取控制端本地)。只读、无 sender 依赖、语义在被控端执行 → 进 device-link

@@ -1,5 +1,5 @@
 import { MANAGED_LLAMACPP_PROVIDER_ID } from '../../../shared/llamaCpp';
-import { PROVIDER_MEDIA_FIELDS, presetDisplayName, providerPresetOAuth, isMimoTokenPlanPreset, type ProviderPreset, type ProviderView } from '@cindy/model-providers';
+import { ANTIGRAVITY_PROVIDER_ID, PROVIDER_MEDIA_FIELDS, presetDisplayName, providerPresetOAuth, isMimoTokenPlanPreset, type ProviderPreset, type ProviderView } from '@cindy/model-providers';
 import { isBuiltinApiKeyProviderId } from '../../../shared/providerSecrets';
 import { LOCAL_CONNECT_PRESET_IDS, LOCAL_ADVANCED_PRESET_IDS, MANAGED_OLLAMA_PROVIDER_ID } from '../../../shared/localModelRuntime';
 
@@ -14,8 +14,9 @@ export function hasRetainedBuiltinConnection(provider: ProviderView): boolean {
 }
 export function isWizardOAuthChoice(p: ProviderView): boolean {
   return p.id !== 'xd' && p.source === 'builtin' &&
-    (!hasRetainedBuiltinConnection(p) || ['anthropic', 'openai', 'xai'].includes(p.id)) &&
-    (['anthropic', 'openai', 'xai'].includes(p.id) || (p.auth.method === 'oauth' && !!p.auth.oauth));
+    // Subscription sources stay listed once connected, so the entry does not vanish from under the user.
+    (!hasRetainedBuiltinConnection(p) || ['anthropic', 'openai', 'xai', ANTIGRAVITY_PROVIDER_ID].includes(p.id)) &&
+    (['anthropic', 'openai', 'xai', ANTIGRAVITY_PROVIDER_ID].includes(p.id) || (p.auth.method === 'oauth' && !!p.auth.oauth));
 }
 export function isWizardApiKeyChoice(p: ProviderView): boolean {
   return p.source === 'builtin' && p.auth.method === 'apiKey' &&

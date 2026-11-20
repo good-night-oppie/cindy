@@ -11045,7 +11045,7 @@ function isActiveSessionSnapshot(value: unknown): value is ActiveSessionSnapshot
   const item = value as Record<string, unknown>;
   return (
     typeof item.sessionId === 'string' &&
-    (item.agentKind === 'claude-code' || item.agentKind === 'codex' || item.agentKind === 'pi') &&
+    (item.agentKind === 'claude-code' || item.agentKind === 'codex' || item.agentKind === 'pi' || item.agentKind === 'agy') &&
     typeof item.isTurnRunning === 'boolean'
   );
 }
@@ -16757,6 +16757,8 @@ async function resendBlockedMessage(
 
 function steerQueuedMessage(sessionId: string, clientId: string): Promise<boolean> {
   if (!sessionId || !clientId) return Promise.resolve(false);
+  // No same-turn steer on Antigravity: the row stays queued and is sent when the reply ends.
+  if (getOrCreateState(sessionId).agentKind === 'agy') return Promise.resolve(false);
   // Capture the target before entering the dispatch coordinator. A relay
   // reconnect may clear remoteProjectsStore while the coordinator is waiting;
   // retrying through makerApiFor(sessionId) in that window would address the
@@ -19059,7 +19061,7 @@ function mirrorSessionFields(
   // 新引擎的事件会被旧引擎 reducer 错误处理(2026-07-20 审计实锤)。随引擎翻转
   // 同步清 sdkSessionId(旧引擎的原生会话 id 对新引擎无意义,与 noteAgentSwitched
   // 口径一致)。幂等:发起窗口已 noteAgentSwitched → 同值 no-op。
-  if (patch.agentKind === 'cc' || patch.agentKind === 'codex' || patch.agentKind === 'pi') {
+  if (patch.agentKind === 'cc' || patch.agentKind === 'codex' || patch.agentKind === 'pi' || patch.agentKind === 'agy') {
     const nextKind = dbToMakerAgentKind(patch.agentKind);
     setState(sessionId, (s) => {
       // New hosts publish the full runtime snapshot before explicitly clearing
