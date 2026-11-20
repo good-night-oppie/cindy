@@ -13611,7 +13611,7 @@ export function registerMakerIpc(maker: Maker, options: RegisterMakerIpcOptions)
           title, projectDir, workspaceKind: projectDir ? 'project' : 'dialogue', workingDir: projectDir ?? undefined,
           ...(route && agentKind ? { agentKind: agentKind === 'claude-code' ? 'cc' as const : agentKind, model: route.model,
             providerId: route.providerId, effort: route.effort || '', fastMode: route.fastMode } : {}),
-          permissionMode: permissionModeOrAsk(agentKind ? getRemoteNewMakerDefaults(agentKind).permissionMode : undefined),
+          permissionMode: permissionModeOrAsk(agentKind && agentKind !== 'agy' ? getRemoteNewMakerDefaults(agentKind).permissionMode : undefined),
         } });
         // Before its first turn starts, so the task starts with the 群协作 Skill.
         markGroupCindyTask(row.id);
@@ -17275,12 +17275,14 @@ export function registerMakerIpc(maker: Maker, options: RegisterMakerIpcOptions)
     }
     const chain = await readEffectiveBotModelChain(config);
     const toAgentKind = (harness: string): AgentKind =>
-      harness === 'codex' ? 'codex' : harness === 'pi' ? 'pi' : 'claude-code';
+      harness === 'codex' ? 'codex' : harness === 'pi' ? 'pi' : harness === 'agy' ? 'agy' : 'claude-code';
     const currentHarness = current.agentKind === 'codex'
       ? 'codex'
       : current.agentKind === 'pi'
         ? 'pi'
-        : 'claude';
+        : current.agentKind === 'agy'
+          ? 'agy'
+          : 'claude';
     const control = getSessionRuntimeControlSnapshot(controlSessionId);
     const [controlSession] = controlSessionId === sessionId ? [{ remoteHostId: row.remoteHostId }]
       : await getDbClient().drizzle.select({ remoteHostId: sessions.remoteHostId })

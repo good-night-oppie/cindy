@@ -41,7 +41,7 @@ export interface BotCapabilities {
   agentDeviceId?: string | null;
   effort: string;
   fastMode: boolean | 'ultrafast';
-  harness: 'claude' | 'codex' | 'pi';
+  harness: BotModelRoute['harness'];
   /** Ordered, complete runtime routes. The first route is the normal choice. */
   modelChain: BotModelRoute[];
   /** null follows the global Bot default; an array is this Bot's explicit chain. */
@@ -81,7 +81,7 @@ export interface BotModelOverride {
 export type { BotHarness, BotModelRoute };
 export { BOT_MODEL_CHAIN_MAX };
 
-function vendorForHarness(harness: BotCapabilities['harness']): 'cc' | 'codex' | 'pi' {
+function vendorForHarness(harness: BotCapabilities['harness']): 'cc' | 'codex' | 'pi' | 'agy' {
   return harness === 'claude' ? 'cc' : harness;
 }
 
@@ -236,7 +236,8 @@ export function canonicalBotSessionId(bot: BotProfile): string | undefined {
 function defaultBotModelSettings(vendor: ReturnType<typeof vendorForHarness>): BotModelOverride {
   const providers = getCachedProvidersSnapshot()?.providers ?? [];
   const agent = vendor === 'cc' ? 'claude-code' : vendor;
-  const picked = pickConnectedModelForAgent(providers, agent, getDefaultModelForVendor(vendor).id);
+  // Antigravity has no built-in default: take the first model its provider reports.
+  const picked = pickConnectedModelForAgent(providers, agent, vendor === 'agy' ? '' : getDefaultModelForVendor(vendor).id);
   const provider = providers.find((item) => item.id === picked?.providerId);
   const model = provider && picked ? getModel(provider, picked.model, agent) : undefined;
   return { model: picked?.model ?? '', providerId: picked?.providerId ?? null,
