@@ -562,10 +562,19 @@ export class AgyAgent extends BaseAgent {
     try {
       assertCurrent();
       assertAgyModelAllowed(requestedModel, allowedModels);
-      if (opts.extraDirs?.length || opts.writableDirs?.length || opts[LIBRARY_READ_ROOT]) {
+      // Where agy runs without system isolation (Windows, macOS, Full access) it already reaches
+      // every folder the user can, so a teammate's own folders and the Library need no grant (and
+      // read-only cannot be enforced there, as for any agy task). Inside the Linux sandbox they
+      // would be silently unreachable, so that case is refused.
+      const directoryGrantsEnforced = useSandbox && !fullAccessLaunch;
+      if (directoryGrantsEnforced && (opts[LIBRARY_READ_ROOT] || opts.extraDirs?.length || opts.writableDirs?.length)) {
         throw new Error('agy ACP cannot enforce additional directory grants or a read-only Library root');
       }
-      if (opts.reviewMode || opts.botRuntimeProfile) throw new Error('agy ACP does not support restricted Reviewer or Bot runtime profiles');
+      if (opts.reviewMode) throw new Error('agy ACP does not support the restricted Reviewer runtime');
+      // A teammate needs Cindy's tools to answer where it was asked; the sandbox closes them.
+      if (opts.botRuntimeProfile && directoryGrantsEnforced) {
+        throw new Error('agy teammates need Cindy tools, which the Linux sandbox blocks; use Full access');
+      }
       if (opts.remoteHostId || opts.deviceHosted) throw new Error('agy currently runs only on the task host computer');
       if (!path.isAbsolute(opts.workingDir)) throw new Error('agy ACP requires an absolute working directory');
       if (!this.capabilities.permissionModes.some(option => option.id === mode)) throw new NotSupportedError('permissionMode', no);
@@ -581,7 +590,9 @@ export class AgyAgent extends BaseAgent {
         const memory = memoryEnabled ? opts.makerMemoryIndexSnapshot
           ?? (this.deps.makerMemory ? await (await this.deps.makerMemory.getStore(scope)).getIndex() : '') : '';
         // ACP has no system-message API. Pass caller-owned context once with the first user prompt.
-        context = [opts.botProfilePrompt, opts.botProfileContextPrompt, memory, opts.userPrompt].filter(Boolean).join('\n\n');
+        // A classic teammate has its own identity and does not inherit the owner's user prompt.
+        const ownerPrompt = isolatedBotProfile(opts.botRuntimeProfile) ? undefined : opts.userPrompt;
+        context = [opts.botProfilePrompt, opts.botProfileContextPrompt, memory, opts.botUserProfilePrompt, ownerPrompt].filter(Boolean).join('\n\n');
       }
       assertCurrent();
       // System-level isolation: agy only touches the task folder and its private state; no host
@@ -601,6 +612,9 @@ export class AgyAgent extends BaseAgent {
             workingDir: agyWorkingDir,
             ...(opts.makerMemoryScopeKey ? { memoryScopeKey: opts.makerMemoryScopeKey } : {}),
             memoryEnabled: (opts.makerMemoryEnabled ?? this.deps.runtimeConfig.makerMemoryEnabled) === true,
+            // The teammate's allowed tool servers; without it a teammate would get every server.
+            ...(isolatedBotProfile(opts.botRuntimeProfile)?.mcpPolicy
+              ? { botMcpPolicy: isolatedBotProfile(opts.botRuntimeProfile)!.mcpPolicy } : {}),
             vendorOptions: { ...(opts.vendorOptions ?? {}) },
             mcpCallerKind: 'root',
             mcpCallerAttested: true,
