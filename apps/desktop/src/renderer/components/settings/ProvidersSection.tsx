@@ -3691,6 +3691,9 @@ export function ProvidersSection() {
                     ((!effectiveSelected.suspended &&
                     effectiveSelected.connected &&
                     effectiveSelected.agents.length > 0 &&
+                    // Antigravity runs only on this computer; offering to share it would hand the
+                    // other side an empty model list.
+                    effectiveSelected.id !== ANTIGRAVITY_PROVIDER_ID &&
                     effectiveSelected.remoteInvocationEnabled !== undefined) ||
                     (effectiveSelected.subscriptionPoolAlias && ownedShares.get(null)?.has(effectiveSelected.id))) && (
                       <RemoteProviderAccessRow
