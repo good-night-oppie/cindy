@@ -1147,7 +1147,8 @@ export function ModelEffortChip({
   const catalogModel = source ? getModel(source, effectiveId, agentKind) : undefined;
   const effectiveEffort = effectiveId ? effortValue || catalogModel?.defaultEffort || current?.defaultEffort || '' : '';
   const modelLabel = catalogModel?.name || current?.displayName || effectiveId || t('scheduler.chips.model.default');
-  const agentLabel = t(`newChat.modelSelector.trigger.agent.${agentKind === 'claude-code' ? 'claudeCode' : agentKind}`);
+  const agentLabel = agentKind === 'agy' ? 'Antigravity'
+    : t(`newChat.modelSelector.trigger.agent.${agentKind === 'claude-code' ? 'claudeCode' : agentKind}`);
   const effortLabel = (e: EffortValue) => t(`effortLevels.${e}`);
   const display = followsSessionModel
     ? [
