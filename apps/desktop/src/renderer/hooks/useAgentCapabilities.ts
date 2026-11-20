@@ -694,7 +694,9 @@ export function getCachedCapabilities(
  * 模型下拉 / fast / effort 不为空、modelDefinitions 同步层已热。失败 swallow(轮询/打开会话会再取)。
  */
 export async function prefetchDeviceCapabilities(deviceId: string): Promise<void> {
-  await Promise.allSettled(ALL_AGENT_KINDS.map((agent) => fetchCapabilities(agent, deviceId)));
+  // Antigravity runs only on this computer: another device or a share is never asked for it.
+  await Promise.allSettled(ALL_AGENT_KINDS.filter((agent) => !deviceId || agent !== 'agy')
+    .map((agent) => fetchCapabilities(agent, deviceId)));
 }
 
 export function evictControlledDeviceCapabilities(taskDeviceId: string): void {
