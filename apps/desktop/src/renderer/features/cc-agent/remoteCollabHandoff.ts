@@ -62,7 +62,8 @@ async function readRemoteCollabCapabilities(
 }> {
   // Worker 的 Agent 在另一台电脑运行时，那个 Agent 不一定装在被控电脑上；这些是整台电脑的协议位，
   // 改用被控电脑一定注册的 Claude Code 读。
-  const probeAgent = typeof options.agentDeviceId === 'string' ? 'claude-code' : options.workerAgent;
+  // Antigravity never runs on another computer (the caller refuses it); these bits are device-wide.
+  const probeAgent = typeof options.agentDeviceId === 'string' || options.workerAgent === 'agy' ? 'claude-code' : options.workerAgent;
   const raw = await agentCapabilitiesForDevice(deviceId, probeAgent);
   if (
     !raw

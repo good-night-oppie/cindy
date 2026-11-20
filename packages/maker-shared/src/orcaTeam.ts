@@ -55,7 +55,7 @@ export const ORCA_WORKER_LABEL_MAX_LENGTH = 32;
 
 const ORCA_WORKER_LABEL_PATTERN = /^[a-z0-9_-]+$/i;
 
-export type OrcaWorkerAgentKind = 'claude-code' | 'codex' | 'pi';
+export type OrcaWorkerAgentKind = 'claude-code' | 'codex' | 'pi' | 'agy';
 export type OrcaWorkerPermissionMode = 'auto' | 'bypassPermissions';
 export type OrcaWorkerStatus = 'idle' | 'running' | 'done' | 'error';
 
@@ -70,6 +70,8 @@ export const DEFAULT_ORCA_WORKER_MODELS: Readonly<Record<OrcaWorkerAgentKind, st
   'claude-code': 'claude-opus-4-7',
   // 与被控端 orcaWorkerCreationService 的 pi 默认一致。
   pi: 'claude-sonnet-4-6',
+  // Antigravity has no built-in default: the model comes from what the CLI reports.
+  agy: '',
 };
 
 /**

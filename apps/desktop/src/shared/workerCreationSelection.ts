@@ -17,7 +17,7 @@ export function normalizeWorkerCreationSelection(raw: unknown): WorkerCreationSe
     v.length <= limit &&
     Array.from(v).every((character) => character.charCodeAt(0) >= 32);
   if (
-    !['claude-code', 'codex', 'pi'].includes(p.agent ?? '') ||
+    !['claude-code', 'codex', 'pi', 'agy'].includes(p.agent ?? '') ||
     !text(p.model, 1024) ||
     typeof p.effort !== 'string' ||
     p.effort.length > 32 ||
