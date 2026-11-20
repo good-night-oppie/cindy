@@ -181,6 +181,38 @@ describe('piEnvironment per-session identity', () => {
     rmSync(profile, { recursive: true, force: true });
   });
 
+  it('passes each registered agy task to helper authorization and its inner tool', async () => {
+    const authorizeCall = vi.fn(async ({ sessionId }: { sessionId?: string }) => sessionId
+      ? { ok: true as const }
+      : { ok: false as const, errorCode: 'CAPABILITY_NOT_AVAILABLE', message: 'Missing task' });
+    const providers = createLiziMcpProviders({ xdtHelper: { authorizeCall } });
+    const readIdentity = async (sessionId: string) => {
+      const config = await getPiExtraSpawnConfig(providers, noopLogger(), {
+        agentKind: 'agy', sessionId, workingDir: '/workspace',
+      });
+      const bridge = config!.mcpBridge!;
+      const server = bridge.servers.find(entry => entry.name === 'cindy_helper')!;
+      const client = new Client({ name: 'agy-helper-test', version: '1' });
+      try {
+        await client.connect(new StreamableHTTPClientTransport(new URL(server.url), {
+          requestInit: { headers: { Authorization: 'Bearer ' + bridge.token } },
+        }));
+        const result = await client.callTool({
+          name: 'call_tool', arguments: { name: 'get_current_session_id', args: {} },
+        });
+        return JSON.parse((result.content as Array<{ text: string }>)[0]!.text);
+      } finally {
+        await client.close();
+        config!.disposeSessionCtx?.();
+      }
+    };
+    for (const sessionId of ['agy-task-one', 'agy-task-two']) {
+      const result = await readIdentity(sessionId);
+      expect(result).toMatchObject({ ok: true, agent_kind: 'agy', session_id: sessionId });
+      expect(authorizeCall).toHaveBeenCalledWith(expect.objectContaining({ sessionId }));
+    }
+  });
+
   it('recovers Slack binding in the existing Pi bridge while another session holds its lease', async () => {
     let bound = false;
     const providers = createLiziMcpProviders({ slackHook: { getBridge: () => ({
