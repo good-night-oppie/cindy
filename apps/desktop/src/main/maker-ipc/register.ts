@@ -260,6 +260,7 @@ import {
   isOrganizationManagedProvider,
   supportsSubscriptionFastPolicy,
   type ProviderView,
+  ANTIGRAVITY_PROVIDER_ID,
 } from '@cindy/model-providers';
 import { createId } from '@paralleldrive/cuid2';
 import { normalizeOrcaWorkerLabel } from '@cindy/maker-shared/orca-team';
@@ -12564,7 +12565,10 @@ export function registerMakerIpc(maker: Maker, options: RegisterMakerIpcOptions)
           fastMode: (inherited.fastMode ?? false),
           providerId: inherited.providerId,
           title: newTitle,
-          permissionMode: inherited.permissionMode ?? 'bypassPermissions',
+          // Antigravity's Full access removes file and network isolation, so a task created
+          // for the user never starts there (same rule as the new-task draft).
+          permissionMode: inherited.agentKind === 'agy' && (inherited.permissionMode ?? 'bypassPermissions') === 'bypassPermissions'
+            ? 'auto' : inherited.permissionMode ?? 'bypassPermissions',
           ...(inheritedAgentDeviceId ? { agentDeviceId: inheritedAgentDeviceId } : {}),
         });
         await assertTaskActionCurrent();
@@ -14726,11 +14730,12 @@ export function registerMakerIpc(maker: Maker, options: RegisterMakerIpcOptions)
         const snapshot = getCurrentDbClientSnapshot();
         const { available } = await inspectAppDefaultModel();
         if (snapshot !== getCurrentDbClientSnapshot() || !isPluginTaskAuthorized(pluginId)) throw new PluginTaskError('PERMISSION_DENIED', '账号或插件授权已变化');
-        return { models: available.map(option => ({ id: option.id,
-          route: { agentKind: option.route.harness === 'claude' ? 'cc' : option.route.harness,
+        // Plugin tasks cannot run on Antigravity (see resolveRoute above); do not offer it.
+        return { models: available.flatMap(option => option.route.harness === 'agy' ? [] : [{ id: option.id,
+          route: { agentKind: option.route.harness === 'claude' ? 'cc' as const : option.route.harness,
             model: option.route.model, providerId: option.route.providerId,
             effort: option.route.effort, fastMode: option.route.fastMode },
-          efforts: option.efforts, supportsFastMode: option.supportsFastMode })) };
+          efforts: option.efforts, supportsFastMode: option.supportsFastMode }]) };
       }
       case 'setModel': return service.setModel(pluginId, request);
       case 'create': return service.create(pluginId, request);
@@ -15241,7 +15246,6 @@ export function registerMakerIpc(maker: Maker, options: RegisterMakerIpcOptions)
       const writableDirs = await readSessionWritableDirsFromDb(sessionId).catch(() => []);
       if (writableDirs.length > 0) createOpts.writableDirs = writableDirs;
     }
-    if (createOpts.agentKind === 'agy') throw new Error('Native Antigravity input queue is not integrated');
     return {
       agentKind: createOpts.agentKind,
       workingDir: createOpts.workingDir,
@@ -17889,10 +17893,22 @@ export function registerMakerIpc(maker: Maker, options: RegisterMakerIpcOptions)
     },
     listAvailableModels: async ({ agent, callerSessionId, executionDeviceId, agentDeviceId: requestedAgentDeviceId }) => {
       try {
-        if (agent === 'agy') throw new Error('Native Antigravity workers are not supported');
         if (executionDeviceId === 'local' || executionDeviceId === getSelfDeviceId()) {
           executionDeviceId = undefined;
           requestedAgentDeviceId ??= null;
+        }
+        if (agent === 'agy') {
+          // Antigravity runs only on this computer and has one source, the Google Gemini
+          // subscription. Listed only when asked for by name (schedules); Workers on it are
+          // still refused at creation, and it is never listed for another computer.
+          if (executionDeviceId || (requestedAgentDeviceId && requestedAgentDeviceId !== getSelfDeviceId())) {
+            throw new Error('Antigravity runs only on this computer');
+          }
+          const source = (await getDesktopProviderService().listProviders({ allowSideEffects: false }))
+            .find((provider) => provider.id === ANTIGRAVITY_PROVIDER_ID && provider.connected && !provider.suspended);
+          return { ok: true, agentDeviceId: null, agy: source ? (source.models.agy ?? []).map((model) => ({
+            id: model.id, label: model.name, providers: [{ id: source.id, name: source.name }], defaultProviderId: source.id,
+          })) : [] };
         }
         if (executionDeviceId) {
           if (!orcaRemoteWorkersForHost) throw new Error('[HOST_NOT_READY] Worker service is not ready');
@@ -19638,7 +19654,6 @@ export function registerMakerIpc(maker: Maker, options: RegisterMakerIpcOptions)
     hasPendingInteraction: hasPendingAgentInteractionForSession,
     getAgentKind: (sessionId) => {
       const kind = getStableSessionForTurnBoundary(sessionId)?.agentKind;
-      if (kind === 'agy') throw new Error('Native Antigravity input queue is not integrated');
       return kind ?? null;
     },
     getSdkSessionId: async (sessionId) => {

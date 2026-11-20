@@ -674,7 +674,7 @@ export function budgetModelRequiresApiKeyMessage(model: string): string {
 
 /** agent 的人类可读名,用于 preflight 失败信息。 */
 function agentDisplayName(agent: AgentKind): string {
-  return agent === 'codex' ? 'Codex' : agent === 'pi' ? 'Pi' : 'Claude Code';
+  return agent === 'codex' ? 'Codex' : agent === 'pi' ? 'Pi' : agent === 'agy' ? 'Antigravity' : 'Claude Code';
 }
 
 /**

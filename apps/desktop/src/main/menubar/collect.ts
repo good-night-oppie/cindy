@@ -661,6 +661,8 @@ export function usageScope(
   const windows: Array<keyof MenubarUsageScopeData['models']> = ['7', '30', '90'];
   const modelRows: Record<string, MenubarModelUsage[]> = { '7': [], '30': [], '90': [] };
   for (const row of payload.modelDaily) {
+    // The menu bar helper knows three engines; leave Antigravity out instead of counting it as Claude Code.
+    if (row.agentKind === 'agy') continue;
     const index = indexOfDay.get(row.day);
     if (index === undefined) continue;
     const harness = harnessOf(row.agentKind);
@@ -695,6 +697,8 @@ function modelSeries(
   type Entry = { harness: MenubarHarness; money: number[]; tokens: number[]; recent: number };
   const byModel = new Map<string, Entry>();
   for (const row of payload.modelDaily) {
+    // The menu bar helper knows three engines; leave Antigravity out instead of counting it as Claude Code.
+    if (row.agentKind === 'agy') continue;
     const index = indexOfDay.get(row.day);
     if (index === undefined) continue;
     const name = label(row.model);
@@ -760,6 +764,7 @@ async function collectTasks(
   const meta = new Map((usage?.tasks ?? []).filter((task) => task.deviceId === 'local').map((task) => [task.sessionId, task]));
   const rates = new Map<string, { money: number; tokens: number; harness: MenubarHarness }>();
   for (const row of usage?.modelDaily ?? []) {
+    if (row.agentKind === 'agy') continue;
     if (row.day !== today) continue;
     const rate = rates.get(row.model) ?? { money: 0, tokens: 0, harness: harnessOf(row.agentKind) };
     rate.money += finite(row.money?.amount);
