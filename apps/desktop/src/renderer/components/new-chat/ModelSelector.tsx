@@ -1897,6 +1897,10 @@ function ModelSelectorContentView({
     void visibilityVersion;
     const entries = unifiedModelEntries({
       providers: homeProviders.filter((provider) => !runLocationFold.hiddenLocal.has(provider.id)),
+      // Same engine set as the list itself: without it a source that only serves an engine this
+      // picker does not offer (Google Gemini / Antigravity in the teammate picker) got a rail
+      // item that opened an empty list.
+      ...(unifiedAgents ? { agents: unifiedAgents } : {}),
       isVisible: homeDeviceId
         ? (providerId, model, agent) =>
             isDeviceModelVisible(homeModelVisibilityOverrides, agent, providerId, model)
@@ -1905,7 +1909,9 @@ function ModelSelectorContentView({
       scope: 'draft',
     });
     return buildUnifiedRail(entries, undefined, homeDeviceId ? undefined : localProviders.providerOrder);
+    // biome-ignore lint/correctness/useExhaustiveDependencies: unifiedAgents 以 unifiedAgentsKey 表达身份。
   }, [
+    unifiedAgentsKey,
     hasRemoteAgent,
     homeDeviceId,
     homeProviders,

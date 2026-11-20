@@ -4160,7 +4160,10 @@ function CCAgentSessionContent({
       if (readOnly) return false;
       if (cindyMakeInputLocked) return false;
       invalidateHistoryRecoveryNavigation();
-      const deliveryMode = opts?.deliveryMode ?? 'queue';
+      // Antigravity cannot take a message into a running turn (no same-turn steer). A message
+      // sent meanwhile is queued and goes out when the current reply ends, like an ordinary send.
+      const deliveryMode = opts?.deliveryMode === 'steer' && sessionRef.current?.agentKind === 'agy'
+        ? 'queue' : opts?.deliveryMode ?? 'queue';
       const originalMessage = message;
       const navigationRequestVersion =
         !opts?.literalText && deliveryMode !== 'steer' && matchNavigationCommandName(message)
@@ -6359,7 +6362,7 @@ function CCAgentSessionContent({
                   queueEditingClientId={activeQueueComposerEdit?.clientId ?? null}
                   onQueueEditSubmit={submitQueueComposerEdit}
                   onQueueEditCancel={cancelQueueComposerEdit}
-                  onQueueSteer={steerQueuedMessage}
+                  onQueueSteer={session?.agentKind === 'agy' ? undefined : steerQueuedMessage}
                   steeringQueueClientIds={steeringQueueClientIds}
                   messages={sideChatMessages}
                   placeholder={
