@@ -10547,7 +10547,7 @@ export function registerMakerIpc(maker: Maker, options: RegisterMakerIpcOptions)
         await getDbClient().drizzle.insert(sessions).values(row).run();
       },
       bootstrapSession: async (opened, assertCurrent) => {
-        const agentKind = opened.agentKind === 'codex' || opened.agentKind === 'pi'
+        const agentKind = opened.agentKind === 'codex' || opened.agentKind === 'pi' || opened.agentKind === 'agy'
           ? opened.agentKind
           : 'claude-code';
         await bootstrapSession(buildCreateOptsWithStderr({

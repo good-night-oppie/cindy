@@ -135,7 +135,7 @@ export function registerListAvailableModelsTool(
       device: z.string().trim().min(1).max(128).optional().describe('任务所在电脑，取 list_machines 的 machines.computers[].deviceId；查询在这台电脑创建任务可用的模型。省略保持当前任务的位置。'),
       provider_device_id: z.string().trim().min(1).max(128).optional().describe('模型供应商所在电脑；local 相对 device 指定的任务电脑。agent_device_id 为兼容旧名。'),
       agent: z
-        .enum(['codex', 'claude-code', 'pi'])
+        .enum(['codex', 'claude-code', 'pi', 'agy'])
         .optional()
         .describe('可选, 只查某一 agent 的 model 列表; 不传返三者'),
       agent_device_id: z

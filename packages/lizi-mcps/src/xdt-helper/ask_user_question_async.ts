@@ -36,7 +36,7 @@ export function registerManageUserQuestionsTool(
       const context = getContext();
       if (!context?.sessionId || !context.sessionInstanceId) return errorPayload('NO_SESSION_CONTEXT', 'No current task instance.');
       const surface = await getSurface();
-      if (!['codex', 'claude-code', 'pi'].includes(context.agentKind ?? '') || (surface && !surface.has('cindy'))) {
+      if (!['codex', 'claude-code', 'pi', 'agy'].includes(context.agentKind ?? '') || (surface && !surface.has('cindy'))) {
         return errorPayload('CAPABILITY_NOT_AVAILABLE', 'Question management is unavailable in this task.');
       }
       if (context.mcpCallerKind !== 'root' || context.mcpCallerAttested !== true) return errorPayload('ROOT_REQUIRED', 'Ask the parent agent to manage its questions.');

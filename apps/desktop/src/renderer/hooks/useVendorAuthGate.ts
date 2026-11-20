@@ -253,7 +253,7 @@ export function useVendorAuthGate(): UseVendorAuthGateReturn {
       const deviceId = options?.deviceId;
       if (deviceId) {
         const providerAgent: ProviderAgentKind =
-          vendor === 'codex' ? 'codex' : vendor === 'pi' ? 'pi' : 'claude-code';
+          vendor === 'codex' ? 'codex' : vendor === 'pi' ? 'pi' : vendor === 'agy' ? 'agy' : 'claude-code';
         const includeSuspended = options?.existingSessionRoute === true;
         // 模型选择器已读到的来源快照(被控端来源变化推送会令其失效)显示已有可用来源时直接复用:
         // provider:list 经隧道实测 1–5 秒,重拉一遍会整段挡在远程新建任务的第一步。

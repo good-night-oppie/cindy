@@ -248,7 +248,7 @@ function text(value: unknown): string | null {
 }
 
 function agentKind(value: unknown): OrcaWorkerAgentKind {
-  return value === 'codex' || value === 'pi' ? value : 'claude-code';
+  return value === 'codex' || value === 'pi' || value === 'agy' ? value : 'claude-code';
 }
 
 function workerStatus(value: unknown): OrcaWorkerStatus {

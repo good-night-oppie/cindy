@@ -80,7 +80,7 @@ export function registerListSessionsTool(
         .optional()
         .describe('ISO 8601 时间字符串(不含), 过滤所选 time_field < to。'),
       agent_kind: z
-        .enum(['cc', 'codex', 'pi'])
+        .enum(['cc', 'codex', 'pi', 'agy'])
         .optional()
         .describe('过滤 agent 类型, 不传 = 全部返回。'),
       include_deleted: z

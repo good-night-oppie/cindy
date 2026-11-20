@@ -7,7 +7,7 @@ import type { IpcHandlerRegistry } from './ipcHandlerRegistry.js';
 
 const botContextSchema = z.object({
   botId: z.string().min(1),
-  agentKind: z.enum(['claude-code', 'codex', 'pi']),
+  agentKind: z.enum(['claude-code', 'codex', 'pi', 'agy']),
   remoteHostId: z.string().nullish(),
 });
 

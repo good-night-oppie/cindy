@@ -45,7 +45,7 @@ async function loadCatalog(
     agentKind:
       session.runtimePending?.profile.agentKind ??
       session.runtimeEffective?.agentKind ??
-      (session.agentKind === 'codex' || session.agentKind === 'pi' ? session.agentKind : 'claude-code'),
+      (session.agentKind === 'codex' || session.agentKind === 'pi' || session.agentKind === 'agy' ? session.agentKind : 'claude-code'),
     botSessionId: bot.canonicalSessionId,
     modelChain: modelChain as never,
   });

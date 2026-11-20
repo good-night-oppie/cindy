@@ -224,7 +224,7 @@ export function parseRoutineInput(value: unknown): RoutineInput {
   if (input.modelOverride === null) modelOverride = null;
   else if (input.modelOverride !== undefined) {
     const model = record(input.modelOverride);
-    if (!['claude-code', 'codex', 'pi'].includes(String(model.agentKind))) throw new Error('Invalid routine agent');
+    if (!['claude-code', 'codex', 'pi', 'agy'].includes(String(model.agentKind))) throw new Error('Invalid routine agent');
     if (model.effort !== undefined && !['', 'minimal', 'low', 'medium', 'high', 'xhigh', 'max', 'ultra'].includes(String(model.effort))) throw new Error('Invalid routine effort');
     if (model.fastMode !== undefined && typeof model.fastMode !== 'boolean' && model.fastMode !== 'ultrafast') throw new Error('Invalid routine fast mode');
     modelOverride = {
