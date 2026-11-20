@@ -14,7 +14,8 @@ export function hasRetainedBuiltinConnection(provider: ProviderView): boolean {
 }
 export function isWizardOAuthChoice(p: ProviderView): boolean {
   return p.id !== 'xd' && p.source === 'builtin' &&
-    (!hasRetainedBuiltinConnection(p) || ['anthropic', 'openai', 'xai'].includes(p.id)) &&
+    // Subscription sources stay listed once connected, so the entry does not vanish from under the user.
+    (!hasRetainedBuiltinConnection(p) || ['anthropic', 'openai', 'xai', ANTIGRAVITY_PROVIDER_ID].includes(p.id)) &&
     (['anthropic', 'openai', 'xai', ANTIGRAVITY_PROVIDER_ID].includes(p.id) || (p.auth.method === 'oauth' && !!p.auth.oauth));
 }
 export function isWizardApiKeyChoice(p: ProviderView): boolean {
