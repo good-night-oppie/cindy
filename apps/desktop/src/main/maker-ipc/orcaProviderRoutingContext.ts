@@ -193,7 +193,7 @@ export function buildLocalProviderRoutingContext(views: ProviderView[], modelReg
     (provider.models[agent] ?? []).filter((model) =>
       isModelSelectableForNewRoute(model, { userProvider: provider.source === 'user' }),
     );
-  const availabilityFor = (agent: Exclude<AgentKind, 'agy'>) =>
+  const availabilityFor = (agent: AgentKind) =>
     connectedProvidersForAgent(views, agent).map((provider) => {
       const models = routableModels(provider, agent);
       const registryIdentityByModel = Object.fromEntries(
@@ -202,7 +202,7 @@ export function buildLocalProviderRoutingContext(views: ProviderView[], modelReg
             modelRegistry,
             provider.id,
             model.id,
-            agent === 'pi' ? undefined : agent,
+            agent === 'pi' || agent === 'agy' ? undefined : agent,
           );
           return matched ? [[model.id, matched.entry.id]] : [];
         }),
@@ -237,7 +237,8 @@ export function buildLocalProviderRoutingContext(views: ProviderView[], modelReg
 
   return {
     availability: {
-      agy: [],
+      // The Google Gemini subscription, when the CLI is signed in on this computer.
+      agy: availabilityFor('agy'),
       'claude-code': availabilityFor('claude-code'),
       codex: availabilityFor('codex'),
       pi: availabilityFor('pi'),
