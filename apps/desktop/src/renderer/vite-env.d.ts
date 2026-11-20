@@ -6451,7 +6451,7 @@ interface ElectronAPI {
     enableOrca: (
       leadSessionId: string,
       opts: {
-        workerAgent: 'claude-code' | 'codex' | 'pi';
+        workerAgent: 'claude-code' | 'codex' | 'pi' | 'agy';
         delegateTask?: string;
         role?: string;
         label?: string;

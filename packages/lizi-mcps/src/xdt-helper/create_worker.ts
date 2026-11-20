@@ -135,7 +135,7 @@ export const createWorkerSpecSchema = z.object({
     .max(32)
     .describe('worker 角色: developer / reviewer / tester / merger 或自定义 string'),
   agent: z
-    .enum(['claude-code', 'codex', 'pi'])
+    .enum(['claude-code', 'codex', 'pi', 'agy'])
     .optional()
     .describe('可选，省略按用户在创建 Worker 面板手工提交过的组合；没选过需指定 agent。记忆不可用且无法确定 agent 时，指定 agent 后重试。'),
   model: z

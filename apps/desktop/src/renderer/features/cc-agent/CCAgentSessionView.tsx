@@ -3428,10 +3428,12 @@ function CCAgentSessionContent({
         };
         const orcaDeviceId = getStickySessionDeviceId(collabSessionId);
         if (orcaDeviceId) {
+          // Antigravity runs only on this computer; a lead on another computer cannot start one.
+          if (enableOptions.workerAgent === 'agy') throw new Error('Antigravity runs only on this computer');
           await enableRemoteCollabForSession({
             deviceId: orcaDeviceId,
             leadSessionId: collabSessionId,
-            options: enableOptions,
+            options: { ...enableOptions, workerAgent: enableOptions.workerAgent },
             logTag: 'session enable collab',
           });
         } else {
