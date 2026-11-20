@@ -22790,48 +22790,54 @@ export function registerMakerIpc(maker: Maker, options: RegisterMakerIpcOptions)
       await assertReviewSettingsUnlocked(sessionId);
       await beforeMutation?.();
       assertOwnerCurrent();
-      const [row] = await snapshot!.client.drizzle.select({permissionMode: sessions.permissionMode})
+      const [row] = await snapshot!.client.drizzle.select({permissionMode: sessions.permissionMode, agentKind: sessions.agentKind})
         .from(sessions).where(eq(sessions.id, sessionId)).limit(1);
       assertOwnerCurrent();
       if (!row) throwIpcError('NOT_FOUND', 'session not found');
       await beforeMutation?.();
       const sess = maker.getSession(sessionId);
-      let runtimeChanged = false;
-      try {
-        if (sess) {
-          await sess.setPermissionMode(mode as PermissionMode);
-          runtimeChanged = true;
-        }
+      const crossingIsolation = (sess?.agentKind ?? row.agentKind) === 'agy' && process.platform === 'linux'
+        && (row.permissionMode === 'bypassPermissions') !== (mode === 'bypassPermissions');
+      const tightening = crossingIsolation && mode !== 'bypassPermissions';
+      const persistMode = async () => {
         await beforeMutation?.();
         assertOwnerCurrent();
         const saved = await snapshot!.client.tx('bots.persistSessionPermission', {sessionId, mode});
         if (!saved.updated) throwIpcError('NOT_FOUND', 'session not found');
         assertOwnerCurrent();
-      } catch (error) {
-        // Keep recovery inside the same permission operation so it cannot
-        // overwrite a later user choice. Never recover into a new account.
-        if (runtimeChanged && sess && snapshot === getCurrentDbClientSnapshot()) {
-          await sess.setPermissionMode(row.permissionMode as PermissionMode).catch((rollbackError) => {
-            log.warn('permission runtime rollback failed', {sessionId, error: String(rollbackError)});
-          });
+      };
+      if (tightening) {
+        // Keep sends and lazy session creation outside the close-and-persist interval.
+        await withSessionRestartLock(sessionId, async () => {
+          assertOwnerCurrent();
+          const current = maker.getSession(sessionId);
+          if (current?.isTurnRunning()) await current.abort();
+          await maker.closeSession(sessionId, 'runtime-refresh');
+          await persistMode();
+        });
+      } else {
+        let runtimeChanged = false;
+        try {
+          if (sess) {
+            await sess.setPermissionMode(mode as PermissionMode);
+            runtimeChanged = true;
+          }
+          await persistMode();
+        } catch (error) {
+          if (runtimeChanged && sess && snapshot === getCurrentDbClientSnapshot()) {
+            await sess.setPermissionMode(row.permissionMode as PermissionMode).catch((rollbackError) => {
+              log.warn('permission runtime rollback failed', {sessionId, error: String(rollbackError)});
+            });
+          }
+          throw error;
         }
-        throw error;
       }
       // Antigravity on Linux: Full access is a different launch (no file/network isolation) from
       // the other modes, and the isolation is fixed per process. Crossing that line recycles the
       // runtime; the next message starts agy again in the new mode and resumes the conversation.
       // Same rule as Codex: loosening waits for the running turn, tightening stops it now.
-      if (sess && sess.agentKind === 'agy' && process.platform === 'linux'
-        && (row.permissionMode === 'bypassPermissions') !== (mode === 'bypassPermissions')) {
-        const loosening = mode === 'bypassPermissions';
-        // Tightening: stop the running reply the way the Stop button does first, so the user sees a
-        // stopped turn rather than a failed one when the runtime is then recycled.
-        if (!loosening && sess.isTurnRunning()) {
-          await sess.abort().catch((error) => {
-            log.warn('agy access-mode tighten: stopping the running turn failed', { sessionId, error: String(error) });
-          });
-        }
-        await (loosening && sess.isTurnRunning()
+      if (sess && crossingIsolation && !tightening) {
+        await (sess.isTurnRunning()
           ? maker.closeSessionIfCurrent(sess, 'runtime-refresh', { afterCurrentTurn: true })
           : maker.closeSession(sessionId, 'runtime-refresh')
         ).catch((error) => {

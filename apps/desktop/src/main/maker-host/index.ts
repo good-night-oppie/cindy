@@ -2113,7 +2113,7 @@ export function getMaker(): Maker {
 
     setAntigravityModelSource({
       read: () => agyAgent.capabilities.availableModels,
-      probe: () => agyAgent.probeModels(process.cwd()),
+      probe: () => agyAgent.probeModels(),
       changed: () => refreshSelectableModelsAndBroadcast({}),
     });
 

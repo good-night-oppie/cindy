@@ -58,7 +58,7 @@ describe('ACP stdio transport', () => {
     expect(f.transport.getPid?.()).toBe(f.child.pid);
     f.exit(); await f.transport.close(); expect(f.transport.getPid?.()).toBeNull();
   });
-  it('requires successful Windows tree termination, never upgrades failed cleanup to success', async () => {
+  it.each([1, 128])('keeps Windows tree termination unconfirmed after taskkill exit %i', async code => {
     vi.useFakeTimers();
     const killer = Object.assign(new EventEmitter(), { kill: vi.fn() });
     vi.mocked(spawn).mockReturnValue(killer as unknown as ChildProcess);
@@ -66,9 +66,14 @@ describe('ACP stdio transport', () => {
     f.child.kill.mockImplementation(() => { f.exit(); });
     const closed = f.transport.close();
     const rejected = expect(closed).rejects.toThrow('tree exit could not be confirmed');
-    killer.emit('exit', 1); await rejected;
+    killer.emit('exit', code); await rejected;
     await expect(f.transport.close()).rejects.toThrow('tree exit could not be confirmed');
     expect(spawn).toHaveBeenCalledWith(expect.stringMatching(/taskkill\.exe$/), ['/PID', String(f.child.pid), '/T', '/F'], expect.objectContaining({ shell: false }));
+  });
+  it('keeps the tree unconfirmed if its root exited before close', async () => {
+    const f = fixture({ platformOverride: 'win32' });
+    f.exit();
+    await expect(f.transport.close()).rejects.toThrow('tree exit could not be confirmed');
   });
   it('accepts Windows shutdown only after successful tree kill and child exit', async () => {
     const killer = Object.assign(new EventEmitter(), { kill: vi.fn() });

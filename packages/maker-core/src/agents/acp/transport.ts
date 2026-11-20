@@ -113,7 +113,8 @@ export function spawnAcpTransport(options: AcpTransportOptions): AcpTransport {
     if (!exited) { try { child.kill(signal); } catch { /* verified by waitForExit */ } }
   }
   async function killWindowsTree(): Promise<boolean> {
-    if (child.pid === undefined || exited) return true;
+    if (child.pid === undefined) return true;
+    if (exited) return false;
     return new Promise(resolve => {
       // taskkill is a system utility, never a PATH-selected executable or shell command.
       const systemRoot = process.env.SystemRoot ?? 'C:\\Windows';
@@ -121,9 +122,8 @@ export function spawnAcpTransport(options: AcpTransportOptions): AcpTransport {
       let finished = false;
       const done = (success: boolean) => { if (finished) return; finished = true; clearTimeout(timer); resolve(success); };
       const timer = setTimeout(() => { try { killer.kill(); } catch { /* best effort */ } done(false); }, killWait);
-      // 128: the root is already gone (it exits on its own once its input closes), which is the
-      // state this call is after; it is not a failure to stop the tree.
-      killer.once('error', () => done(false)); killer.once('exit', code => done(code === 0 || code === 128));
+      // A missing root cannot confirm that its descendants stopped.
+      killer.once('error', () => done(false)); killer.once('exit', code => done(code === 0));
     });
   }
   const transport: AcpTransport = {

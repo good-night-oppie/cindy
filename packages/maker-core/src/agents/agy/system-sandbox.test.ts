@@ -29,6 +29,7 @@ import {
 
 const fakeFs = (opts: { symlinks?: Record<string, string>; existing?: string[] } = {}): AgySandboxFsView => ({
   exists: p => (opts.existing ?? ['/etc/hosts', '/etc/ssl', '/etc/resolv.conf', '/lib64']).includes(p) || p in (opts.symlinks ?? {}),
+  isRegularFile: p => (opts.existing ?? []).includes(p) && !(p in (opts.symlinks ?? {})),
   readSymlink: p => (opts.symlinks ?? { '/bin': 'usr/bin', '/lib': 'usr/lib' })[p] ?? null,
   realpath: p => (p === '/etc/resolv.conf' ? '/run/systemd/resolve/stub-resolv.conf' : p),
 });
@@ -77,6 +78,9 @@ describe('buildAgySandboxLaunch', () => {
     // Asked for: exactly the token file, read-only, and nothing else from the real ~/.gemini.
     const token = '/home/u/.gemini/antigravity-cli/antigravity-oauth-token';
     const shared = buildAgySandboxLaunch({ ...base, shareCliLogin: true, fs: fakeFs({ existing: ['/etc/hosts', token] }) });
+    const nonFile = { ...fakeFs({ existing: [token] }), isRegularFile: () => false };
+    expect(buildAgySandboxLaunch({ ...base, shareCliLogin: true, fs: nonFile }).args).not.toContain(token);
+    expect(buildAgyFullAccessLaunch({ ...base, stateMounts: [], shareCliLogin: true, fs: nonFile }).args).not.toContain(token);
     // Not signed in on this computer: nothing is mounted.
     expect(buildAgySandboxLaunch({ ...base, shareCliLogin: true }).args.join(' ')).not.toContain('antigravity-oauth-token');
     expect(pairs(shared.args, '--ro-bind').filter(([src]) => src!.startsWith('/home/u/.gemini'))).toEqual([[token, token]]);

@@ -22,7 +22,7 @@ const permissionCommitSource = source.slice(source.indexOf('  async function com
 const planSource = source.slice(source.indexOf('  ipcMain.handle(\n    MAKER_INVOKE.SET_PLAN_MODE,'), source.indexOf('  ipcMain.handle(MAKER_INVOKE.EXPORT_SESSION_HTML,'));
 const planJs = ts.transpileModule(planSource, { compilerOptions: { target: ts.ScriptTarget.ES2022 } }).outputText;
 const settingJs = ts.transpileModule(permissionCommitSource + settingSource, { compilerOptions: { target: ts.ScriptTarget.ES2022 } }).outputText;
-function fixture() {
+function fixture(platform = process.platform) {
  let identity = 'owner-epoch-install';
  let usesDefaults = true;
  const gate = new PluginWriteAccessGate();
@@ -36,12 +36,12 @@ function fixture() {
  const task = { taskId: 'task', revision: 1, status: 'active', permissionMode: 'plan' };
  const service = { get: vi.fn(async () => task), listRuns: vi.fn(async () => ({ items: [] })), completeOperation: vi.fn(async <T>(operation: () => Promise<T>) => operation()) };
  let runtimePlan: boolean | null = false;
- const live = { get stablePlanModeState() { return runtimePlan === null ? null : {enabled:runtimePlan,generation:0}; }, getPlanMode:()=>runtimePlan, setPlanMode:vi.fn(async(enabled:boolean)=>{runtimePlan=enabled;}), isTurnRunning: () => false, getTurnControlSnapshot: () => ({ pendingInteractionCount: 0 }), setPermissionMode: vi.fn(async (mode: string) => {runtimeMode=mode;}) };
+ const live = { agentKind: 'codex', get stablePlanModeState() { return runtimePlan === null ? null : {enabled:runtimePlan,generation:0}; }, getPlanMode:()=>runtimePlan, setPlanMode:vi.fn(async(enabled:boolean)=>{runtimePlan=enabled;}), isTurnRunning: () => false, getTurnControlSnapshot: () => ({ pendingInteractionCount: 0 }), setPermissionMode: vi.fn(async (mode: string) => {runtimeMode=mode;}) };
  const queue = { ensureQueueRestored: vi.fn(async (_id: string) => {}), isQueueRestored: vi.fn((_id: string) => true), getQueueControlSnapshot: vi.fn((_id: string) => ({ pendingQueue: [] as string[] })) };
  const slots = new Set<string>();
  const dialog = { showMessageBox: vi.fn(async () => ({ response: 0 })) };
  const write = vi.fn((_id: string, value: Record<string, unknown>) => { cfg = value; });
- const deps = { isPluginTaskPermissionAllowed, withBotPermissionChange: async (_id: string, change: () => Promise<unknown>) => change(), withSessionPermissionChange, withSessionRestartLock, drainPersistQueue:drain,messages,sessions,eq:()=>true,and:()=>true,service, getCurrentDbClientSnapshot: () => ownership.current, getPluginTaskDefaults: () => usesDefaults ? cfg : undefined, pluginPermissionRequests: slots, PluginTaskError, maker: { getSession: () => cold ? null : live }, inputCoordinator: queue, dialog, t: (x: string) => x, getInstalledGhostName: () => 'fixture', clampPluginTaskPermissionMode: (x: string) => x, writePluginTaskConfig: write, broadcastSessionPatched: vi.fn() };
+ const deps = { isPluginTaskPermissionAllowed, withBotPermissionChange: async (_id: string, change: () => Promise<unknown>) => change(), withSessionPermissionChange, withSessionRestartLock, drainPersistQueue:drain,messages,sessions,eq:()=>true,and:()=>true,service, getCurrentDbClientSnapshot: () => ownership.current, getPluginTaskDefaults: () => usesDefaults ? cfg : undefined, pluginPermissionRequests: slots, PluginTaskError, maker: { getSession: () => cold ? null : live, closeSession: vi.fn(async () => {}) }, inputCoordinator: queue, dialog, t: (x: string) => x, getInstalledGhostName: () => 'fixture', clampPluginTaskPermissionMode: (x: string) => x, writePluginTaskConfig: write, broadcastSessionPatched: vi.fn() };
  const allDeps = {...deps, pluginWriteAccessGate:gate, pluginWriteAccessIdentity:()=>identity};
  const run = new Function(...Object.keys(allDeps), js)(...Object.values(allDeps));
  let setMode!: (event: unknown, sessionId: string, mode: string) => Promise<unknown>;
@@ -49,7 +49,7 @@ function fixture() {
  let remote = false;
  const persistedResults = new WeakSet<object>();
  const forgetGrants = vi.fn();
- const settingDeps = {...deps, syncBotLinkedLanePermissions: vi.fn(async()=>{}), forgetCredentialGrants:forgetGrants, log:{warn:vi.fn()}, ipcMain:{handle:(_name:unknown,fn:typeof setMode)=>{setMode=fn;}}, MAKER_INVOKE:{SET_PERMISSION_MODE:'permission'}, isDeviceLinkInvoke:()=>remote, assertTrustedAppRendererEvent:()=>{}, assertReviewSettingsUnlocked:async()=>{}, isSessionPermissionMode:()=>true, throwIpcError:(code:string,message:string)=>{throw Object.assign(Error(message),{code});}, persistPermissionModeWithoutRuntime:async(_id:string,mode:string)=>(await epoch.client.tx('bots.persistSessionPermission',{mode})).updated, markRemoteSettingPersistedInsideHandler:(result:object)=>persistedResults.add(result)};
+ const settingDeps = {...deps, process: {platform}, syncBotLinkedLanePermissions: vi.fn(async()=>{}), forgetCredentialGrants:forgetGrants, log:{warn:vi.fn()}, ipcMain:{handle:(_name:unknown,fn:typeof setMode)=>{setMode=fn;}}, MAKER_INVOKE:{SET_PERMISSION_MODE:'permission'}, isDeviceLinkInvoke:()=>remote, assertTrustedAppRendererEvent:()=>{}, assertReviewSettingsUnlocked:async()=>{}, isSessionPermissionMode:()=>true, throwIpcError:(code:string,message:string)=>{throw Object.assign(Error(message),{code});}, persistPermissionModeWithoutRuntime:async(_id:string,mode:string)=>(await epoch.client.tx('bots.persistSessionPermission',{mode})).updated, markRemoteSettingPersistedInsideHandler:(result:object)=>persistedResults.add(result)};
  new Function(...Object.keys(settingDeps), settingJs)(...Object.values(settingDeps));
  expect(setMode, 'SET_PERMISSION_MODE source extraction must register its handler').toBeTypeOf('function');
  const planPersist=vi.fn(async(_id:string,patch:{planModeEnabled:boolean})=>{history.planModeEnabled=patch.planModeEnabled;});
@@ -62,9 +62,22 @@ function fixture() {
   getLiveSession:()=>cold?null:live,
   persist:async next=>{await epoch.client.tx('bots.persistSessionPermission',{mode:next});},
  });
- return {hideCard: () => { usesDefaults = false; }, setPlan:(enabled:boolean)=>setPlan({},'task',enabled),planPersist,forgetGrants,runtimePlan:()=>runtimePlan,nativePlan:(enabled:boolean|null)=>{runtimePlan=enabled;},setImMode, setMode:(mode:string)=>setMode({},'task',mode), persistedResults, remote:()=>{remote=true;}, cold:()=>{cold=true;}, runtimeMode:()=>runtimeMode, changeOwner:()=>{ownership.current={};}, run: (mode = 'acceptEdits', explicit = false) => run('plugin', { kind: 'requestWriteAccess', taskId: 'task', mode }, explicit), queue, gate, identity: (next: string) => {identity=next;}, service, live, epoch, dialog, slots, write, history, drain, config: () => cfg, change: (next: Record<string, unknown>) => { cfg = next; } };
+ return {closeSession:deps.maker.closeSession,broadcast:deps.broadcastSessionPatched,hideCard: () => { usesDefaults = false; }, setPlan:(enabled:boolean)=>setPlan({},'task',enabled),planPersist,forgetGrants,runtimePlan:()=>runtimePlan,nativePlan:(enabled:boolean|null)=>{runtimePlan=enabled;},setImMode, setMode:(mode:string)=>setMode({},'task',mode), persistedResults, remote:()=>{remote=true;}, cold:()=>{cold=true;}, runtimeMode:()=>runtimeMode, changeOwner:()=>{ownership.current={};}, run: (mode = 'acceptEdits', explicit = false) => run('plugin', { kind: 'requestWriteAccess', taskId: 'task', mode }, explicit), queue, gate, identity: (next: string) => {identity=next;}, service, live, epoch, dialog, slots, write, history, drain, config: () => cfg, change: (next: Record<string, unknown>) => { cfg = next; } };
 }
 describe('shared-provider credential grants on permission changes', () => {
+ it('keeps Full access when Linux cannot confirm the old agy session closed', async () => {
+  const f = fixture('linux');
+  f.live.agentKind = 'agy';
+  f.history.permissionMode = 'bypassPermissions';
+  f.closeSession.mockRejectedValueOnce(new Error('exit unconfirmed'));
+  await expect(f.setMode('auto')).rejects.toThrow('exit unconfirmed');
+  expect(f.epoch.client.tx).not.toHaveBeenCalled();
+  expect(f.broadcast).not.toHaveBeenCalled();
+  expect(f.live.setPermissionMode).not.toHaveBeenCalled();
+  await f.setMode('auto');
+  expect(f.history.permissionMode).toBe('auto');
+  expect(f.broadcast).toHaveBeenCalled();
+ });
  // guard: native self rewind can close its runtime before a real UI permission
  // change. Execute the existing IPC branches and the same revocation Set so an
  // ABA change remains observable without inventing a second authority source.

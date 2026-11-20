@@ -296,6 +296,7 @@ export async function scanTaskDirForHardlinks(taskDir: string, limit = 200_000):
 
 export interface AgySandboxFsView {
   exists(p: string): boolean;
+  isRegularFile(p: string): boolean;
   /** Returns the link target if p is a symlink, else null. */
   readSymlink(p: string): string | null;
   realpath(p: string): string;
@@ -303,6 +304,7 @@ export interface AgySandboxFsView {
 
 const realFs: AgySandboxFsView = {
   exists: existsSync,
+  isRegularFile: p => { try { return lstatSync(p).isFile(); } catch { return false; } },
   readSymlink: p => { try { return lstatSync(p).isSymbolicLink() ? readlinkSync(p) : null; } catch { return null; } },
   realpath: p => realpathSync(p),
 };
@@ -468,7 +470,7 @@ export function buildAgySandboxLaunch(input: AgySandboxLaunchInput): AgySandboxL
   if (input.shareCliLogin) {
     const token = path.join(homeDir, ...AGY_CLI_LOGIN_FILE);
     // The exact regular file only: a symlink (or a symlinked parent) could point anywhere.
-    if (fs.exists(token) && fs.readSymlink(token) === null && fs.realpath(token) === token) {
+    if (fs.isRegularFile(token) && fs.realpath(token) === token) {
       a.push('--ro-bind', token, token);
     }
   }
@@ -682,7 +684,7 @@ export function buildAgyFullAccessLaunch(input: {
   for (const m of input.stateMounts) a.push('--bind', m.source, m.target);
   if (input.shareCliLogin) {
     const token = path.join(homeDir, ...AGY_CLI_LOGIN_FILE);
-    if (fs.exists(token) && fs.readSymlink(token) === null && fs.realpath(token) === token) {
+    if (fs.isRegularFile(token) && fs.realpath(token) === token) {
       a.push('--ro-bind', token, token);
     }
   }

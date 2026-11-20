@@ -1,4 +1,5 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
+import { clearAgyVersionCache } from './version.js';
 import { AgyAgent, type AgyAgentDeps } from './index.js';
 import { AgentNotAuthenticatedError, AgentStartupStoppedError } from '../base-agent.js';
 import type { AcpTransport } from '../acp/transport.js';
@@ -113,6 +114,56 @@ async function ticks(count = 5) { for (let index = 0; index < count; index++) aw
 afterEach(() => { vi.useRealTimers(); vi.restoreAllMocks(); delete process.env.CINDY_AGY_STALL_TIMEOUT_MS; });
 
 describe('AgyAgent startup and configuration receipts', () => {
+  it('only registers the local tool bridge for an identified task', async () => {
+    const local = 'http://127.0.0.1:9000/mcp';
+    const prepare = vi.fn(async () => ({
+      mcpBridge: { token: 'fixture', servers: [
+        { name: 'helper', url: local }, { name: 'alias', url: 'http://localhost:9000/mcp' },
+      ] },
+    }));
+    const anonymous = create(new FakeAgy(), { preparePiExtraSpawnConfig: prepare });
+    await (await anonymous.start()).close();
+    expect(prepare).not.toHaveBeenCalled();
+    const task = create(new FakeAgy(), { preparePiExtraSpawnConfig: prepare });
+    const handle = await task.start({ sessionId: 'fixture-task' });
+    expect(prepare).toHaveBeenCalledTimes(1);
+    expect(task.fake.written.find(frame => frame.method === 'session/new')?.params?.mcpServers).toEqual([
+      { type: 'http', name: 'helper', url: local, headers: [{ name: 'Authorization', value: 'Bearer fixture' }] },
+    ]);
+    await handle.close();
+  });
+
+  it('discovers and caches the catalog from an empty probe folder with no tool bridge', async () => {
+    const fs = await import('node:fs');
+    const fake = new FakeAgy();
+    const root = fs.mkdtempSync(joinPath(osTmpdir(), 'agy-probe-test-'));
+    const spawn = vi.fn((opts: { cwd: string; binaryPath: string }) => {
+      expect(fs.readdirSync(opts.cwd)).toEqual([]);
+      if (process.platform === 'linux') expect(opts.binaryPath).toBe('/usr/bin/pasta');
+      return fake;
+    });
+    try {
+      const { agent } = create(fake, {
+        binaryPath: fs.realpathSync(process.execPath), readAgyVersion: async () => '1.5.9',
+        agySandbox: { stateRoot: root, allowWithoutSystemSandbox: true, probe: {
+          ok: true, bwrapPath: '/usr/bin/bwrap', pastaPath: '/usr/bin/pasta', ipPath: '/usr/sbin/ip',
+          version: '0.6.1', supportsDisableUserns: false,
+        } },
+        createAgyTransport: spawn,
+      });
+      await Promise.all([agent.probeModels(), agent.probeModels()]);
+      await agent.probeModels();
+      expect(spawn).toHaveBeenCalledTimes(1);
+      const cwd = spawn.mock.calls[0]![0].cwd;
+      expect(fake.written.find(frame => frame.method === 'session/new')?.params).toEqual({ cwd, mcpServers: [] });
+      expect(fs.existsSync(cwd)).toBe(false);
+      expect(agent.capabilities.availableModels.length).toBeGreaterThan(0);
+    } finally {
+      clearAgyVersionCache();
+      fs.rmSync(root, { recursive: true, force: true });
+    }
+  });
+
   // Regression #25: startSession/setModel/send must not use an unspecified or
   // host-disallowed model. Existing tests only covered explicit receipt mismatch.
   // Unit tier: in-memory transport, no real CLI/auth/files. Minimal inputs are a

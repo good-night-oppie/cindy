@@ -31,6 +31,12 @@ function agentWith(extra: Partial<AgyAgentDeps>, authEnv: Record<string, string>
 }
 
 describe('agy launch goes through the system sandbox', () => {
+  it('refuses catalog discovery when isolation is unavailable', async () => {
+    const { agent, captured } = agentWith({ agySandbox: { probe: { ok: false, reason: 'network-isolation-missing', detail: 'unavailable' } } });
+    await expect(agent.probeModels()).rejects.toBeInstanceOf(Error);
+    expect(captured).toHaveLength(0);
+  });
+
   it('spawns pasta -> bwrap -> agy with only the task folder and drops the session bus', async () => {
     const task = path.join(root, 'task');
     (await import('node:fs')).mkdirSync(task, { recursive: true });

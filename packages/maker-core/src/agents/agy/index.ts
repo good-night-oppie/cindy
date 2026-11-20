@@ -17,6 +17,7 @@
  *     fallback to another runtime.
  */
 import { realpathSync } from 'node:fs';
+import { mkdtemp, rm } from 'node:fs/promises';
 import os from 'node:os';
 import path from 'node:path';
 import { pathToFileURL } from 'node:url';
@@ -53,7 +54,7 @@ import { agyReviewAction } from './permissions.js';
 import { AgyStallWatchdog, resolveAgyStallTimeoutMs } from './watchdog.js';
 import { assertAgyModelAllowed } from './models.js';
 import { agyRpcDiagnostic, type AgyRpcDiagnostic } from './diagnostics.js';
-import { assertAgyBinaryUsable, AgyBinaryUnavailableError, type AgyVersionReader } from './version.js';
+import { assertAgyBinaryUsable, readAgyVersionOutput, AgyBinaryUnavailableError, type AgyVersionReader } from './version.js';
 import {
   AGY_SANDBOX_USER_COPY_DRAFT, AgySandboxUnavailableError, agyPrivateStateMounts, prepareAgySandboxedLaunch, prepareAgyFullAccessLaunch,
   filterAgyUnsandboxedEnv,
@@ -72,7 +73,7 @@ export const AGY_ACP_ARGS = ['acp', '--disable-telemetry'] as const;
 const yes = { supported: true } as const;
 const no = { supported: false, reason: 'not-implemented' } as const;
 // Wording pending JJ (cindy#1 6908586833 item 4): say exactly what the isolation does and does not do.
-const NATIVE_PERMISSION_DESCRIPTION = 'Antigravity runs inside Cindy\'s file isolation: it can only read and change files in this task\'s folder, and it may change files there without asking. Cindy answers the approval requests agy sends (typically shell commands).';
+const NATIVE_PERMISSION_DESCRIPTION = 'Antigravity can change files in this task folder and its private CLI state. Cindy tools run on the host and may request access to other files. Cindy handles approval requests from the CLI and tools.';
 // Used only where no system-level isolation exists (Windows, macOS). Wording pending JJ.
 const UNSANDBOXED_PERMISSION_DESCRIPTION = 'Antigravity runs without system-level file isolation on this computer: it can reach any file your user account can, limited only by the approval requests it sends to Cindy. Requests outside this task\'s folder are worth reading before you allow them.';
 // Same meaning as Full access on the other engines: no file isolation, network commands allowed, no questions.
@@ -115,16 +116,12 @@ export interface AgyAgentDeps extends AgentDeps {
   uiLocale?: () => string | null | undefined;
 }
 
-/** Loopback ports of Cindy's tool bridge, read from the server URLs handed to agy. */
-function bridgeLoopbackPorts(servers: readonly { url: string }[]): number[] {
-  const ports = new Set<number>();
-  for (const server of servers) {
-    try {
-      const url = new URL(server.url);
-      if ((url.hostname === '127.0.0.1' || url.hostname === 'localhost') && url.port) ports.add(Number(url.port));
-    } catch { /* not a URL: nothing to forward */ }
-  }
-  return [...ports];
+function bridgeLoopbackPort(raw: string): number | undefined {
+  try {
+    const url = new URL(raw);
+    if (url.protocol === 'http:' && url.hostname === '127.0.0.1' && url.port) return Number(url.port);
+  } catch { /* Ignore malformed local bridge descriptors. */ }
+  return undefined;
 }
 
 export class AgyAgent extends BaseAgent {
@@ -186,41 +183,57 @@ export class AgyAgent extends BaseAgent {
     }
   }
 
-  /**
-   * One-shot, unsandboxed ACP probe so the model picker can list agy models before a task
-   * exists. Spawns `agy acp` in the current working directory, reads session/new's catalog
-   * into capabilities, then closes. Cached after the first success; a failed probe is not
-   * cached, so a later call retries. Never runs inside a sandbox and never prompts.
-   */
-  async probeModels(cwd: string): Promise<void> {
+  /** Discover the catalog in an empty task directory with the normal isolation policy. */
+  async probeModels(): Promise<void> {
     if (this.capabilities.availableModels.length) return;
     if (this.probePromise) return this.probePromise;
     this.probePromise = (async () => {
       const binaryPath = this.deps.binaryPath;
       if (!binaryPath) throw new Error('agy binary path is not configured');
-      await assertAgyBinaryUsable(binaryPath, this.deps.readAgyVersion);
-      const authEnv = await this.deps.auth.getAuthEnv();
-      const env = filterAgyUnsandboxedEnv({ ...process.env, ...authEnv }, os.homedir(), cwd, Object.keys(authEnv ?? {}));
-      const transport = (this.deps.createAgyTransport ?? spawnAcpTransport)({
-        binaryPath, args: [...AGY_ACP_ARGS], cwd, env,
-      });
-      const client = new AcpClient(transport, { requestTimeoutMs: CONTROL_TIMEOUT });
+      const config = this.deps.agySandbox;
+      if (process.platform !== 'linux' && !config?.allowWithoutSystemSandbox) {
+        throw new AgySandboxUnavailableError('unsupported-platform', process.platform);
+      }
+      const cwd = await mkdtemp(path.join(os.tmpdir(), 'cindy-agy-models-'));
       try {
-        const init = record(await client.request('initialize', {
-          protocolVersion: 1,
-          clientCapabilities: { fs: { readTextFile: false, writeTextFile: false }, terminal: false },
-          clientInfo: { name: 'cindy', version: '1.0.0' },
-        }));
-        if (init.protocolVersion !== 1) throw new Error('agy ACP protocol version is unsupported');
-        const result = record(await client.request('session/new', { cwd, mcpServers: [] }));
-        const catalog = readAgyCatalog(result);
+        const homeDir = os.homedir();
+        const authEnv = await this.deps.auth.getAuthEnv();
+        const env = { ...process.env, ...authEnv };
+        const passEnvKeys = Object.keys(authEnv ?? {});
+        const launch = process.platform === 'linux'
+          ? await prepareAgySandboxedLaunch({ binaryPath, args: AGY_ACP_ARGS, taskDir: cwd,
+              homeDir, env, passEnvKeys, probe: config?.probe, shareCliLogin: config?.shareCliLogin,
+              stateRoot: config?.stateRoot ?? path.join(homeDir, '.cindy', 'agy-sandbox', 'state') })
+          : { command: binaryPath, args: AGY_ACP_ARGS, env: filterAgyUnsandboxedEnv(env, homeDir, cwd, passEnvKeys) };
+        // Both launch builders append the CLI arguments last. Run the version check
+        // with the same isolation, cwd and filtered environment as catalog discovery.
+        const versionArgs = [...launch.args.slice(0, -AGY_ACP_ARGS.length), '--version'];
+        await assertAgyBinaryUsable(binaryPath, this.deps.readAgyVersion ?? (() =>
+          readAgyVersionOutput(launch.command, versionArgs, { cwd, env: launch.env })));
+        const transport = (this.deps.createAgyTransport ?? spawnAcpTransport)({
+          binaryPath: launch.command, args: launch.args, cwd, env: launch.env,
+        });
+        const client = new AcpClient(transport, { requestTimeoutMs: CONTROL_TIMEOUT });
+        let catalog: ReturnType<typeof readAgyCatalog>;
+        try {
+          const init = record(await client.request('initialize', {
+            protocolVersion: 1,
+            clientCapabilities: { fs: { readTextFile: false, writeTextFile: false }, terminal: false },
+            clientInfo: { name: 'cindy', version: '1.0.0' },
+          }));
+          if (init.protocolVersion !== 1) throw new Error('agy ACP protocol version is unsupported');
+          const result = record(await client.request('session/new', { cwd, mcpServers: [] }));
+          catalog = readAgyCatalog(result);
+        } finally {
+          await client.close();
+        }
         this.capabilities.availableModels = catalog.models;
         this.capabilities.switchModel = catalog.models.length ? yes : no;
         this.capabilities.effort = catalog.currentEfforts.length ? yes : no;
         this.capabilities.effortLevels = catalog.currentEfforts.map(id => ({ id, displayName: id }));
         this.capabilities.planMode = catalog.modes.includes(AGY_PLAN_MODE) ? yes : no;
       } finally {
-        await client.close().catch(() => {});
+        await rm(cwd, { recursive: true, force: true });
       }
     })();
     try { await this.probePromise; } catch (error) { this.probePromise = null; throw error; }
@@ -615,7 +628,7 @@ export class AgyAgent extends BaseAgent {
       // Cindy's own tools (memory, helper, plugins...) are served by the host's loopback MCP
       // bridge, the same per-session bridge Pi uses. Inside the Linux sandbox only the bridge's
       // own port is forwarded (see hostLoopbackPorts); the rest of host loopback stays closed.
-      if (this.deps.preparePiExtraSpawnConfig) {
+      if (opts.sessionId && this.deps.preparePiExtraSpawnConfig) {
         try {
           const extra = await this.deps.preparePiExtraSpawnConfig(this.deps.mcpProviders ?? [], {
             agentKind: 'agy',
@@ -634,7 +647,7 @@ export class AgyAgent extends BaseAgent {
           disposeMcp = extra?.disposeSessionCtx;
           const bridge = extra?.mcpBridge;
           if (bridge?.token) {
-            mcpServers = bridge.servers.filter(server => !server.remote).map(server => ({
+            mcpServers = bridge.servers.filter(server => !server.remote && bridgeLoopbackPort(server.url) !== undefined).map(server => ({
               type: 'http', name: server.name, url: server.url,
               headers: [{ name: 'Authorization', value: `Bearer ${bridge.token}` }],
             }));
@@ -653,7 +666,7 @@ export class AgyAgent extends BaseAgent {
           shareCliLogin: this.deps.agySandbox?.shareCliLogin === true })
         : useSandbox
         ? await prepareAgySandboxedLaunch({ binaryPath: this.deps.binaryPath, args: acpArgs, taskDir: agyWorkingDir,
-          hostLoopbackPorts: bridgeLoopbackPorts(mcpServers),
+          hostLoopbackPorts: [...new Set(mcpServers.map(server => bridgeLoopbackPort(server.url)!))],
           homeDir: os.homedir(), stateRoot: sandboxStateRoot, env, passEnvKeys: Object.keys(authEnv), probe: this.deps.agySandbox?.probe,
           shareCliLogin: this.deps.agySandbox?.shareCliLogin === true })
         : { command: this.deps.binaryPath, args: acpArgs,

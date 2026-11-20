@@ -31,15 +31,18 @@ export function compareVersions(a: readonly number[], b: readonly number[]): num
 
 export type AgyVersionReader = (binaryPath: string) => Promise<string>;
 
-const readVersionOutput: AgyVersionReader = binaryPath => new Promise((resolve, reject) => {
-  execFile(binaryPath, ['--version'], { timeout: 15_000, shell: false, windowsHide: true, maxBuffer: 64 * 1024 },
-    (error, stdout) => error ? reject(error) : resolve(String(stdout)));
-});
+export function readAgyVersionOutput(command: string, args: readonly string[] = ['--version'],
+  options: { cwd?: string; env?: NodeJS.ProcessEnv } = {}): Promise<string> {
+  return new Promise((resolve, reject) => {
+    execFile(command, args, { ...options, timeout: 15_000, shell: false, windowsHide: true, maxBuffer: 64 * 1024 },
+      (error, stdout) => error ? reject(error) : resolve(String(stdout)));
+  });
+}
 
 const cache = new Map<string, { mtimeMs: number; size: number; version: string }>();
 
 /** Resolve and gate the installed agy version. Cached per binary path + file identity. */
-export async function assertAgyBinaryUsable(binaryPath: string, reader: AgyVersionReader = readVersionOutput): Promise<string> {
+export async function assertAgyBinaryUsable(binaryPath: string, reader: AgyVersionReader = readAgyVersionOutput): Promise<string> {
   let info;
   try {
     info = await stat(binaryPath);
