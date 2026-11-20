@@ -19,6 +19,7 @@ import {
   filterAgyUnsandboxedEnv,
   AGY_NO_SYSTEM_ISOLATION_ENV,
   parseBwrapVersion,
+  pastaNetArgs,
   prepareAgySandboxedLaunch,
   buildAgyFullAccessLaunch,
   probeAgySystemSandbox,
