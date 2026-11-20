@@ -2095,6 +2095,10 @@ export function getMaker(): Maker {
       },
       runtimeConfig: {},
       logger: desktopMakerLogger,
+      // Cindy's own tools reach agy through the same per-session loopback bridge Pi uses. The
+      // provider list is read at session start: Pi's is assembled after this agent is built.
+      get mcpProviders() { return _mcpProviders.pi ?? _mcpProviders.codex ?? []; },
+      preparePiExtraSpawnConfig: (providers, ctx) => getPiExtraSpawnConfig(providers, desktopMakerLogger, ctx),
       get binaryPath() { return resolveAgyBinary(); },
       uiLocale: () => { try { return app.getLocale(); } catch { return null; } },
       // Linux keeps the bwrap sandbox and still fails closed if it is unavailable. Windows and
