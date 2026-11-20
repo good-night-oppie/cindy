@@ -273,6 +273,8 @@ export class AgyAgent extends BaseAgent {
     let turnOptions: SendOptions | undefined;
     let promptCapabilities: AcpRecord = {};
     let firstPrompt = !opts.resumeSessionId;
+    let mcpServers: { type: 'http'; name: string; url: string; headers: { name: string; value: string }[] }[] = [];
+    let disposeMcp: (() => void) | undefined;
     let context = '';
     let closePromise: Promise<void> | undefined;
     let fenced = false;
@@ -522,6 +524,7 @@ export class AgyAgent extends BaseAgent {
         await client?.close();
         await active?.catch(() => {});
         releaseTaskDir?.(); releaseTaskDir = undefined;
+        try { disposeMcp?.(); } catch { /* the bridge lease is best-effort on close */ } disposeMcp = undefined;
         if (!closed) queue.end();
         closed = true;
         running = false;
@@ -572,7 +575,7 @@ export class AgyAgent extends BaseAgent {
       const authEnv = await this.deps.auth.getAuthEnv();
       const env = { ...process.env, ...authEnv };
       const memoryEnabled = (opts.makerMemoryEnabled ?? this.deps.runtimeConfig.makerMemoryEnabled) === true;
-      if (firstPrompt) {
+      {
         const scope = await resolveMemoryScopeKey(opts.makerMemoryScopeKey ?? opts.workingDir);
         const memory = memoryEnabled ? opts.makerMemoryIndexSnapshot
           ?? (this.deps.makerMemory ? await (await this.deps.makerMemory.getStore(scope)).getIndex() : '') : '';
@@ -585,15 +588,47 @@ export class AgyAgent extends BaseAgent {
       if (unsandboxedByPlatform) {
         emit({ type: 'error', data: { message: agyNoSystemIsolationText(this.deps.uiLocale), isTerminal: false } });
       }
+      // Cindy's own tools (memory, helper, plugins...) are served by the host's loopback MCP
+      // bridge, the same per-session bridge Pi uses. The Linux sandbox closes host loopback on
+      // purpose, so there the tools are only reachable in Full access; elsewhere always.
+      if (this.deps.preparePiExtraSpawnConfig && (!useSandbox || fullAccessLaunch)) {
+        try {
+          const extra = await this.deps.preparePiExtraSpawnConfig(this.deps.mcpProviders ?? [], {
+            agentKind: 'agy',
+            sessionId: opts.sessionId,
+            ...(opts.sessionInstanceId ? { sessionInstanceId: opts.sessionInstanceId } : {}),
+            workingDir: agyWorkingDir,
+            ...(opts.makerMemoryScopeKey ? { memoryScopeKey: opts.makerMemoryScopeKey } : {}),
+            memoryEnabled: (opts.makerMemoryEnabled ?? this.deps.runtimeConfig.makerMemoryEnabled) === true,
+            vendorOptions: { ...(opts.vendorOptions ?? {}) },
+            mcpCallerKind: 'root',
+            mcpCallerAttested: true,
+          });
+          disposeMcp = extra?.disposeSessionCtx;
+          const bridge = extra?.mcpBridge;
+          if (bridge?.token) {
+            mcpServers = bridge.servers.filter(server => !server.remote).map(server => ({
+              type: 'http', name: server.name, url: server.url,
+              headers: [{ name: 'Authorization', value: `Bearer ${bridge.token}` }],
+            }));
+          }
+        } catch (error) {
+          // Tools are an addition: a bridge that cannot start must not stop the task.
+          this.deps.logger.warn('agy: Cindy MCP bridge is unavailable; starting without Cindy tools', { error: String(error) });
+        }
+        assertCurrent();
+      }
+      // The CLI serves HTTP MCP only when each session has its own worker process.
+      const acpArgs = mcpServers.length ? [...AGY_ACP_ARGS, '--process-per-session'] : [...AGY_ACP_ARGS];
       const launch = fullAccessLaunch
-        ? await prepareAgyFullAccessLaunch({ binaryPath: this.deps.binaryPath, args: AGY_ACP_ARGS, taskDir: agyWorkingDir,
+        ? await prepareAgyFullAccessLaunch({ binaryPath: this.deps.binaryPath, args: acpArgs, taskDir: agyWorkingDir,
           homeDir: os.homedir(), stateRoot: sandboxStateRoot, env, passEnvKeys: Object.keys(authEnv), probe: this.deps.agySandbox?.probe,
           shareCliLogin: this.deps.agySandbox?.shareCliLogin === true })
         : useSandbox
-        ? await prepareAgySandboxedLaunch({ binaryPath: this.deps.binaryPath, args: AGY_ACP_ARGS, taskDir: agyWorkingDir,
+        ? await prepareAgySandboxedLaunch({ binaryPath: this.deps.binaryPath, args: acpArgs, taskDir: agyWorkingDir,
           homeDir: os.homedir(), stateRoot: sandboxStateRoot, env, passEnvKeys: Object.keys(authEnv), probe: this.deps.agySandbox?.probe,
           shareCliLogin: this.deps.agySandbox?.shareCliLogin === true })
-        : { command: this.deps.binaryPath, args: [...AGY_ACP_ARGS],
+        : { command: this.deps.binaryPath, args: acpArgs,
             // issue #13: the branch that runs without the sandbox must never hand agy the full
             // process env. On the test-transport seam it stays exactly as before.
             env: unsandboxedByPlatform
@@ -634,6 +669,12 @@ export class AgyAgent extends BaseAgent {
       const capabilities = record(init.agentCapabilities);
       promptCapabilities = record(capabilities.promptCapabilities);
       this.capabilities.multimodal.image = promptCapabilities.image === true ? yes : no;
+      // The CLI can append to its system prompt. Caller-owned context (teammate persona, memory
+      // index, the user's prompt) then applies to every turn and to a resumed session, instead of
+      // riding once on the first user message.
+      const systemAppend = record(record(record(capabilities._meta).antigravity).systemPrompt).append === true && context
+        ? { _meta: { antigravity: { systemPrompt: { append: context } } } } : {};
+      if ('_meta' in systemAppend) context = '';
       // Cindy never starts an interactive sign-in from a task; see AgentNotAuthenticatedError below.
       if (opts.resumeSessionId) {
         validateSessionId(opts.resumeSessionId);
@@ -641,14 +682,12 @@ export class AgyAgent extends BaseAgent {
         const sessionCaps = record(capabilities.sessionCapabilities);
         // Prefer resume (no history replay); session/load replays history, which is suppressed while loading.
         if (sessionCaps.resume !== undefined) {
-          updateCatalog(await request('session/resume', { sessionId, cwd: agyWorkingDir, mcpServers: [] }, { signal: startup.signal }));
+          updateCatalog(await request('session/resume', { sessionId, cwd: agyWorkingDir, mcpServers, ...systemAppend }, { signal: startup.signal }));
         } else if (capabilities.loadSession === true) {
-          updateCatalog(await request('session/load', { sessionId, cwd: agyWorkingDir, mcpServers: [] }, { signal: startup.signal }));
+          updateCatalog(await request('session/load', { sessionId, cwd: agyWorkingDir, mcpServers, ...systemAppend }, { signal: startup.signal }));
         } else throw new Error('This agy version cannot resume saved tasks');
       } else {
-        // HTTP MCP is not integrated in this launch mode; the official CLI guide
-        // requires --process-per-session. See protocol-compatibility/antigravity-native-acp.md.
-        const result = record(await request('session/new', { cwd: agyWorkingDir, mcpServers: [] }, { signal: startup.signal }));
+        const result = record(await request('session/new', { cwd: agyWorkingDir, mcpServers, ...systemAppend }, { signal: startup.signal }));
         sessionId = validateSessionId(result.sessionId);
         updateCatalog(result);
       }
