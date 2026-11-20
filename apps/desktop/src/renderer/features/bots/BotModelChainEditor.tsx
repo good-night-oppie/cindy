@@ -396,7 +396,7 @@ export function BotModelChainEditor({
             },
           } : undefined}
           onUnifiedSelect={(selection) => {
-            if (!visibleVendors.includes(selection.engine)) return;
+            if (selection.engine === 'agy' || !visibleVendors.includes(selection.engine)) return;
             replace(index, {
               harness: harnessFor(selection.engine),
               ...(route.agentDeviceId || selection.agentDevice ? { agentDeviceId: selection.agentDevice?.deviceId ?? null } : {}),

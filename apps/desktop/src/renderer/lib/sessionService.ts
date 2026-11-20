@@ -13,6 +13,7 @@ import type {
   UsageHistorySession,
   WorkspaceKind,
 } from '@/lib/ccAgent.types';
+import type { DbAgentKind } from '../../shared/agentKindConversion';
 import { ApiError } from '@/lib/httpClient';
 import { extractIpcError } from '@/utils/ipcError';
 // device-link 透明对等:fork / rewind 按 sessionId 来源路由(本机 → 本地 maker,
@@ -115,7 +116,7 @@ export async function create(body?: {
    * 'acp' = 插件引擎任务(docs/plans/acp-plugin-bridge.md)：main 只在 providerId 为
    * `acp-plugin:<插件>:<引擎>`、且不带 remoteHostId / agentDeviceId 时接受。
    */
-  agentKind?: 'cc' | 'codex' | 'pi' | typeof PLUGIN_ENGINE_AGENT_KIND;
+  agentKind?: DbAgentKind | typeof PLUGIN_ENGINE_AGENT_KIND;
   orcaRole?: OrcaRole | null;
   /** 附加只读引用目录列表 (绝对路径); main 端 mapper 会 JSON.stringify 后写库。 */
   extraDirs?: string[];

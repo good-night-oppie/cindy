@@ -92,7 +92,16 @@ const STORAGE_KEY = 'xdt:modelFavorites:v1';
 export const LOCAL_FAVORITE_PROVIDER_ID_MAX_LENGTH = PROVIDER_SHARE_FAVORITE_SOURCE_MAX_LENGTH;
 
 /** 一条收藏所描述的完整配置(不含锚点)。归一化 / 身份规则与最近使用共用(见 modelConfigCopy)。 */
-export type ModelFavoriteConfig = ModelConfigCopy;
+
+
+/**
+ * 收藏/跨设备收藏目前只覆盖三种既有引擎:device-link 的 wire 协议
+ * (`RemoteModelFavorite.agent`) 也只认这三种,手机端旧版本收到未知引擎会整表拒绝。
+ * agy 的模型选择随任务存,不在这套收藏里。
+ */
+export type ModelFavoriteConfig = Omit<ModelConfigCopy, 'agent'> & {
+  agent: Exclude<ModelEngine, 'agy'>;
+};
 
 /** 落盘 / 消费的收藏条目:配置 + 独立锚点 uid。 */
 export interface ModelFavoriteItem extends ModelFavoriteConfig {
@@ -101,7 +110,7 @@ export interface ModelFavoriteItem extends ModelFavoriteConfig {
 
 /** 编辑一条已有收藏。**模型身份(providerId/modelId)由锚点固定,不可改**——换模型 = 另收藏一条。 */
 export interface ModelFavoritePatch {
-  agent?: ModelEngine;
+  agent?: Exclude<ModelEngine, 'agy'>;
   /** `null` = 清除该条深度(回落推荐档);`undefined`(不传该键)= 不改。 */
   effort?: Effort | null;
   fast?: boolean | 'ultrafast';
@@ -173,7 +182,11 @@ function sanitize(raw: unknown): FavoritesState {
       const seq = seqOfUid(uid);
       if (seq !== null && seq >= uidSeq) uidSeq = seq + 1;
     }
-    parsed.push({ config, uid });
+    // 收藏表只覆盖三种既有引擎:agy 配置在解析阶段就被丢掉(不写回、不迁移)。
+    if (config.agent === 'agy') continue;
+    // agent 已被上面的守卫收窄到三种引擎;展开重建让类型也跟上(不写回、不迁移)。
+    const { agent, ...restConfig } = config;
+    parsed.push({ config: { ...restConfig, agent }, uid });
   }
 
   const items: ModelFavoriteItem[] = parsed.map(({ config, uid }) => {
@@ -575,8 +588,11 @@ export function getModelFavorite(uid: string): ModelFavoriteItem | undefined {
  * effort 非法只丢该字段(条目仍建,回落推荐档)。
  */
 export function addModelFavorite(config: ModelFavoriteConfig): string {
-  const normalized = normalizeModelConfigCopy(config);
-  if (!normalized) return '';
+  const normalizedRaw = normalizeModelConfigCopy(config);
+  if (!normalizedRaw || normalizedRaw.agent === 'agy') return '';
+  // 收藏只覆盖三种既有引擎(见 ModelFavoriteConfig);展开重建带上收窄后的 agent。
+  const { agent: favoriteAgent, ...favoriteRest } = normalizedRaw;
+  const normalized: ModelFavoriteConfig = { ...favoriteRest, agent: favoriteAgent };
   // 基底取**重读后的**持久化快照(见 freshState):另一窗口刚加的条目要一起带上,
   // 否则本次整表写回会把它抹掉。uidSeq 的单调性、modelConfigCopyIdentity 去重都在这份新鲜基底上判。
   const state = freshState();
@@ -607,9 +623,10 @@ export function seedDefaultFavorite(config: ModelFavoriteConfig): void {
   const state = freshState();
   if (state.seeded) return;
   // 非法配置不落标记:下次给出合法推荐时仍要能投放。
-  const normalized = normalizeModelConfigCopy(config);
-  if (!normalized) return;
-  commitOp({ kind: 'seed', config: normalized, preferredUid: uidOfSeq(state.uidSeq) }, state);
+  const normalizedRaw = normalizeModelConfigCopy(config);
+  if (!normalizedRaw || normalizedRaw.agent === 'agy') return;
+  const { agent: seedAgent, ...seedRest } = normalizedRaw;
+  commitOp({ kind: 'seed', config: { ...seedRest, agent: seedAgent }, preferredUid: uidOfSeq(state.uidSeq) }, state);
 }
 
 /**
@@ -696,8 +713,10 @@ export function accessHostModelFavorites(ownerId: string | null, mutation?: Mode
   requireDurableWrite = true;
   try {
     if (op.kind === 'add') {
-      const config = normalizeModelConfigCopy(op.item);
-      if (!config) throw new Error('Invalid favorite');
+      const configRaw = normalizeModelConfigCopy(op.item);
+      if (!configRaw || configRaw.agent === 'agy') throw new Error('Invalid favorite');
+      const { agent: replayAgent, ...replayRest } = configRaw;
+      const config: ModelFavoriteConfig = { ...replayRest, agent: replayAgent };
       if (base.items.length >= 4096 && !base.items.some(item => modelConfigCopyIdentity(item) === modelConfigCopyIdentity(config))) throw new Error('Favorites limit reached');
       commitOp({kind:'add',config,preferredUid:uidOfSeq(base.uidSeq)},base);
     } else if (op.kind === 'remove') commitOp({kind:'remove',uid:op.expected.uid},base);

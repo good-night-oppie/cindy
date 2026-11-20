@@ -187,6 +187,8 @@ export function PluginModelPickerPopover({
           }}
           onDismiss={close}
           onUnifiedSelect={async ({ providerId, modelId, engine, effort, fast, agentDevice }) => {
+            // 插件任务不支持 agy(主进程也会拒绝):忽略 agy 的选择。
+            if (engine === 'agy') return false;
             const next = {
               ...(agentDevice?.deviceId ? { agentDeviceId: agentDevice.deviceId } : {}),
               providerId,
@@ -280,6 +282,8 @@ export function PluginModelPickerDialog({
               setRoute((r) => (r ? { ...r, fastMode } : r));
             }}
             onUnifiedSelect={({ providerId, modelId, engine, effort, fast, agentDevice }) => {
+              // 插件任务不支持 agy(主进程也会拒绝):这里忽略 agy 的选择。
+              if (engine === 'agy') return;
               setRoute({
                 ...(agentDevice?.deviceId ? { agentDeviceId: agentDevice.deviceId } : {}),
                 providerId,

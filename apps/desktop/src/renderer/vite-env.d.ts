@@ -5172,7 +5172,7 @@ interface ElectronAPI {
         fastMode?: boolean | 'ultrafast';
         planModeEnabled?: boolean;
         /** 'acp' = plugin engine task: main requires an `acp-plugin:` providerId and no remote fields. */
-        agentKind?: 'cc' | 'codex' | 'pi' | 'acp';
+        agentKind?: import('../shared/agentKindConversion').DbAgentKind | 'acp';
         orcaRole?: import('@/lib/ccAgent.types').OrcaRole | null;
         /** 附加只读引用目录列表 (绝对路径); main 端 mapper 会 JSON.stringify 后写库。 */
         extraDirs?: string[];
@@ -7241,7 +7241,7 @@ interface ElectronAPI {
     autoTitle: (request: {
       sessionId: string;
       text: string;
-      agentKind: 'claude-code' | 'codex' | 'pi';
+      agentKind: import('./shared/agentKindConversion').MakerAgentKindWire;
       isUserText?: boolean;
     }) => Promise<{ applied: boolean; done: boolean }>;
     /** 输入框推荐提示词:turn 结束后预测用户下一步输入。 */

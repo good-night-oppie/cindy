@@ -67,7 +67,7 @@ export interface ReadCreateSessionOptsDeps {
 }
 
 function readAgentKind(value: unknown): EngineKind {
-  if (value === 'claude-code' || value === 'codex' || value === 'pi') return value;
+  if (value === 'claude-code' || value === 'codex' || value === 'pi' || value === 'agy') return value;
   // Plugin ACP engine (docs/plans/acp-plugin-bridge.md); further checks in readCreateSessionOpts.
   if (value === 'acp') return value;
   throwIpcError('INVALID_PARAMS', 'agentKind required');

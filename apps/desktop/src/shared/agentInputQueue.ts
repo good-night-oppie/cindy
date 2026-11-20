@@ -168,7 +168,8 @@ export interface AgentInputChatMessage {
 }
 
 export interface AgentInputCreateOpts {
-  agentKind: 'claude-code' | 'codex' | 'pi';
+  /** Four engine kinds now; the input-queue handler still refuses agy where it is unsupported. */
+  agentKind: 'claude-code' | 'codex' | 'pi' | 'agy';
   workingDir: string;
   model: string;
   providerId?: string | null;

@@ -1013,16 +1013,18 @@ export function ScheduleFormDialog({
                                     effort,
                                     fast,
                                     agentDevice,
-                                  }) =>
-                                    selectModelConfiguration({
+                                  }) => {
+                                    // 定时任务不支持 agy(主进程 runner 也会拒绝)。
+                                    if (engine === 'agy') return;
+                                    return selectModelConfiguration({
                                       agentKind: engine === 'cc' ? 'claude-code' : engine,
                                       model: modelId,
                                       providerId,
                                       effort: (effort ?? '') as typeof form.effort,
                                       fastMode: fast,
                                       modelAgentDeviceId: agentDevice?.deviceId ?? '',
-                                    })
-                                  }
+                                    });
+                                  }}
                                   onFollowSession={() =>
                                     selectModelConfiguration(
                                       null,

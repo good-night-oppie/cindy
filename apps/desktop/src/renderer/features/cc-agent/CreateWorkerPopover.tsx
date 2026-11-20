@@ -1499,6 +1499,8 @@ export function CreateWorkerPopover({
                 unifiedAgents={pickerAgents}
                 onUnifiedSelect={deviceId && remoteProviders.unsupported ? undefined : (selection) => {
                   if (selection.agentDevice !== undefined && executionDeviceId && !agentLocationSelectable) return;
+                  // Worker 只支持三种既有引擎(agy 不在协同 worker 范围内)。
+                  if (selection.engine === 'agy') return;
                   setPluginEngine(null);
                   modelSelectionChosenRef.current = true;
                   restoredModelSelectionRef.current = false;

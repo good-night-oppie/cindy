@@ -308,6 +308,8 @@ export function ModelGroupsSection() {
                         ariaContext={t('modelGroups.settings.addSource')}
                         fallbackOption={{ active: true, label: t('modelGroups.settings.chooseModel'), onSelect: () => undefined }}
                         onUnifiedSelect={({ engine, providerId, modelId, agentDevice }) => {
+                          // 模型组按供应商聚合,agy 没有供应商来源,不能进组。
+                          if (engine === 'agy') return;
                           const added: ModelGroupCandidate = {
                             agentKind: engine, providerId, model: modelId,
                             ...(agentDevice ? { agentDeviceId: agentDevice.deviceId } : {}),

@@ -222,7 +222,9 @@ export function PluginTaskPrefs({
               agentDevice={agentDeviceId ? { deviceId: agentDeviceId, name: agentDeviceName } : undefined}
               disabled={saving || disabled}
               unifiedAgents={pickerAgents}
-              onUnifiedSelect={({ engine, providerId, modelId, effort, fast, agentDevice }) =>
+              onUnifiedSelect={({ engine, providerId, modelId, effort, fast, agentDevice }) => {
+                // 插件任务不支持 agy(主进程也会拒绝)。
+                if (engine === 'agy') return;
                 save({
                   ...config,
                   agentKind: engine,
@@ -232,8 +234,8 @@ export function PluginTaskPrefs({
                   agentDeviceId: agentDevice?.deviceId ?? null,
                   effort: TASK_EFFORTS.has(effort ?? '') ? effort : undefined,
                   fastMode: fast,
-                })
-              }
+                });
+              }}
               modelId={shownModel}
               effort={shownEffort}
               fastMode={shownFast}

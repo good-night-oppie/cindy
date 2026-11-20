@@ -98,7 +98,8 @@ export interface MakeDependencyProgress {
 }
 
 export interface CindyMakeTaskOptions {
-  agentKind?: 'cc' | 'codex' | 'pi';
+  /** agy 只是让草稿里选中的引擎能如实带过来;Cindy Make 运行时会显式拒绝 agy 任务。 */
+  agentKind?: 'cc' | 'codex' | 'pi' | 'agy';
   model?: string;
   effort?: string;
   providerId?: string | null;

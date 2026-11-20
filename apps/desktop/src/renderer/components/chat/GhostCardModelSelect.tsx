@@ -93,6 +93,8 @@ export function GhostCardModelSelect({
           }}
           onUnifiedSelect={({ providerId, modelId, engine, effort, fast, agentDevice }) => {
             picked.current = true;
+            // 插件任务不支持 agy(主进程也会拒绝)。
+            if (engine === 'agy') return;
             update({
               providerId,
               model: modelId,

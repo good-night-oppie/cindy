@@ -174,14 +174,17 @@ function syncNewMakerPrefs(appDefaultModelRequestId?: string) {
   window.electronAPI.syncNewMakerDraft({
     ...(appDefaultModelRequestId ? { appDefaultModelRequestId } : {}),
     ownerStamp: { dataOwnerId: owner.dataOwnerId, ownerGeneration: owner.generation },
-    selectedRoute: {
-      ...(draft.agentDeviceId ? { agentDeviceId: draft.agentDeviceId } : {}),
-      harness: draft.vendor === 'cc' || draft.vendor === 'orca' ? 'claude' : draft.vendor,
-      providerId: selected.providerId ?? null,
-      model: selected.model,
-      effort: selected.effort ?? '',
-      fastMode: (draft.fastModeByModel[selected.model] ?? false),
-    },
+    // agy 草稿不进入 worker / bot / 远程草稿的默认路由 —— 那三处只认三种既有引擎。
+    ...(draft.vendor === 'agy' ? {} : {
+      selectedRoute: {
+        ...(draft.agentDeviceId ? { agentDeviceId: draft.agentDeviceId } : {}),
+        harness: draft.vendor === 'cc' || draft.vendor === 'orca' ? 'claude' : draft.vendor,
+        providerId: selected.providerId ?? null,
+        model: selected.model,
+        effort: selected.effort ?? '',
+        fastMode: (draft.fastModeByModel[selected.model] ?? false),
+      },
+    }),
     lastByVendor: {
       cc: {
         model: draft.lastByVendor.cc.model,

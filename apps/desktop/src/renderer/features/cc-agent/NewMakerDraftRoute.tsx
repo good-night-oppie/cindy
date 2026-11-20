@@ -123,6 +123,7 @@ import { remoteProjectsStore } from '@/features/device-link/remoteProjectsStore'
 import {
   dbToMakerAgentKind,
   normalizeDbAgentKind,
+  type DbAgentKind,
   type MakerAgentKindWire,
 } from '../../../shared/agentKindConversion';
 import { getBranchName } from '../../../shared/managedWorktreeBranches';
@@ -977,8 +978,8 @@ function NewMakerDraftForm({ composerKey: NEW_MAKER_DRAFT_KEY }: { composerKey: 
    * 并清掉 —— 持久化之后那等于一切引擎只能记住最后一次选择。
    */
   const draftFavoriteAnchor = useDraftFavoriteAnchor(normalizeDbAgentKind(draft.vendor));
-  const persistedAgentKind: 'cc' | 'codex' | 'pi' = normalizeDbAgentKind(draft.vendor);
-  const authVendor: 'cc' | 'codex' | 'pi' = persistedAgentKind;
+  const persistedAgentKind: DbAgentKind = normalizeDbAgentKind(draft.vendor);
+  const authVendor: DbAgentKind = persistedAgentKind;
   const capabilityAgentKind = dbToMakerAgentKind(persistedAgentKind);
 
   // 品牌区跟随当前主题；icon / logo 的固定布局统一由 ThemeBrandLockup 负责。
@@ -1771,7 +1772,7 @@ function NewMakerDraftForm({ composerKey: NEW_MAKER_DRAFT_KEY }: { composerKey: 
         isModelEnabled,
         providers: localProviders,
         providersLoading: localProvidersLoading,
-        availableAgents: availableVendors,
+        availableAgents: new Set([...availableVendors].filter((v): v is 'cc' | 'codex' | 'pi' => v === 'cc' || v === 'codex' || v === 'pi')),
         availableAgentsLoaded,
       }),
     [localProviders, localProvidersLoading, availableVendors, availableAgentsLoaded, defaultVisibilityVersion],
@@ -2177,6 +2178,8 @@ function NewMakerDraftForm({ composerKey: NEW_MAKER_DRAFT_KEY }: { composerKey: 
     const deviceId = isDeviceLinkDraft ? effectiveDeviceLinkDeviceId ?? null : null;
     const confirmed = remoteDefaults.confirmedEngineRef.current;
     const defaults = confirmed?.deviceId === deviceId ? confirmed : undefined;
+    // 远程草稿引擎跟随只覆盖三种既有引擎;agy 草稿保持用户自己的选择。
+    if (draft.vendor === 'agy') return;
     const next = nextRemoteDraftEngine({
       ownerId: dataOwnerId,
       deviceId,
@@ -3083,6 +3086,8 @@ function NewMakerDraftForm({ composerKey: NEW_MAKER_DRAFT_KEY }: { composerKey: 
     // 选着插件引擎时不提前建任务(也就不预热内置 Harness)：已建出的那条由下方 effect 删掉，
     // 发送时按插件引擎的路径新建(docs/plans/acp-plugin-bridge.md)。
     if (activePluginEngine) return null;
+    // 预热任务目前只覆盖三种既有引擎(ProvisionalDraftCreateArgs);agy 首次发送时正常建会话即可。
+    if (persistedAgentKind === 'agy') return null;
     const workingDir = effectiveWorkingDir?.trim() || undefined;
     return {
       id: localDraftSessionIdRef.current,
@@ -3215,7 +3220,7 @@ function NewMakerDraftForm({ composerKey: NEW_MAKER_DRAFT_KEY }: { composerKey: 
   const carryDraftFavoriteAnchorToSession = useCallback(
     (
       newSessionId: string,
-      engine: 'cc' | 'codex' | 'pi',
+      engine: DbAgentKind,
       model: string,
       providerId: string | null,
     ): void => {
@@ -3504,7 +3509,9 @@ function NewMakerDraftForm({ composerKey: NEW_MAKER_DRAFT_KEY }: { composerKey: 
   const handleRemoteProjectAdded = useCallback(
     async (target: RemoteProjectTarget) => {
       // vendor 由外层 VendorSegmentedSwitcher (draft.vendor) 单一决策 —— dialog 不再让用户选。
-      const draftVendor: 'cc' | 'codex' | 'pi' = normalizeDbAgentKind(draft.vendor);
+      const draftVendor: DbAgentKind = normalizeDbAgentKind(draft.vendor);
+      // agy 只在任务所在电脑本地运行:远程项目(SSH)不支持,直接拒绝。
+      if (draftVendor === 'agy') throw new Error('Antigravity 只能在当前电脑上运行,不支持远程项目。');
 
       if (target.kind === 'device-link') {
         // device-link:**不**像 SSH 立即建会话(会在被控端留空会话)。改为把当前草稿指向该被控
@@ -5560,7 +5567,7 @@ function NewMakerDraftForm({ composerKey: NEW_MAKER_DRAFT_KEY }: { composerKey: 
           }
           // 插件模型：建任务前问一次插件。插件只能从已连接的模型里选(主进程校验)，
           // 没回应、没意见或选了用不了的模型都沿用用户原来的模型；下面整笔创建都用这一组值。
-          const pluginRoute = pluginModelAtSend
+          const pluginRoute = pluginModelAtSend && sendBaseRoute.persistedAgentKind !== 'agy'
             ? await askPluginModelRoute(pluginModelAtSend, message, files?.length ?? 0, {
                 agentKind: sendBaseRoute.persistedAgentKind,
                 model: sendBaseRoute.model,
@@ -5692,6 +5699,8 @@ function NewMakerDraftForm({ composerKey: NEW_MAKER_DRAFT_KEY }: { composerKey: 
           // resolveDeviceLinkSubmission 会把 workspaceKind 派生成 'dialogue',被控端自行分配
           // 运行目录(隧道侧 path guard 对「缺 workingDir」本来就是放行的,不放宽任何边界)。
           if (isDeviceLinkDraft && effectiveDeviceLinkDeviceId) {
+            // agy 只在任务所在电脑本地运行:device-link 远端任务不支持,直接拒绝。
+            if (persistedAgentKind === 'agy') throw new Error('Antigravity 只能在当前电脑上运行,不支持跨设备任务。');
             const deviceId = effectiveDeviceLinkDeviceId;
             const deviceName = deviceDisplayName(deviceId, effectiveDeviceLinkDeviceName);
             const invokeRemote = async (channel: string, args: unknown[]) => {
@@ -6153,7 +6162,7 @@ function NewMakerDraftForm({ composerKey: NEW_MAKER_DRAFT_KEY }: { composerKey: 
           // agent 启动时看到的工作区已是迁移后的状态。fail-soft：检测错误只 warn，不阻塞 send。
           try {
             const wd = effectiveWorkingDir;
-            if (wd && !isRemoteProjectDraft && persistedAgentKind !== 'pi') {
+            if (wd && !isRemoteProjectDraft && persistedAgentKind !== 'pi' && persistedAgentKind !== 'agy') {
               const r = await crossAgentConvertService.detect(
                 wd,
                 persistedAgentKind === 'cc' ? 'claude-code' : persistedAgentKind,
@@ -6521,7 +6530,8 @@ function NewMakerDraftForm({ composerKey: NEW_MAKER_DRAFT_KEY }: { composerKey: 
           }
           // 草稿里选中的那条收藏跟着会话走(见 carryDraftFavoriteAnchorToSession)。
           rememberCreatedWorkspace();
-          carryDraftFavoriteAnchorToSession(newSession.id, persistedAgentKind, model, providerId);
+          // agy 没有收藏条目(收藏只覆盖三种既有引擎)。
+          if (persistedAgentKind !== 'agy') carryDraftFavoriteAnchorToSession(newSession.id, persistedAgentKind, model, providerId);
           // 计划模式是一次性选择:随本次发送被消耗,草稿勾选同步熄灭。
           if (effectivePlanMode) patchActivePrefs({ planMode: false });
           // 本机/SSH 首条在下面直接 sendMessage,createOpts 读 chat store 的
@@ -6980,7 +6990,7 @@ function NewMakerDraftForm({ composerKey: NEW_MAKER_DRAFT_KEY }: { composerKey: 
           throw new Error(t('ccAgent.draft.deviceStillLoading'));
         }
         // 插件模型：与 handleSend 同一流程，目标文本就是这个任务的第一条消息。
-        const pluginRoute = goalPluginModel
+        const pluginRoute = goalPluginModel && goalBaseRoute.persistedAgentKind !== 'agy'
           ? await askPluginModelRoute(goalPluginModel, objective, 0, {
               agentKind: goalBaseRoute.persistedAgentKind,
               model: goalBaseRoute.model,
@@ -7141,6 +7151,8 @@ function NewMakerDraftForm({ composerKey: NEW_MAKER_DRAFT_KEY }: { composerKey: 
             remoteGoalTitlePreviewId = presetSessionId;
           }
           // 与 handleSend 同口径先存一份 args:临时行要按实际提交的值组装(见 commitRemoteSessionHandoff)。
+          // agy 只在任务所在电脑本地运行:device-link 远端任务不支持。
+          if (persistedAgentKind === 'agy') throw new Error('Antigravity 只能在当前电脑上运行,不支持跨设备任务。');
           const createArgs = resolveDeviceLinkSubmission({
             agentKind: persistedAgentKind,
             // 无项目 → 不传,由 workingDir 派生 workspaceKind:'dialogue'。
@@ -7406,7 +7418,7 @@ function NewMakerDraftForm({ composerKey: NEW_MAKER_DRAFT_KEY }: { composerKey: 
           throw new Error(t('ccAgent.draft.createSessionFailed'));
         }
         // 草稿里选中的那条收藏跟着会话走(见 carryDraftFavoriteAnchorToSession)。
-        carryDraftFavoriteAnchorToSession(
+        if (persistedAgentKind !== 'agy') carryDraftFavoriteAnchorToSession(
           newSession.id,
           persistedAgentKind,
           draftInitialModel,
@@ -7500,7 +7512,8 @@ function NewMakerDraftForm({ composerKey: NEW_MAKER_DRAFT_KEY }: { composerKey: 
         }
         // 自动起名:/goal 新建的会话不经普通发送路径,scheduleAutoName 漏触发 → 标题会停在默认。
         // 这里用目标文案补一次,与普通会话同款(立即占位 + 智能标题后台覆盖 + 不覆盖手动改名)。
-        makerChatStore.autoNameSession(newSession.id, objective, capabilityAgentKind);
+        // 起名是内部一次性调用:agy 没有对应的起名模型,沿用 Claude 的通道(只影响标题生成)。
+        makerChatStore.autoNameSession(newSession.id, objective, capabilityAgentKind === 'agy' ? 'claude-code' : capabilityAgentKind);
         clearComposerDraftAndNotify(NEW_MAKER_DRAFT_KEY);
         setAlternateModel(null);
         resetDraftWorkspaceAfterSend();

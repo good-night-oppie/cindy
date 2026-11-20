@@ -265,6 +265,8 @@ export function normalizeStopReason(raw: unknown): AcpStopReason {
   const stopReason = asRecord(raw).stopReason;
   return typeof stopReason === 'string' && STOP_REASONS.has(stopReason) ? stopReason as AcpStopReason : 'end_turn';
 
+}
+
 // Ported from makecindy/cindy#5611 (Cursor native ACP, by Ken / kenlinjie).
 export type AcpRpcId = string | number;
 export class AcpRpcError extends Error {

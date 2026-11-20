@@ -253,6 +253,18 @@ function defaultVendorPrefs(vendor: DraftVendor): VendorPrefs {
       providerId: null,
     };
   }
+  if (vendor === 'agy') {
+    return {
+      // agy 的模型清单由 ACP 会话在运行时给出,草稿不预置具体模型:
+      // 选中该引擎后由模型选择器补齐(空模型不会被当成有效选择落库)。
+      model: '',
+      effort: 'medium',
+      permissionMode: 'auto',
+      permissionModeCustomized: false,
+      planMode: false,
+      providerId: null,
+    };
+  }
   return {
     model: getDefaultModelForVendor('cc').id,
     effort: 'medium',
@@ -293,6 +305,7 @@ function makeDefault(): NewMakerDraft {
       pi: defaultVendorPrefs('pi'),
       orca: defaultVendorPrefs('orca'),
       codex: defaultVendorPrefs('codex'),
+      agy: defaultVendorPrefs('agy'),
     },
     modelChosenByVendor: {},
     defaultTupleCustomized: false,
@@ -450,7 +463,10 @@ function sanitize(raw: unknown): NewMakerDraft {
   // 已经随旧版完整草稿自然落盘过的 cc seed。它们不是用户选择，不能因为新版目录换了
   // seed 就反过来把系统快照认成自定义；这里只服务一次性迁移，不参与新会话默认决策。
   const legacyCcSeedModels = new Set([def.lastByVendor.cc.model, 'claude-sonnet-4-6']);
+  // agy / orca 没有产品默认组合(产品默认只覆盖三种既有引擎),直接判否。
   const isKnownProductTuple = (slotVendor: DraftVendor, prefs: Partial<VendorPrefs>): boolean =>
+    slotVendor !== 'agy' &&
+    slotVendor !== 'orca' &&
     typeof prefs.providerId === 'string' &&
     prefs.providerId.length > 0 &&
     typeof prefs.model === 'string' &&
@@ -536,6 +552,7 @@ function sanitize(raw: unknown): NewMakerDraft {
       pi: sanitizeVendorPrefs(lastByVendorRaw.pi, 'pi'),
       orca: sanitizeVendorPrefs(lastByVendorRaw.orca, 'orca'),
       codex: sanitizeVendorPrefs(lastByVendorRaw.codex, 'codex'),
+      agy: sanitizeVendorPrefs(lastByVendorRaw.agy, 'agy'),
     },
     modelChosenByVendor,
     defaultTupleCustomized,
@@ -708,8 +725,16 @@ let preferenceSyncFallback: PreferenceSyncFallback = null;
  * 显式 tuple 操作先采用跨窗口持久真相，再只施加自己的字段变更。
  * 这样既不会带着旧整表复活已恢复的 override，也不会吞掉本窗口刚发生的真实选模意图。
  */
+/**
+ * 远程草稿引擎跟随只覆盖三种既有引擎:agy 草稿不参与跟随,保持用户自己的选择,
+ * 也不会被远端默认值改写。
+ */
+function persistedVendorForDraft(vendor: DraftVendor): DraftVendor {
+  return vendor === 'agy' ? vendor : persistedDraftVendor(activeDataOwnerId, vendor);
+}
+
 function mergeStoredTuple(stored: StoredDefaultTuplePreference): NewMakerDraft {
-  const following = persistedDraftVendor(activeDataOwnerId, currentDraft.vendor) !== currentDraft.vendor;
+  const following = persistedVendorForDraft(currentDraft.vendor) !== currentDraft.vendor;
   return { ...currentDraft, ...stored, vendor: following ? currentDraft.vendor : stored.vendor };
 }
 
@@ -771,7 +796,7 @@ function scheduleWrite(
     currentDraft = mergeStoredTuple(storedDefaultTuplePreference);
   }
   try {
-    window.localStorage.setItem(storageKey(), JSON.stringify({ ...currentDraft, vendor: persistedDraftVendor(activeDataOwnerId, currentDraft.vendor) }));
+    window.localStorage.setItem(storageKey(), JSON.stringify({ ...currentDraft, vendor: persistedVendorForDraft(currentDraft.vendor) }));
     preferenceSyncFallback = null;
   } catch {
     // localStorage 满 / 私密窗口禁写——忽略,不影响内存状态。
@@ -858,7 +883,7 @@ export function getDraft(): NewMakerDraft {
  */
 export function getDraftForPreferenceSync(): NewMakerDraft {
   const stored = readStoredDraftRecord();
-  if (!stored || preferenceSyncFallback === 'full-draft') return { ...currentDraft, vendor: persistedDraftVendor(activeDataOwnerId, currentDraft.vendor) };
+  if (!stored || preferenceSyncFallback === 'full-draft') return { ...currentDraft, vendor: persistedVendorForDraft(currentDraft.vendor) };
   const persistedDraft = sanitize(stored);
   return preferenceSyncFallback === 'worktree-only'
     ? {
@@ -897,7 +922,7 @@ export function setWorktreePreference(enabled: boolean): void {
   const worktreePreferenceCustomized = true;
   if (typeof window !== 'undefined') {
     const stored = readStoredDraftRecord();
-    const base = stored ?? { ...currentDraft, vendor: persistedDraftVendor(activeDataOwnerId, currentDraft.vendor) };
+    const base = stored ?? { ...currentDraft, vendor: persistedVendorForDraft(currentDraft.vendor) };
     if (
       stored?.worktreeEnabled !== worktreeEnabled
       || stored?.worktreePreferenceCustomized !== worktreePreferenceCustomized
@@ -1082,7 +1107,8 @@ export function applyAppDefaultModelSelection(selection: AppDefaultModelSelectio
   const stored = readStoredDraftRecord();
   const base = stored ? sanitize(stored) : currentDraft;
   const prefs = base.lastByVendor[base.vendor];
-  const current: BotModelRoute | null = prefs.model ? {
+  // agy 不参与默认路由(worker/bot/远程草稿都只认三种既有引擎):没有可比对的 route。
+  const current: BotModelRoute | null = prefs.model && base.vendor !== 'agy' ? {
     harness: base.vendor === 'cc' || base.vendor === 'orca' ? 'claude' : base.vendor,
     model: prefs.model, providerId: prefs.providerId ?? null, effort: prefs.effort ?? '',
     fastMode: (base.fastModeByModel[prefs.model] ?? false),

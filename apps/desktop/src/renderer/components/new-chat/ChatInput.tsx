@@ -1,3 +1,4 @@
+import type { SelectableVendor } from '@/lib/agentVendors';
 import '@/styles/chatContentDirection.css';
 import {
   useCallback,
@@ -845,7 +846,7 @@ interface ChatInputProps {
    * M35: Vendor lock — when provided, ModelSelector only shows models
    * belonging to this vendor ('cc' for Claude, 'codex' for OpenAI Codex).
    */
-  vendorKey?: 'cc' | 'codex' | 'pi';
+  vendorKey?: SelectableVendor;
   /**
    * Optional override for the composerDraftStore key used to persist editor
    * content (and via attachmentState, attachments) across mount/unmount.
@@ -990,7 +991,7 @@ interface ChatInputProps {
    * `lastByVendor.model` 并原样进 createSession,写错就是首条请求路由到一个不存在的模型。
    */
   onUnifiedDraftSelect?: (selection: {
-    vendor: 'cc' | 'codex' | 'pi';
+    vendor: SelectableVendor;
     providerId: string;
     /** 选中引擎的 **wire model id**。 */
     modelId: string;
@@ -1091,14 +1092,15 @@ function rememberCatalogModelPrefs(
 const UNIFIED_AGENT_KINDS = ['claude-code', 'codex', 'pi'] as const;
 
 /** AgentKind → NewMaker vendor(useAvailableAgents 用 vendor 口径)。 */
-function agentKindToVendor(kind: Exclude<AgentKind, 'agy'>): 'cc' | 'codex' | 'pi' {
-  return kind === 'codex' ? 'codex' : kind === 'pi' ? 'pi' : 'cc';
+function agentKindToVendor(kind: AgentKind): SelectableVendor {
+  return kind === 'codex' ? 'codex' : kind === 'pi' ? 'pi' : kind === 'agy' ? 'agy' : 'cc';
 }
 
-function vendorKeyToAgentKind(v?: 'cc' | 'codex' | 'pi'): Exclude<AgentKind, 'agy'> | null {
+function vendorKeyToAgentKind(v?: SelectableVendor): AgentKind | null {
   if (v === 'cc') return 'claude-code';
   if (v === 'codex') return 'codex';
   if (v === 'pi') return 'pi';
+  if (v === 'agy') return 'agy';
   return null;
 }
 
@@ -8106,7 +8108,7 @@ export function ChatInput({
       /** 选中引擎的 **wire model id** —— 唯一可发送、可当记忆键的那个 id。 */
       modelId: string;
       effort?: Effort;
-      engine: 'cc' | 'codex' | 'pi';
+      engine: SelectableVendor;
       fast: boolean | 'ultrafast';
       favoriteUid: string | null;
       /** 行的归一化 id(面板行身份)。草稿层不消费,更不作为发送 id。 */
@@ -10360,7 +10362,9 @@ export function ChatInput({
                       sessionAgentSwitchSupported
                         ? {
                             currentVendor: vendorKey,
-                            onSwitch: performAgentSwitch,
+                            // 会话内跨引擎切换仍只覆盖三种引擎。
+                            onSwitch: (targetAgentKind, modelId, providerId) =>
+                              performAgentSwitch(targetAgentKind, modelId, providerId),
                           }
                         : undefined
                     }

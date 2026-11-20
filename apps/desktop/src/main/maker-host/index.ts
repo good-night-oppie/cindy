@@ -66,6 +66,7 @@ import {
   isBotMcpServerAllowed,
   ClaudeCodeAgent,
   CodexAgent,
+  AgyAgent,
   configureDefaultImageResizer,
   type AgentKind,
   type EngineKind,
@@ -2048,8 +2049,39 @@ export function getMaker(): Maker {
 
     // 装配第二步: 把 agents 引用挂回 manager (manager.enable() 时遍历 setMemory(false))。
     // 保留同一份可变 map，供可选 Pi runtime 在 Maker 构造后动态注册。
+    // Antigravity (agy) signs in with the user's own Google account inside agy's state dir.
+    // Cindy injects no credentials here, and agy must never appear under subscription accounts.
+    const resolveAgyBinary = (): string => {
+      const override = process.env['CINDY_AGY_BINARY'];
+      if (override && override.trim()) return override.trim();
+      const candidates = process.platform === 'win32'
+        ? [process.env['LOCALAPPDATA'] ? path.join(process.env['LOCALAPPDATA'], 'agy', 'bin', 'agy.exe') : '']
+        : ['/usr/local/bin/agy', path.join(os.homedir(), '.local', 'bin', 'agy')];
+      for (const candidate of candidates) {
+        if (candidate && fsSync.existsSync(candidate)) return candidate;
+      }
+      return process.platform === 'win32' ? 'agy.exe' : 'agy';
+    };
+    const agyAgent = new AgyAgent({
+      auth: {
+        getState: async () => ({ authenticated: true, identity: 'agy-native', authSource: 'oauth' }),
+        triggerLogin: async () => ({ authenticated: true, identity: 'agy-native', authSource: 'oauth' }),
+        logout: async () => {},
+        getAuthEnv: async () => ({}),
+      },
+      runtimeConfig: {},
+      logger: desktopMakerLogger,
+      get binaryPath() { return resolveAgyBinary(); },
+      uiLocale: () => { try { return app.getLocale(); } catch { return null; } },
+      // Linux keeps the bwrap sandbox and still fails closed if it is unavailable. Windows and
+      // macOS have no system sandbox; the owner chose to run agy there with a filtered env and a
+      // visible notice instead of hiding the engine (cindy#1, 2026-11-17).
+      agySandbox: { allowWithoutSystemSandbox: process.platform !== 'linux' },
+    });
+
     const makerAgents: ConstructorParameters<typeof Maker>[0]['agents'] = {
       'claude-code': withSubscriptionAccounts(claudeAgent, desktopClaudeAuthAdapter),
+      agy: agyAgent,
       codex: withSubscriptionAccounts(codexAgent, {
         getState: desktopCodexAuthAdapter.getState.bind(desktopCodexAuthAdapter),
         resolveCodexHistoryHome: async threadId => (await readCodexThreadStorageReadOnly(threadId))?.historyHome,

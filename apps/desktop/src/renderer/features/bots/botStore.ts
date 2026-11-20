@@ -377,9 +377,13 @@ export function getEffectiveBotModelChain(
   if (stored) return stored;
   const providers = getCachedProvidersSnapshot();
   const availableAgents = getCachedAvailableVendors();
+  // bot 运行时只认三种既有引擎:agy 会被过滤掉,不会出现在 bot 的引擎候选里。
+  const botAgents = availableAgents
+    ? new Set([...availableAgents].filter((v): v is 'cc' | 'codex' | 'pi' => v === 'cc' || v === 'codex' || v === 'pi'))
+    : new Set<'cc' | 'codex' | 'pi'>();
   return defaultBotModelChain({ providers: providers?.providers ?? [],
     isModelEnabled,
-    providersLoading: !providers, availableAgents: availableAgents ?? new Set(),
+    providersLoading: !providers, availableAgents: botAgents,
     availableAgentsLoaded: availableAgents !== null });
 }
 
