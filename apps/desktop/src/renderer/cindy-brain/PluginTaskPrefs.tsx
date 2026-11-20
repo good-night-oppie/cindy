@@ -186,7 +186,9 @@ export function PluginTaskPrefs({
               localOnlyReason={showTaskRows ? 'plugin-task-local-route' : 'one-shot-local-request'}
               disabled={saving || disabled}
               unifiedAgents={pickerAgents}
-              onUnifiedSelect={({ engine, providerId, modelId, effort, fast }) =>
+              onUnifiedSelect={({ engine, providerId, modelId, effort, fast }) => {
+                // 插件任务不支持 agy(主进程也会拒绝)。
+                if (engine === 'agy') return;
                 save({
                   ...config,
                   agentKind: engine,
@@ -194,8 +196,8 @@ export function PluginTaskPrefs({
                   model: modelId,
                   effort: TASK_EFFORTS.has(effort ?? '') ? effort : undefined,
                   fastMode: fast,
-                })
-              }
+                });
+              }}
               modelId={shownModel}
               effort={shownEffort}
               fastMode={shownFast}

@@ -3362,8 +3362,8 @@ export function stopPiIdleReleaseWatcher(): void {
   piIdleReleaseWatcher = null;
 }
 
-function requireAgentKind(value: unknown): Exclude<AgentKind, 'agy'> {
-  if (value === 'claude-code' || value === 'codex' || value === 'pi') return value;
+function requireAgentKind(value: unknown): AgentKind {
+  if (value === 'claude-code' || value === 'codex' || value === 'pi' || value === 'agy') return value;
   throwIpcError('INVALID_PARAMS', 'agentKind required');
 }
 
@@ -7349,7 +7349,10 @@ export function registerMakerIpc(maker: Maker, options: RegisterMakerIpcOptions)
   // (model/effort/fast/permission/source/是否显式选过模型)。控制端经隧道调用 → seed 远程项目草稿。
   // 缓存未就绪 / 该 vendor 无草稿 model → 返回 {},控制端按 capabilities 默认兜底。
   ipcMain.handle(MAKER_INVOKE.GET_NEW_MAKER_DEFAULTS, (_e, agentKind: unknown) => {
-    return getRemoteNewMakerDefaults(requireAgentKind(agentKind));
+    const kind = requireAgentKind(agentKind);
+    // 远程草稿镜像只覆盖三种既有引擎;agy 不支持跨设备草稿 seed。
+    if (kind === 'agy') throwIpcError('UNSUPPORTED_CAPABILITY', 'agy is not available for remote new-maker defaults');
+    return getRemoteNewMakerDefaults(kind);
   });
 
   // device-link 草稿「模型 effort/fast」写穿:控制端经隧道调用 → 跑在**被控端**。被控端不直接改
@@ -9025,7 +9028,9 @@ export function registerMakerIpc(maker: Maker, options: RegisterMakerIpcOptions)
 
   const appliedTaskPrompts = new WeakMap<Awaited<ReturnType<typeof maker.createSession>>, string>();
   const readTaskPrompt = (sessionId: string, agentKind: AgentKind, agentDeviceId?: string | null) => {
-    if (agentKind === 'agy') throw new Error('Native Antigravity desktop integration is not ready');
+    // ACP gives agy no system-prompt channel, so runtime-plugin task prompts are not injected
+    // there yet. Return none instead of refusing the whole task (cindy#1, agy open).
+    if (agentKind === 'agy') return '';
     return ghostTaskSystemPrompt(sessionId, agentKind === 'claude-code' ? 'cc' : agentKind, !(agentKind === 'pi' && agentDeviceId));
   };
   const createSessionWithRuntimePlugins = (o: CreateOpts, signal?: AbortSignal) => {

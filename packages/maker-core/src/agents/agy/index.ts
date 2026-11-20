@@ -55,6 +55,7 @@ import { agyRpcDiagnostic, type AgyRpcDiagnostic } from './diagnostics.js';
 import { assertAgyBinaryUsable, AgyBinaryUnavailableError, type AgyVersionReader } from './version.js';
 import {
   AGY_SANDBOX_USER_COPY_DRAFT, AgySandboxUnavailableError, agyPrivateStateMounts, prepareAgySandboxedLaunch,
+  filterAgyUnsandboxedEnv,
   type AgySandboxProbe,
 } from './system-sandbox.js';
 import { openAgyTaskFile, registerAgyTaskDir } from './host-path-guard.js';
@@ -71,6 +72,8 @@ const yes = { supported: true } as const;
 const no = { supported: false, reason: 'not-implemented' } as const;
 // Wording pending JJ (cindy#1 6908586833 item 4): say exactly what the isolation does and does not do.
 const NATIVE_PERMISSION_DESCRIPTION = 'Antigravity runs inside Cindy\'s file isolation: it can only read and change files in this task\'s folder, and it may change files there without asking. Cindy answers the approval requests agy sends (typically shell commands).';
+// Used only where no system-level isolation exists (Windows, macOS). Wording pending JJ.
+const UNSANDBOXED_PERMISSION_DESCRIPTION = 'Antigravity runs without system-level file isolation on this computer: it can reach any file your user account can, limited only by the approval requests it sends to Cindy. Requests outside this task\'s folder are worth reading before you allow them.';
 const CONTROL_TIMEOUT = 30_000;
 const CANCEL_TIMEOUT = 10_000;
 const PROMPT_REQUEST_TIMEOUT = 24 * 60 * 60 * 1000;
@@ -93,7 +96,16 @@ export interface AgyAgentDeps extends AgentDeps {
    * System-level isolation (cindy#1 6908586833): always applied to the real spawn. With an injected
    * transport (tests) it is applied only when set. stateRoot defaults to ~/.cindy/agy-sandbox/state.
    */
-  agySandbox?: { stateRoot?: string; probe?: AgySandboxProbe };
+  agySandbox?: {
+    stateRoot?: string;
+    probe?: AgySandboxProbe;
+    /**
+     * Non-Linux hosts (Windows, macOS) have no bwrap/pasta. When the product host sets this,
+     * agy runs there without OS isolation: env is filtered, the UI is told, and the sandboxed
+     * path still never falls back to this on its own (cindy#1, owner decision 2026-11-17).
+     */
+    allowWithoutSystemSandbox?: boolean;
+  };
   /** UI locale for agy user notices (JJ's wording exists in zh-CN and en). */
   uiLocale?: () => string | null | undefined;
 }
@@ -128,7 +140,18 @@ export class AgyAgent extends BaseAgent {
   }>();
   private disposed = false;
 
-  constructor(protected override deps: AgyAgentDeps) { super(deps); }
+  constructor(protected override deps: AgyAgentDeps) {
+    super(deps);
+    // Never claim file isolation on a host that has none (copy wording pending JJ).
+    if (deps.agySandbox?.allowWithoutSystemSandbox) {
+      this.capabilities = {
+        ...this.capabilities,
+        permissionModes: this.capabilities.permissionModes.map(mode => ({
+          ...mode, description: (mode.description ?? '').replace(NATIVE_PERMISSION_DESCRIPTION, UNSANDBOXED_PERMISSION_DESCRIPTION),
+        })),
+      };
+    }
+  }
 
   private async retryFailedStartupCleanup(key: string): Promise<void> {
     const entry = this.failedStartupCleanups.get(key);
@@ -218,13 +241,20 @@ export class AgyAgent extends BaseAgent {
     const emit = (event: AgentEvent) => {
       if (!closed) queue.push({ ...event, source: 'agy', turnAttemptToken: turnOptions?.turnAttemptToken });
     };
-    const useSandbox = !this.deps.createAgyTransport || this.deps.agySandbox !== undefined;
+    const wantsIsolation = !this.deps.createAgyTransport || this.deps.agySandbox !== undefined;
+    // Non-Linux hosts (Windows, macOS) have no bwrap/pasta. Only when the host explicitly allows it,
+    // agy runs there without OS isolation: filtered env, a visible notice, no silent fallback.
+    const unsandboxedByPlatform = wantsIsolation && process.platform !== 'linux'
+      && this.deps.agySandbox?.allowWithoutSystemSandbox === true;
+    const useSandbox = wantsIsolation && !unsandboxedByPlatform;
     const sandboxStateRoot = this.deps.agySandbox?.stateRoot ?? path.join(os.homedir(), '.cindy', 'agy-sandbox', 'state');
     // agy sees the task folder by its real path inside the sandbox; a symlinked workingDir does not exist there.
-    const agyWorkingDir = useSandbox ? realpathOr(opts.workingDir) : opts.workingDir;
-    const translator = new AgyTranslator(emit, useSandbox ? {
+    const agyWorkingDir = wantsIsolation ? realpathOr(opts.workingDir) : opts.workingDir;
+    const translator = new AgyTranslator(emit, wantsIsolation ? {
       taskDir: agyWorkingDir, homeDir: os.homedir(),
-      visibleDirs: agyPrivateStateMounts(sandboxStateRoot, os.homedir()).map(mount => mount.target),
+      visibleDirs: useSandbox
+        ? agyPrivateStateMounts(sandboxStateRoot, os.homedir()).map(mount => mount.target)
+        : [],
       locale: this.deps.uiLocale,
     } : undefined);
     // Host reads / lists / uploads of this folder go through checkAgyTaskPath (cindy#1 QQ 6924350879 item 5).
@@ -503,10 +533,18 @@ export class AgyAgent extends BaseAgent {
       assertCurrent();
       // System-level isolation: agy only touches the task folder and its private state; no host
       // loopback, no session bus (cindy#1 6908586833, 6909268027). Fails closed, never runs bare.
+      if (unsandboxedByPlatform) {
+        emit({ type: 'error', data: { message: agyNoSystemIsolationText(this.deps.uiLocale), isTerminal: false } });
+      }
       const launch = useSandbox
         ? await prepareAgySandboxedLaunch({ binaryPath: this.deps.binaryPath, args: AGY_ACP_ARGS, taskDir: agyWorkingDir,
           homeDir: os.homedir(), stateRoot: sandboxStateRoot, env, passEnvKeys: Object.keys(authEnv), probe: this.deps.agySandbox?.probe })
-        : { command: this.deps.binaryPath, args: [...AGY_ACP_ARGS], env };
+        : { command: this.deps.binaryPath, args: [...AGY_ACP_ARGS],
+            // issue #13: the branch that runs without the sandbox must never hand agy the full
+            // process env. On the test-transport seam it stays exactly as before.
+            env: unsandboxedByPlatform
+              ? filterAgyUnsandboxedEnv(env, os.homedir(), agyWorkingDir, Object.keys(authEnv))
+              : env };
       assertCurrent();
       const transport = (this.deps.createAgyTransport ?? spawnAcpTransport)({ binaryPath: launch.command, args: launch.args, cwd: agyWorkingDir, env: launch.env });
       client = new AcpClient(transport, {
@@ -737,6 +775,18 @@ export class AgyAgent extends BaseAgent {
 
 function realpathOr(dir: string): string {
   try { return realpathSync(dir); } catch { return dir; }
+}
+
+/**
+ * `[agy_no_system_isolation]` notice, emitted once per start on hosts without bwrap/pasta.
+ * Says exactly what is and is not protected; JJ's final wording pending (cindy#1).
+ */
+export function agyNoSystemIsolationText(locale?: () => string | null | undefined): string {
+  const language = locale?.() ?? '';
+  if (/^zh\b|^zh-/i.test(language) || language === 'zh-CN' || language === 'zh-TW') {
+    return '[agy_no_system_isolation] 这台电脑上没有系统级文件隔离，Antigravity 能碰到你这个账户能碰到的文件，只能靠它在动之前先向你申请来限制范围。任务文件夹以外的请求，请看清楚再同意。';
+  }
+  return '[agy_no_system_isolation] This computer has no system-level file isolation: Antigravity can reach any file your account can, limited only by asking you first. Read requests outside this task folder before you allow them.';
 }
 
 /** `[agy_sandbox_unavailable]` code + English fallback; zh/en wording pending JJ (cindy#1). */

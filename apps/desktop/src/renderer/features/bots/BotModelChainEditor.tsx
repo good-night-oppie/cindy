@@ -133,7 +133,8 @@ export function BotModelChainEditor({
         unifiedPanel
         unifiedAgents={unifiedAgents}
         onUnifiedSelect={(selection) => {
-          if (!visibleVendors.includes(selection.engine)) return;
+          // bot 只认三种既有引擎(agy 不在 visibleVendors 里)。
+          if (selection.engine === 'agy' || !visibleVendors.includes(selection.engine)) return;
           replace(index, {
             harness: harnessFor(selection.engine),
             ...(route.agentDeviceId || selection.agentDevice ? { agentDeviceId: selection.agentDevice?.deviceId ?? null } : {}),

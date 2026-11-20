@@ -360,6 +360,36 @@ export function filterAgySandboxEnv(env: NodeJS.ProcessEnv, homeDir: string, tas
   return out;
 }
 
+/**
+ * Windows and macOS have no bwrap/pasta, so there is no OS-level isolation to
+ * apply. The host may still run agy there, but it must say so: this filter keeps
+ * the same deny list as the sandbox, adds the platform variables agy needs to
+ * start and to run shell commands, and marks the process so the UI can warn.
+ * Never call this when the sandbox is available - the sandboxed path stays the
+ * only silent one.
+ */
+const UNSANDBOXED_ENV_ALLOW = new Set([...ENV_ALLOW, 'PATH', 'Path',
+  'SystemRoot', 'SYSTEMROOT', 'SystemDrive', 'windir', 'PATHEXT', 'ComSpec', 'COMSPEC',
+  'APPDATA', 'LOCALAPPDATA', 'PROGRAMDATA', 'PROGRAMFILES', 'PROGRAMFILES(X86)', 'PROGRAMW6432',
+  'USERPROFILE', 'HOMEDRIVE', 'HOMEPATH', 'TEMP', 'TMP', 'PROCESSOR_ARCHITECTURE', 'NUMBER_OF_PROCESSORS']);
+
+export const AGY_NO_SYSTEM_ISOLATION_ENV = 'CINDY_AGY_NO_SYSTEM_ISOLATION';
+
+export function filterAgyUnsandboxedEnv(env: NodeJS.ProcessEnv, homeDir: string, taskDir: string,
+  passEnvKeys: readonly string[] = []): NodeJS.ProcessEnv {
+  const pass = new Set(passEnvKeys);
+  const out: NodeJS.ProcessEnv = {};
+  for (const [k, v] of Object.entries(env)) {
+    if (v === undefined || ENV_DENY.has(k)) continue;
+    if (pass.has(k) || UNSANDBOXED_ENV_ALLOW.has(k) || ENV_ALLOW_PREFIX.some(p => k.startsWith(p))) out[k] = v;
+  }
+  Object.assign(out, {
+    HOME: homeDir, USERPROFILE: out.USERPROFILE ?? homeDir,
+    CINDY_AGY_SANDBOX: '0', [AGY_NO_SYSTEM_ISOLATION_ENV]: '1', CINDY_AGY_SANDBOX_TASK_DIR: taskDir,
+  });
+  return out;
+}
+
 export function buildAgySandboxLaunch(input: AgySandboxLaunchInput): AgySandboxLaunch {
   const fs = input.fs ?? realFs;
   const taskDir = fs.realpath(input.taskDir);

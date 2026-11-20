@@ -49,7 +49,7 @@ function refreshRemoteCapabilitiesOnce(deviceId: string): void {
   remoteCapabilitiesRefreshInFlight.set(deviceId, pending);
 }
 
-type RuntimeAgentKind = 'claude-code' | 'codex' | 'pi';
+type RuntimeAgentKind = 'claude-code' | 'codex' | 'pi' | 'agy';
 
 /** runtime agent id → NewMaker vendor(其余保持同名)。 */
 function toVendor(agent: RuntimeAgentKind): SelectableVendor {
@@ -82,7 +82,7 @@ async function fetchAvailableAgents(deviceId?: string | null): Promise<RuntimeAg
     if (!dl) throw new Error('device-link IPC not available');
     const raw = await invokeModelCatalog(dl, deviceId, 'maker:list-available-agents', []);
     return Array.isArray(raw) ? (raw.filter((v): v is RuntimeAgentKind =>
-      v === 'claude-code' || v === 'codex' || v === 'pi') as RuntimeAgentKind[]) : [];
+      v === 'claude-code' || v === 'codex' || v === 'pi' || v === 'agy') as RuntimeAgentKind[]) : [];
   }
   const api = getMakerApi();
   if (!api) throw new Error('maker IPC not available');
@@ -333,6 +333,7 @@ export function __resetAvailableAgentsCacheForTest(): void {
 export function useModelPickerAgents(current: RuntimeAgentKind, deviceId?: string | null): readonly RuntimeAgentKind[] | undefined {
   const { availableVendors, loaded } = useAvailableAgents(deviceId);
   if (!loaded) return undefined;
+  // 模型选择器里的会话内跨引擎切换仍只覆盖三种引擎;agy 只用于新建任务。
   return (['claude-code', 'codex', 'pi'] as const).filter(
     (agent) => agent === current || availableVendors.has(toVendor(agent)),
   );
