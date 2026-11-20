@@ -602,7 +602,7 @@ export interface XdtHelperMcpDeps {
  * 字段惰性创建, 工具 handler 闭包捕获这些值。
  */
 export interface XdtHelperMcpSessionCtx {
-  agentKind: 'claude-code' | 'codex' | 'pi';
+  agentKind: 'claude-code' | 'codex' | 'pi' | 'agy';
   workingDir: string;
   remoteHostId?: string;
   getSessionContext?: () => import('./types.js').LiziMcpSessionContext | undefined;
@@ -922,7 +922,7 @@ export function createXdtHelperMcpServer(
     return ['ask_user_question_async', 'manage_user_questions'].flatMap((name) => {
       const definition = questions.get(name);
       if (!definition || (name === 'ask_user_question_async' ? !supportsAsyncQuestionTool(context)
-        : !['codex', 'claude-code', 'pi'].includes(context.agentKind ?? ''))) return [];
+        : !['codex', 'claude-code', 'pi', 'agy'].includes(context.agentKind ?? ''))) return [];
       return [{ name, description: definition.description,
         inputSchema: z.toJSONSchema(z.strictObject(definition.inputShape)) as Tool['inputSchema'] }];
     });

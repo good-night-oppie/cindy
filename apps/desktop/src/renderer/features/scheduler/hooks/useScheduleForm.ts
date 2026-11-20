@@ -204,7 +204,7 @@ export function getScheduleDefaultRoute(
   const prefs = getScheduleAgentPrefs(agentKind);
   const scheduleRoute = rememberedRoute(prefs.model, prefs.providerId || null);
   if (scheduleRoute) return scheduleRoute;
-  const vendor = agentKind === 'codex' ? 'codex' : agentKind === 'pi' ? 'pi' : 'cc';
+  const vendor = agentKind === 'codex' ? 'codex' : agentKind === 'pi' ? 'pi' : agentKind === 'agy' ? 'agy' : 'cc';
   const draft = getDraft();
   const chatLast = getPersistedVendorModel(vendor);
   const chatRoute = rememberedRoute(chatLast, draft.lastByVendor[vendor]?.providerId || null);
