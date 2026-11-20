@@ -2095,6 +2095,8 @@ export function getMaker(): Maker {
       },
       runtimeConfig: {},
       logger: desktopMakerLogger,
+      // Without the reviewer every Auto-review request fell back to manual confirmation.
+      reviewAutoPermissionAction,
       // Cindy's own tools reach agy through the same per-session loopback bridge Pi uses. The
       // provider list is read at session start: Pi's is assembled after this agent is built.
       get mcpProviders() { return _mcpProviders.pi ?? _mcpProviders.codex ?? []; },
