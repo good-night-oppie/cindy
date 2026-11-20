@@ -302,6 +302,8 @@ export function ModelGroupsSection() {
                         onModelChange={() => false}
                         onEffortChange={() => undefined}
                         configurationEnabled={false}
+                        // Groups pick between provider sources; Antigravity is not one, so it is not listed.
+                        unifiedAgents={['pi', 'codex', 'claude-code']}
                         triggerVariant="field"
                         fieldPanelWidth="content"
                         popoverSide="bottom"
