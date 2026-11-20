@@ -574,7 +574,7 @@ export function ScheduleFormDialog({
     ?? (selectedTemplate?.providerId?.trim() ? selectedTemplate.agentKind : undefined);
   const preferredDefaultAgent = selectedTemplate?.agentKind ?? form.agentKind;
   const defaultAgents = useMemo(() => (requiredDefaultAgent ? [requiredDefaultAgent]
-    : [preferredDefaultAgent, ...(['claude-code', 'codex', 'pi', 'agy'] as const).filter((agent) => agent !== preferredDefaultAgent)])
+    : [preferredDefaultAgent, ...(['claude-code', 'codex', 'pi'] as const).filter((agent) => agent !== preferredDefaultAgent)])
     .filter((agent) => !agentsLoaded || availableVendors.has(agent === 'claude-code' ? 'cc' : agent)),
   [requiredDefaultAgent, preferredDefaultAgent, agentsLoaded, availableVendors]);
   const claudeDefaultCaps = useAgentCapabilities(resolvesImplicitDefault && form.agentKind !== 'claude-code'
