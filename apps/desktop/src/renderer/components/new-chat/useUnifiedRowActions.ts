@@ -1155,8 +1155,8 @@ export function useUnifiedRowActions(options: UnifiedRowActionsOptions): Unified
 
   const addFavorite: UnifiedRowActions['addFavorite'] = (anchor, config) => {
     if (interactionDisabled) return;
-    // 同上:agy 没有收藏条目。
-    if (config.engine === 'agy') return;
+    // Antigravity rows can be favorited too. The local store keeps them on this computer;
+    // a store that writes to another device refuses them (see useRemoteModelFavorites).
     const result = favorites.add({
       providerId: anchor.providerId,
       modelId: config.storedModelId ?? anchor.modelId,

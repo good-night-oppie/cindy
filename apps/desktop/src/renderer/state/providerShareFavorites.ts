@@ -16,6 +16,7 @@ import {
   type ModelFavoriteConfig,
   type ModelFavoriteItem,
 } from './modelFavorites';
+import { requireWireModelFavorite } from './modelConfigCopy';
 import type { FavoriteStore } from './useRemoteModelFavorites';
 
 export { parseProviderShareFavoriteSource, providerShareFavoriteSource };
@@ -116,7 +117,8 @@ export function useProviderShareFavorites(
       ? home.store.get(uid)
       : accessHostModelFavorites(owner.dataOwnerId).find((item) => item.uid === uid);
     if (!item || item.providerId !== source) throw new Error('Shared favorite unavailable');
-    return item;
+    // A shared provider never offers Antigravity (it runs only on its own computer).
+    return requireWireModelFavorite(item);
   };
   const store: FavoriteStore = {
     get: (uid) => {
@@ -127,7 +129,7 @@ export function useProviderShareFavorites(
       assertCurrent();
       if (config.providerId !== share!.providerId) throw new Error('Shared provider changed');
       if (home) return home.store.add({ ...config, providerId: source! });
-      accessHostModelFavorites(owner.dataOwnerId, { kind: 'add', item: { ...config, providerId: source! } });
+      accessHostModelFavorites(owner.dataOwnerId, { kind: 'add', item: requireWireModelFavorite({ ...config, providerId: source! }) });
     },
     update: (uid, patch) => {
       const before = expected(uid);

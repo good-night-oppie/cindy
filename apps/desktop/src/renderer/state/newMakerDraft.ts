@@ -1094,20 +1094,24 @@ export function applyAppDefaultModelSelection(selection: AppDefaultModelSelectio
   const stored = readStoredDraftRecord();
   const base = stored ? sanitize(stored) : currentDraft;
   const prefs = base.lastByVendor[base.vendor];
-  // agy 不参与默认路由(worker/bot/远程草稿都只认三种既有引擎):没有可比对的 route。
-  const current: BotModelRoute | null = prefs.model && base.vendor !== 'agy' ? {
+  // Same shape as the route App.tsx mirrors to the host (syncNewMakerPrefs), including for
+  // Antigravity: no Fast mode there, and never a route on another computer.
+  const current: BotModelRoute | null = prefs.model && !(base.vendor === 'agy' && base.agentDeviceId) ? {
     harness: base.vendor === 'cc' || base.vendor === 'orca' ? 'claude' : base.vendor,
     model: prefs.model, providerId: prefs.providerId ?? null, effort: prefs.effort ?? '',
-    fastMode: (base.fastModeByModel[prefs.model] ?? false),
+    fastMode: base.vendor === 'agy' ? false : (base.fastModeByModel[prefs.model] ?? false),
   } : null;
   if (!sameModelRoute(current, selection.expectedRoute) && !sameModelRoute(current, selection.route)) return false;
   const route = selection.route;
+  // Antigravity runs only on this computer; a default on another computer is not applied.
+  if (route.harness === 'agy' && (route.agentDeviceId || base.agentDeviceId)) return false;
   const vendor = route.harness === 'claude' ? 'cc' : route.harness;
   const next: NewMakerDraft = { ...base, vendor,
     defaultTupleCustomized: true, defaultTupleSelectionCustomized: true,
     modelChosenByVendor: { ...base.modelChosenByVendor, [vendor]: true },
-    lastByVendor: { ...base.lastByVendor, [vendor]: { ...base.lastByVendor[vendor],
-      model: route.model, providerId: route.providerId, effort: route.effort as Effort } },
+    // Choosing Antigravity as the default never carries Full access into new tasks.
+    lastByVendor: { ...base.lastByVendor, [vendor]: withoutAgyFullAccessDefault({ ...base.lastByVendor[vendor],
+      model: route.model, providerId: route.providerId, effort: route.effort as Effort }, vendor) },
     effortByModel: { ...base.effortByModel, [route.model]: route.effort as Effort },
     fastModeByModel: { ...base.fastModeByModel, [route.model]: route.fastMode },
   };

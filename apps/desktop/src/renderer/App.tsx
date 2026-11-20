@@ -173,15 +173,18 @@ function syncNewMakerPrefs(appDefaultModelRequestId?: string) {
   window.electronAPI.syncNewMakerDraft({
     ...(appDefaultModelRequestId ? { appDefaultModelRequestId } : {}),
     ownerStamp: { dataOwnerId: owner.dataOwnerId, ownerGeneration: owner.generation },
-    // agy 草稿不进入 worker / bot / 远程草稿的默认路由 —— 那三处只认三种既有引擎。
-    ...(draft.vendor === 'agy' ? {} : {
+    // Antigravity is a new-task default like the other engines, but only for this computer:
+    // with the Agent on another computer there is no default route (the host falls back to
+    // "no selection" instead of another engine). The per-engine slots below stay three-engine
+    // because they feed Workers and the remote draft mirror, which Antigravity is not part of.
+    ...(draft.vendor === 'agy' && (draft.agentDeviceId || !selected.model) ? {} : {
       selectedRoute: {
         ...(draft.agentDeviceId ? { agentDeviceId: draft.agentDeviceId } : {}),
         harness: draft.vendor === 'cc' || draft.vendor === 'orca' ? 'claude' : draft.vendor,
         providerId: selected.providerId ?? null,
         model: selected.model,
         effort: selected.effort ?? '',
-        fastMode: (draft.fastModeByModel[selected.model] ?? false),
+        fastMode: draft.vendor === 'agy' ? false : (draft.fastModeByModel[selected.model] ?? false),
       },
     }),
     lastByVendor: {

@@ -93,11 +93,12 @@ export interface UsageHistoryDay {
 }
 
 function usageAgentKind(value: string): UsageHistoryModel['agentKind'] {
-  return value === 'codex' || value === 'pi' || value === 'media' ? value : 'claude-code';
+  // Antigravity keeps its own identity: never folded into Claude Code.
+  return value === 'codex' || value === 'pi' || value === 'media' || value === 'agy' ? value : 'claude-code';
 }
 
 export interface UsageHistoryModel {
-  agentKind: 'claude-code' | 'codex' | 'pi' | 'media';
+  agentKind: 'claude-code' | 'codex' | 'pi' | 'agy' | 'media';
   model: string;
   /** SDK 实报美元 (Claude); Codex 恒 0。 */
   money: RegionalMoney;
@@ -112,7 +113,7 @@ export interface UsageHistoryModel {
 /** 每日 × 模型的一行明细 — 右栏堆叠柱状图的分段数据。 */
 export interface UsageHistoryModelDay {
   day: string;
-  agentKind: 'claude-code' | 'codex' | 'pi' | 'media';
+  agentKind: 'claude-code' | 'codex' | 'pi' | 'agy' | 'media';
   model: string;
   /** 可比金额: Claude 实报 $; Codex 为价格表估算 (无价格 → 0, 只出现在图例 token 行)。 */
   money: RegionalMoney;
@@ -529,13 +530,14 @@ export function piSubscriptionUsageModelKey(model: string): string {
  * 各级都 miss → undefined(该行只显示 token,不臆造金额)。
  */
 export function getSubscriptionValuePriceFor(
-  agentKind: 'claude-code' | 'codex' | 'pi' | 'media',
+  agentKind: 'claude-code' | 'codex' | 'pi' | 'agy' | 'media',
   model: string,
   pricing: ModelPricingMap | null,
   at?: string | Date,
   overrides?: ModelPriceOverridesSnapshot,
 ): ModelPriceQuote | undefined {
-  if (agentKind === 'media') return undefined;
+  // No reference price exists for Antigravity (Google Gemini subscription): tokens only.
+  if (agentKind === 'media' || agentKind === 'agy') return undefined;
   if (agentKind === 'codex') {
     return (
       getSubscriptionDirectValuePrice(model, 'codex', pricing, at, overrides) ??
@@ -798,7 +800,7 @@ export async function readUsageHistoryWith(
     isSubscriptionUsageModel(r.model) &&
     r.money.kind !== 'value-estimate' &&
     !getSubscriptionValuePriceFor(
-      r.agentKind === 'codex' ? 'codex' : r.agentKind === 'pi' ? 'pi' : 'claude-code',
+      usageAgentKind(r.agentKind),
       displayModelName(r.model),
       pricing,
       r.day,

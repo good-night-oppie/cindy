@@ -19,12 +19,20 @@ export function configureAppDefaultModelSelection(dispatch: typeof dispatchSelec
 /** Validate exactly the requested model; recommendations belong to default
  * selection, never to admission of an explicit task or teammate route. */
 function resolveAvailableLocalRoute(
-  args: Parameters<typeof resolveNewMakerDefaultTuple>[0] & { preferredRoute?: BotModelRoute | null },
+  args: Parameters<typeof resolveNewMakerDefaultTuple>[0] & { preferredRoute?: BotModelRoute | null; agyAvailable?: boolean },
 ): BotModelRoute | null {
   const preferred = args.preferredRoute;
   // Remote routes are validated against their own authorized catalog below.
-  // Antigravity is not an app-default engine yet; fall back to the ordinary default.
-  if (!preferred || preferred.harness === 'agy' || preferred.agentDeviceId || args.providersLoading || !args.availableAgentsLoaded) return null;
+  if (!preferred || preferred.agentDeviceId || args.providersLoading || !args.availableAgentsLoaded) return null;
+  if (preferred.harness === 'agy') {
+    // Antigravity has no provider route and runs only on this computer: the route is usable
+    // when the engine is installed, the Google Gemini subscription is connected here and the
+    // CLI still reports the model. Its only source is that built-in subscription.
+    if (!args.agyAvailable || (preferred.providerId && preferred.providerId !== ANTIGRAVITY_PROVIDER_ID)) return null;
+    const source = args.providers.find(p => p.id === ANTIGRAVITY_PROVIDER_ID && p.connected && !p.suspended);
+    return source && (source.models.agy ?? []).some(model => model.id === preferred.model)
+      ? { ...preferred, providerId: source.id, fastMode: false } : null;
+  }
   const agent = preferred.harness === 'claude' ? 'claude-code' : preferred.harness;
   if (!args.availableAgents.has(agent === 'claude-code' ? 'cc' : agent)) return null;
   const providers = args.providers.filter(p => p.connected && !p.suspended && !p.modelDiscoveryFailure)
@@ -38,15 +46,17 @@ function resolveAvailableLocalRoute(
 export function availableAppDefaultModels(input: {
   providers: readonly ProviderView[];
   currentRoute?: BotModelRoute | null;
-  tuning?: (agent: 'claude-code' | 'codex' | 'pi', providerId: string, model: string) => { effort?: string; fastMode?: boolean | 'ultrafast' };
+  tuning?: (agent: 'claude-code' | 'codex' | 'pi' | 'agy', providerId: string, model: string) => { effort?: string; fastMode?: boolean | 'ultrafast' };
   availableAgents: ReadonlySet<'cc' | 'codex' | 'pi'>;
+  /** The Antigravity engine is installed on this computer. Its models exist only under the Google Gemini subscription. */
+  agyAvailable?: boolean;
   enabled: NonNullable<Parameters<typeof resolveAvailableLocalRoute>[0]['isModelEnabled']>;
 }) {
   const current = resolveAvailableLocalRoute({ providers: input.providers, providersLoading: false,
-    availableAgents: input.availableAgents, availableAgentsLoaded: true,
+    availableAgents: input.availableAgents, availableAgentsLoaded: true, agyAvailable: input.agyAvailable,
     preferredRoute: input.currentRoute ?? undefined, isModelEnabled: input.enabled });
-  return input.providers.flatMap(provider => (['claude-code', 'codex', 'pi'] as const).flatMap(agent =>
-    (provider.models[agent] ?? []).flatMap(model => {
+  return input.providers.flatMap(provider => (['claude-code', 'codex', 'pi', 'agy'] as const).flatMap(agent =>
+    (agent === 'agy' && provider.id !== ANTIGRAVITY_PROVIDER_ID ? [] : provider.models[agent] ?? []).flatMap(model => {
       const remembered = input.tuning?.(agent, provider.id, model.id);
       const route: BotModelRoute = { harness: agent === 'claude-code' ? 'claude' : agent,
         providerId: provider.id, model: model.id,
@@ -62,7 +72,7 @@ export function availableAppDefaultModels(input: {
         ? remembered.effort : (model.defaultEffort && model.efforts.includes(model.defaultEffort) ? model.defaultEffort : '');
       if (remembered?.fastMode !== undefined) route.fastMode = model.supportsFastMode === true && remembered.fastMode;
       const valid = resolveAvailableLocalRoute({ providers: input.providers, providersLoading: false,
-        availableAgents: input.availableAgents, availableAgentsLoaded: true,
+        availableAgents: input.availableAgents, availableAgentsLoaded: true, agyAvailable: input.agyAvailable,
         preferredRoute: route, isModelEnabled: input.enabled });
       return valid ? [{ id: JSON.stringify([route.harness, route.providerId, route.model]),
         route, efforts: model.efforts, supportsFastMode: model.supportsFastMode === true,
@@ -84,6 +94,7 @@ async function readSelection() {
   const inputs = { providers, currentRoute: current,
     tuning: (agent, providerId, model) => getNewMakerModelTuning(owner, agent, providerId, model),
     availableAgents: new Set((getMakerIfReady()?.listAvailableAgents() ?? []).filter(agent => agent !== 'agy').map(agent => agent === 'claude-code' ? 'cc' : agent)),
+    agyAvailable: (getMakerIfReady()?.listAvailableAgents() ?? []).includes('agy'),
     enabled: (agent, providerId, model) => isModelVisible(getModelVisibilityOverride(agent, providerId, model.id), model.defaultEnabled),
   } satisfies Parameters<typeof availableAppDefaultModels>[0];
   const available = availableAppDefaultModels(inputs);
@@ -151,7 +162,7 @@ export async function resolveAvailableTaskModels(routes: readonly BotModelRoute[
         ? { ...route, providerId: source.id, effort: '', fastMode: false } : null;
     }
     const resolved = resolveAvailableLocalRoute({ providers: inputs.providers, providersLoading: false,
-      availableAgents: inputs.availableAgents, availableAgentsLoaded: true,
+      availableAgents: inputs.availableAgents, availableAgentsLoaded: true, agyAvailable: inputs.agyAvailable,
       preferredRoute: route, isModelEnabled: inputs.enabled });
     if (!resolved) return null;
     const entry = available.find(item => item.route.harness === resolved.harness

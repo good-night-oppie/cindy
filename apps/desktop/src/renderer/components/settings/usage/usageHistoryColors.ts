@@ -30,7 +30,13 @@ export function usageHistoryAgentColor(agentKind: UsageAgentKind): string {
     'claude-code': 'var(--engine-badge-cc)',
     codex: 'var(--engine-badge-codex)',
     pi: MODEL_COLORS[0],
+    agy: MODEL_COLORS[1 % MODEL_COLORS.length],
     media: 'var(--text-secondary)',
   };
   return colors[agentKind];
+}
+
+/** Name shown for an engine in the usage tables. The older engines keep their identifiers; Antigravity shows its product name. */
+export function usageHistoryAgentLabel(agentKind: UsageAgentKind): string {
+  return agentKind === 'agy' ? 'Antigravity' : agentKind;
 }

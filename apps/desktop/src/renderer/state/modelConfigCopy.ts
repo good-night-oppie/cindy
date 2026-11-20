@@ -98,3 +98,14 @@ export function modelConfigCopyIdentity(config: ModelConfigCopy): string {
     config.fast === undefined ? '0' : config.fast === 'ultrafast' ? 'ultrafast' : '1',
   ].join(' ');
 }
+
+/**
+ * Refuses an Antigravity entry where a favorite would be sent to another device or a shared
+ * provider: the device-link wire knows three engines and Antigravity runs only on this computer.
+ */
+export function requireWireModelFavorite<T extends { agent: ModelEngine }>(
+  item: T,
+): T & { agent: Exclude<ModelEngine, 'agy'> } {
+  if (item.agent === 'agy') throw new Error('Antigravity favorites stay on this computer');
+  return item as T & { agent: Exclude<ModelEngine, 'agy'> };
+}

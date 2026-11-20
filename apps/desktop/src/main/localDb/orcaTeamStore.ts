@@ -20,7 +20,7 @@ const log = createLogger('orca-team-store');
 
 export type OrcaRole = 'lead' | 'worker';
 export type OrcaTeamStatus = 'active' | 'completed' | 'cancelled' | 'failed';
-export type MakerAgentKind = 'claude-code' | 'codex' | 'pi';
+export type MakerAgentKind = 'claude-code' | 'codex' | 'pi' | 'agy';
 
 // Worker 状态枚举与 "占用槽位" 判定下沉到 renderer-safe 模块,
 // 让 main (本文件) 与 renderer (useWorkers) 共享同一份算法, 避免 F6 那种
@@ -991,7 +991,8 @@ export async function getRemoteWorkerByProxySession(proxySessionId: string): Pro
 }
 
 function fromDbAgentKind(agentKind: string): MakerAgentKind {
-  return agentKind === 'codex' || agentKind === 'pi' ? agentKind : 'claude-code';
+  // An Antigravity task keeps its identity; it is never reported as Claude Code.
+  return agentKind === 'codex' || agentKind === 'pi' || agentKind === 'agy' ? agentKind : 'claude-code';
 }
 
 function msToIso(ms: number | null | undefined): string | null {
