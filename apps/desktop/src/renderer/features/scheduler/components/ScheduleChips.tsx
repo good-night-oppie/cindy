@@ -1104,7 +1104,7 @@ export function ModelEffortChip({
     },
     [disabled, discovery],
   );
-  const pickerAgents = useModelPickerAgents(agentKind, agentDeviceId || undefined);
+  const pickerAgents = useModelPickerAgents(agentKind, agentDeviceId || undefined, { agy: true });
   const caps = useAgentCapabilities(agentKind, agentDeviceId || undefined);
   // 触发器(trigger)展示用:仍按 openai-codex/ 与 codex/ 折扣模型的 XD 网关来源可见性过滤,算出当前
   // 选中模型名。下拉内容本体改用聊天的 ModelSelectorContent(它内部按来源/api-key 自行
