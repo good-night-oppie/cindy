@@ -4614,7 +4614,9 @@ export function ModelSelector({
         ? t('newChat.modelSelector.trigger.agent.claudeCode')
         : agentIdentity.vendorKey === 'pi'
           ? t('newChat.modelSelector.trigger.agent.pi')
-          : t('newChat.modelSelector.trigger.agent.codex')
+          : agentIdentity.vendorKey === 'agy'
+            ? 'Antigravity'
+            : t('newChat.modelSelector.trigger.agent.codex')
       : null;
   const baseDisplayIdentityLabel = agentName
     ? `${agentName} · ${displayLabel}`
@@ -4772,7 +4774,7 @@ export function ModelSelector({
     const model = findCatalogModel(provider, selection.model, selection.agentKind);
     const selectionKey = JSON.stringify([deviceId ?? null, selection.providerId, selection.agentKind, selection.model]);
     const name = selectionKey === labelKey ? localizedName : model?.name ? localizedModelName(model.name, t) : undefined;
-    const vendor = selection.agentKind === 'claude-code' ? 'Claude Code' : selection.agentKind === 'pi' ? 'Pi' : 'Codex';
+    const vendor = selection.agentKind === 'claude-code' ? 'Claude Code' : selection.agentKind === 'pi' ? 'Pi' : selection.agentKind === 'agy' ? 'Antigravity' : 'Codex';
     return [vendor, name ?? t('newChat.modelSelector.trigger.placeholder'), provider ? providerDisplayName(provider, t) : selection.providerId,
       selection.effort ? modelEffortLabel(t, model, selection.effort) : null,
       selection.fastMode ? t(selection.fastMode === 'ultrafast' ? 'newChat.modelSelector.speed.ultrafast' : 'newChat.modelSelector.meta.fastBadge') : null].filter(Boolean).join(' · ');
