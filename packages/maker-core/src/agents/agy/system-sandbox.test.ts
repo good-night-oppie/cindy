@@ -509,3 +509,19 @@ describe('buildAgyFullAccessLaunch (Full access = no isolation, like the other e
     expect(launch.env.AUTH_X).toBe('tok');
   });
 });
+
+
+describe('pastaNetArgs host loopback forwarding', () => {
+  it('forwards no host loopback port unless one is named', () => {
+    const args = pastaNetArgs(null);
+    expect(args[args.indexOf('-T') + 1]).toBe('none');
+  });
+  it('forwards exactly the named ports and drops invalid ones', () => {
+    const args = pastaNetArgs(null, true, [41234, 41234, 0, 70000, 1.5]);
+    expect(args[args.indexOf('-T') + 1]).toBe('41234');
+    // Inbound forwards and UDP stay closed.
+    expect(args[args.indexOf('-t') + 1]).toBe('none');
+    expect(args[args.indexOf('-U') + 1]).toBe('none');
+    expect(args[args.indexOf('-u') + 1]).toBe('none');
+  });
+});

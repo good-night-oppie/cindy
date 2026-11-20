@@ -95,8 +95,11 @@ const DEFAULT_IP_CANDIDATES = ['/usr/sbin/ip', '/sbin/ip', '/usr/bin/ip', '/bin/
  * MCP ports. DNS goes to a fixed in-sandbox address forwarded to one upstream.
  */
 export const AGY_SANDBOX_DNS_ADDR = '169.254.1.53';
-export function pastaNetArgs(dnsHost: string | null, supportsDnsHost = true): string[] {
-  const a = ['--config-net', '--quiet', '--no-map-gw', '-t', 'none', '-u', 'none', '-T', 'none', '-U', 'none'];
+export function pastaNetArgs(dnsHost: string | null, supportsDnsHost = true, hostLoopbackPorts: readonly number[] = []): string[] {
+  // -T forwards a loopback TCP port inside the sandbox to the same port on the host's loopback.
+  // The only ports ever listed are Cindy's own tool bridge (see AgySandboxLaunchInput).
+  const ports = [...new Set(hostLoopbackPorts)].filter(port => Number.isInteger(port) && port > 0 && port < 65536);
+  const a = ['--config-net', '--quiet', '--no-map-gw', '-t', 'none', '-u', 'none', '-T', ports.length ? ports.join(',') : 'none', '-U', 'none'];
   if (dnsHost) {
     a.push('--dns-forward', AGY_SANDBOX_DNS_ADDR);
     // Older pasta (e.g. the 2024-02 build Ubuntu 24.04 ships) has no --dns-host and exits with
@@ -324,6 +327,13 @@ export interface AgySandboxLaunchInput {
   shareCliLogin?: boolean;
   /** File mounted as the sandbox's /etc/resolv.conf (points at AGY_SANDBOX_DNS_ADDR). */
   resolvConfPath?: string;
+  /**
+   * Owner request 2026-11-19 (cindy#1): the sandboxed CLI may reach Cindy's tool bridge, as Codex
+   * can. Exactly these host loopback TCP ports are forwarded; every other host loopback port stays
+   * unreachable. The bridge checks a per-task token on every request, so the port alone grants
+   * nothing. Callers pass only the bridge's own port.
+   */
+  hostLoopbackPorts?: readonly number[];
   /** Ids agy runs as inside the sandbox; default: the caller's. */
   uid?: number;
   gid?: number;
@@ -472,7 +482,7 @@ export function buildAgySandboxLaunch(input: AgySandboxLaunchInput): AgySandboxL
 
   const login = input.login ?? { kind: 'private-state' };
   const loginEnv = login.kind === 'api-key' ? login.env : {};
-  const pastaArgs = [...pastaNetArgs(input.dnsHost, input.pastaSupportsDnsHost !== false), '--', ...agyNetGuardCommand(input.ipPath), input.bwrapPath, ...a];
+  const pastaArgs = [...pastaNetArgs(input.dnsHost, input.pastaSupportsDnsHost !== false, input.hostLoopbackPorts), '--', ...agyNetGuardCommand(input.ipPath), input.bwrapPath, ...a];
   // bwrap dies with its parent, but its parent is pasta, and pasta outlives a Cindy that is
   // killed or crashes: the sandboxed agy then keeps running with nobody attached. The parent
   // death signal ends pasta with Cindy, and bwrap follows.

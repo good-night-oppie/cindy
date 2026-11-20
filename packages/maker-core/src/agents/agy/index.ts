@@ -115,6 +115,18 @@ export interface AgyAgentDeps extends AgentDeps {
   uiLocale?: () => string | null | undefined;
 }
 
+/** Loopback ports of Cindy's tool bridge, read from the server URLs handed to agy. */
+function bridgeLoopbackPorts(servers: readonly { url: string }[]): number[] {
+  const ports = new Set<number>();
+  for (const server of servers) {
+    try {
+      const url = new URL(server.url);
+      if ((url.hostname === '127.0.0.1' || url.hostname === 'localhost') && url.port) ports.add(Number(url.port));
+    } catch { /* not a URL: nothing to forward */ }
+  }
+  return [...ports];
+}
+
 export class AgyAgent extends BaseAgent {
   readonly kind = 'agy' as const;
   readonly capabilities: Capabilities = {
@@ -571,9 +583,9 @@ export class AgyAgent extends BaseAgent {
         throw new Error('agy ACP cannot enforce additional directory grants or a read-only Library root');
       }
       if (opts.reviewMode) throw new Error('agy ACP does not support the restricted Reviewer runtime');
-      // A teammate needs Cindy's tools to answer where it was asked; the sandbox closes them.
+      // A teammate works in its own folders under the home directory, which the sandbox hides.
       if (opts.botRuntimeProfile && directoryGrantsEnforced) {
-        throw new Error('agy teammates need Cindy tools, which the Linux sandbox blocks; use Full access');
+        throw new Error('agy teammates cannot reach their own folders inside the Linux sandbox yet; use Full access');
       }
       if (opts.remoteHostId || opts.deviceHosted) throw new Error('agy currently runs only on the task host computer');
       if (!path.isAbsolute(opts.workingDir)) throw new Error('agy ACP requires an absolute working directory');
@@ -601,9 +613,9 @@ export class AgyAgent extends BaseAgent {
         emit({ type: 'error', data: { message: agyNoSystemIsolationText(this.deps.uiLocale), isTerminal: false } });
       }
       // Cindy's own tools (memory, helper, plugins...) are served by the host's loopback MCP
-      // bridge, the same per-session bridge Pi uses. The Linux sandbox closes host loopback on
-      // purpose, so there the tools are only reachable in Full access; elsewhere always.
-      if (this.deps.preparePiExtraSpawnConfig && (!useSandbox || fullAccessLaunch)) {
+      // bridge, the same per-session bridge Pi uses. Inside the Linux sandbox only the bridge's
+      // own port is forwarded (see hostLoopbackPorts); the rest of host loopback stays closed.
+      if (this.deps.preparePiExtraSpawnConfig) {
         try {
           const extra = await this.deps.preparePiExtraSpawnConfig(this.deps.mcpProviders ?? [], {
             agentKind: 'agy',
@@ -641,6 +653,7 @@ export class AgyAgent extends BaseAgent {
           shareCliLogin: this.deps.agySandbox?.shareCliLogin === true })
         : useSandbox
         ? await prepareAgySandboxedLaunch({ binaryPath: this.deps.binaryPath, args: acpArgs, taskDir: agyWorkingDir,
+          hostLoopbackPorts: bridgeLoopbackPorts(mcpServers),
           homeDir: os.homedir(), stateRoot: sandboxStateRoot, env, passEnvKeys: Object.keys(authEnv), probe: this.deps.agySandbox?.probe,
           shareCliLogin: this.deps.agySandbox?.shareCliLogin === true })
         : { command: this.deps.binaryPath, args: acpArgs,
