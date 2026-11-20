@@ -88,7 +88,7 @@ function onceCron(at: number, timezone: string): string | null {
  * provider to be named there; without one it cannot be kept (null), never silently run here.
  */
 export function automationModelFields(choice: {
-  agentKind: 'claude-code' | 'codex' | 'pi'; model: string; providerId?: string | null;
+  agentKind: 'claude-code' | 'codex' | 'pi' | 'agy'; model: string; providerId?: string | null;
   effort?: string | null; fastMode?: boolean | 'ultrafast'; agentDeviceId?: string | null;
 }): Partial<ProjectScheduleConfig> | null {
   const fields: Partial<ProjectScheduleConfig> = {
@@ -107,8 +107,6 @@ export function automationModelFields(choice: {
 
 /** The teammate's model route as an automation model (null: a remote route that cannot be kept). */
 export function routeModelFields(route: BotModelRoute): Partial<ProjectScheduleConfig> | null {
-  // Automations do not run on Antigravity yet.
-  if (route.harness === 'agy') return null;
   return automationModelFields({
     agentKind: route.harness === 'claude' ? 'claude-code' : route.harness,
     model: route.model, providerId: route.providerId, effort: route.effort,
