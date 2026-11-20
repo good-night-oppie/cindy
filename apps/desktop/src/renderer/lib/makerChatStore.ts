@@ -16757,6 +16757,8 @@ async function resendBlockedMessage(
 
 function steerQueuedMessage(sessionId: string, clientId: string): Promise<boolean> {
   if (!sessionId || !clientId) return Promise.resolve(false);
+  // No same-turn steer on Antigravity: the row stays queued and is sent when the reply ends.
+  if (getOrCreateState(sessionId).agentKind === 'agy') return Promise.resolve(false);
   // Capture the target before entering the dispatch coordinator. A relay
   // reconnect may clear remoteProjectsStore while the coordinator is waiting;
   // retrying through makerApiFor(sessionId) in that window would address the
