@@ -99,6 +99,7 @@ function defaultScheduleFormPrefs(): ScheduleFormPrefs {
     lastByAgent: {
       'claude-code': EMPTY_AGENT_PREFS,
       codex: EMPTY_AGENT_PREFS,
+      agy: EMPTY_AGENT_PREFS,
       pi: EMPTY_AGENT_PREFS,
     },
   };
@@ -110,7 +111,7 @@ function loadScheduleFormPrefs(): ScheduleFormPrefs {
     const raw = window.localStorage.getItem(SCHEDULE_FORM_PREFS_KEY);
     if (!raw) return defaultScheduleFormPrefs();
     const parsed = JSON.parse(raw) as Partial<ScheduleFormPrefs>;
-    const agentKind = parsed.agentKind === 'codex' ? 'codex' : parsed.agentKind === 'pi' ? 'pi' : 'claude-code';
+    const agentKind = parsed.agentKind === 'codex' ? 'codex' : parsed.agentKind === 'pi' ? 'pi' : parsed.agentKind === 'agy' ? 'agy' : 'claude-code';
     const workingDir = typeof parsed.workingDir === 'string' ? parsed.workingDir : '';
     const workspaceKind = normalizePrefsWorkspaceKind(parsed.workspaceKind, workingDir);
     return {
@@ -121,6 +122,7 @@ function loadScheduleFormPrefs(): ScheduleFormPrefs {
       lastByAgent: {
         'claude-code': sanitizeAgentPrefs(parsed.lastByAgent?.['claude-code']),
         codex: sanitizeAgentPrefs(parsed.lastByAgent?.codex),
+        agy: sanitizeAgentPrefs(parsed.lastByAgent?.agy),
         pi: sanitizeAgentPrefs(parsed.lastByAgent?.pi),
       },
     };
@@ -463,8 +465,6 @@ export function useScheduleForm(initial: Schedule | null = null): UseScheduleFor
         // remembered 保留旧快照 —— 用户切走再切回还能还原上一个真实绑定。
         return { ...f, targetSessionId: PENDING_SESSION_ID };
       }
-      // 定时任务不支持 agy:不绑定,保持原状态(不回落成 Claude)。
-      if (session.agentKind === 'agy') return f;
       const next: ScheduleFormState = {
         ...f,
         targetSessionId: session.id,
