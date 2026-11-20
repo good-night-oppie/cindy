@@ -1,3 +1,4 @@
+import { ANTIGRAVITY_PROVIDER_ID } from '@cindy/model-providers';
 import { randomUUID } from 'node:crypto';
 import { effectiveSourceIdForModel, isModelVisible, isModelSelectableForNewRoute, type ProviderView } from '@cindy/model-providers';
 import type { resolveNewMakerDefaultTuple } from '../../shared/newMakerDefaultTuple.js';
@@ -142,6 +143,13 @@ export async function resolveAvailableTaskModels(routes: readonly BotModelRoute[
     }
     if (!local) return null;
     const { available, inputs } = local;
+    if (route.harness === 'agy') {
+      // Antigravity is not in the app-default list; it is valid when the Google Gemini
+      // subscription is connected on this computer and still reports the model.
+      const source = inputs.providers.find(p => p.id === ANTIGRAVITY_PROVIDER_ID && p.connected && !p.suspended);
+      return source && (source.models.agy ?? []).some(model => model.id === route.model)
+        ? { ...route, providerId: source.id, effort: '', fastMode: false } : null;
+    }
     const resolved = resolveAvailableLocalRoute({ providers: inputs.providers, providersLoading: false,
       availableAgents: inputs.availableAgents, availableAgentsLoaded: true,
       preferredRoute: route, isModelEnabled: inputs.enabled });
