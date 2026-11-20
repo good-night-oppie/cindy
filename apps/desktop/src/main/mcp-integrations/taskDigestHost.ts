@@ -64,7 +64,7 @@ function routeFromProfile(profile: RuntimeLike['effectiveProfile']): TaskDigestR
   if (!profile || typeof profile.model !== 'string' || !profile.model) return null;
   const kind = profile.agentKind;
   return {
-    harness: kind === 'codex' || kind === 'pi' ? kind : 'claude-code',
+    harness: kind === 'codex' || kind === 'pi' || kind === 'agy' ? kind : 'claude-code',
     model: profile.model,
     provider_id: typeof profile.providerId === 'string' ? profile.providerId : null,
     effort: typeof profile.effort === 'string' ? profile.effort : null,

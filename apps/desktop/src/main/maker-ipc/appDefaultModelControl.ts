@@ -22,7 +22,8 @@ function resolveAvailableLocalRoute(
 ): BotModelRoute | null {
   const preferred = args.preferredRoute;
   // Remote routes are validated against their own authorized catalog below.
-  if (!preferred || preferred.agentDeviceId || args.providersLoading || !args.availableAgentsLoaded) return null;
+  // Antigravity is not an app-default engine yet; fall back to the ordinary default.
+  if (!preferred || preferred.harness === 'agy' || preferred.agentDeviceId || args.providersLoading || !args.availableAgentsLoaded) return null;
   const agent = preferred.harness === 'claude' ? 'claude-code' : preferred.harness;
   if (!args.availableAgents.has(agent === 'claude-code' ? 'cc' : agent)) return null;
   const providers = args.providers.filter(p => p.connected && !p.suspended && !p.modelDiscoveryFailure)

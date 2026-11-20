@@ -16,15 +16,17 @@ import {
 } from '../../../shared/botModelChain';
 import { useBotTranslation } from './botPronounContext';
 
-function vendorFor(harness: BotHarness): 'cc' | 'codex' | 'pi' {
+type BotVendor = 'cc' | 'codex' | 'pi' | 'agy';
+
+function vendorFor(harness: BotHarness): BotVendor {
   return harness === 'claude' ? 'cc' : harness;
 }
 
-function harnessFor(vendor: 'cc' | 'codex' | 'pi'): BotHarness {
+function harnessFor(vendor: BotVendor): BotHarness {
   return vendor === 'cc' ? 'claude' : vendor;
 }
 
-function agentKindFor(vendor: 'cc' | 'codex' | 'pi'): AgentKind {
+function agentKindFor(vendor: BotVendor): AgentKind {
   return vendor === 'cc' ? 'claude-code' : vendor;
 }
 
@@ -71,8 +73,9 @@ export function BotModelChainEditor({
   const onChange = (next: BotModelRoute[]) => {
     if (!disabled) onValueChange(next);
   };
-  const visibleVendors = (['pi', 'codex', 'cc'] as const)
-    .filter((vendor) => !hiddenVendors.includes(vendor));
+  // Antigravity runs only on this computer, through the CLI signed in here.
+  const visibleVendors = (['pi', 'codex', 'cc', 'agy'] as const)
+    .filter((vendor) => !hiddenVendors.includes(vendor) && (vendor !== 'agy' || (!remote && !deviceId)));
   const unifiedAgents = visibleVendors.map(agentKindFor);
 
   const replace = (index: number, patch: Partial<BotModelRoute>) => {
@@ -133,8 +136,7 @@ export function BotModelChainEditor({
         unifiedPanel
         unifiedAgents={unifiedAgents}
         onUnifiedSelect={(selection) => {
-          // bot 只认三种既有引擎(agy 不在 visibleVendors 里)。
-          if (selection.engine === 'agy' || !visibleVendors.includes(selection.engine)) return;
+          if (!visibleVendors.includes(selection.engine)) return;
           replace(index, {
             harness: harnessFor(selection.engine),
             ...(route.agentDeviceId || selection.agentDevice ? { agentDeviceId: selection.agentDevice?.deviceId ?? null } : {}),

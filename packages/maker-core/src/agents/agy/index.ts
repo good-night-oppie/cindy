@@ -26,6 +26,7 @@ import {
   BaseAgent, PINNED_SKILL_INVOCATION, AgentNotAuthenticatedError, AgentStartupStoppedError,
   AgentStartupCleanupPendingError, TurnPermissionPolicyUnsupportedError,
   type AgentDeps, type AgentSessionHandle, type StartSessionOptions, type SendOptions,
+  isolatedBotProfile,
 } from '../base-agent.js';
 import { LIBRARY_READ_ROOT } from '../shared/library-native-read.js';
 import { AcpClient, AcpRpcError } from '../acp/client.js';
