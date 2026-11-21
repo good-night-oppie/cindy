@@ -719,7 +719,12 @@ export class AgyAgent extends BaseAgent {
           watchdog.stop();
           if (!loading && !running && !fenced && !closed) {
             fenced = true;
-            emit({ type: 'error', data: { message: 'Antigravity CLI (agy) exited. Reopen this task to resume.', isTerminal: true, reason: 'agy_acp_disconnected' } });
+            // A completed turn already has its terminal event. Report the runtime loss
+            // separately and end the stream after cleanup so the next send can lazy-resume.
+            emit({ type: 'error', data: { message: 'Antigravity CLI (agy) exited while idle. Send another message to resume.', isTerminal: false, reason: 'agy_acp_disconnected' } });
+            void Promise.resolve().then(close).catch(() => {
+              emit({ type: 'error', data: { message: 'agy process stop is not confirmed. Retry closing this task.', isTerminal: false, reason: 'agy_cleanup_pending' } });
+            });
           }
         },
       });

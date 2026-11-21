@@ -4821,7 +4821,7 @@ it.each(['unpublished', 'published'] as const)(
   },
 );
 
-it.runIf(process.platform === 'win32')('recovers the same agy task after its root exits with a live child', async () => {
+it.runIf(process.platform === 'win32').each(['active', 'idle'] as const)('recovers the same agy task after its root exits with a live child while %s', async phase => {
   const folder = mkdtempSync(path.join(tmpdir(), 'cindy-job-'));
   const peer = fileURLToPath(new URL('./agents/acp/windows-job-peer.fixture.mjs', import.meta.url));
   const logger = createLogger();
@@ -4838,17 +4838,20 @@ it.runIf(process.platform === 'win32')('recovers the same agy task after its roo
     const first = await maker.createSession(options);
     const errors = vi.fn();
     first.onEvent(errors);
+    if (phase === 'idle') writeFileSync(path.join(folder, 'complete-first-turn'), '');
     await first.send('first turn');
+    if (phase === 'idle') await vi.waitFor(() => expect(errors).toHaveBeenCalledWith(expect.objectContaining({ type: 'done' })));
     const pidsFile = path.join(folder, 'fixture-pids.json');
     await vi.waitFor(() => fsPromises.access(pidsFile), { timeout: 5000 });
     const [root, child]: number[] = JSON.parse(await fsPromises.readFile(pidsFile, 'utf8'));
     for (const pid of [root, child]) expect(process.kill(pid, 0)).toBe(true);
     writeFileSync(path.join(folder, 'exit-root'), '');
     await vi.waitFor(() => expect(errors).toHaveBeenCalledWith(expect.objectContaining({
-      type: 'error', data: expect.objectContaining({ isTerminal: true, reason: 'agy_acp_disconnected' }),
+      type: 'error', data: expect.objectContaining({ isTerminal: phase === 'active', reason: 'agy_acp_disconnected' }),
     })), { timeout: 10000 });
     await vi.waitFor(() => expect(first.getStatus()).toBe('closed'), { timeout: 5000 });
-    const restored = await maker.createSession(options);
+    expect(maker.getSession(options.id)).toBeUndefined();
+    const restored = maker.getSession(options.id) ?? await maker.createSession(options);
     expect(restored.id).toBe(first.id);
     expect(restored.instanceId).not.toBe(first.instanceId);
     for (const pid of [root, child]) expect(() => process.kill(pid, 0)).toThrow(expect.objectContaining({ code: 'ESRCH' }));

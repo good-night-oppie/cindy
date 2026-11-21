@@ -26,7 +26,7 @@ createInterface({ input: process.stdin }).on('line', line => {
         writeFileSync('fixture-pids.json', JSON.stringify([process.pid, child.pid]));
         // The harness confirms both processes exist before letting only the root exit.
         setInterval(() => { if (existsSync('exit-root')) process.exit(7); }, 20);
-        return;
+        if (!existsSync('complete-first-turn')) return;
       }
       const text = params.prompt.findLast(block => block.type === 'text')?.text;
       output({ method: 'session/update', params: { sessionId, update: {
