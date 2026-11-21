@@ -349,9 +349,10 @@ export class AgyAgent extends BaseAgent {
     const sandboxStateRoot = this.deps.agySandbox?.stateRoot ?? path.join(os.homedir(), '.cindy', 'agy-sandbox', 'state');
     // agy sees the task folder by its real path inside the sandbox; a symlinked workingDir does not exist there.
     const agyWorkingDir = wantsIsolation ? realpathOr(opts.workingDir) : opts.workingDir;
-    const translator = new AgyTranslator(emit, directoryGrantsEnforced ? {
+    const translator = new AgyTranslator(emit, directoryGrantsEnforced || unsandboxedByPlatform ? {
+      isolated: directoryGrantsEnforced,
       taskDir: agyWorkingDir, homeDir: os.homedir(),
-      visibleDirs: agyPrivateStateMounts(sandboxStateRoot, os.homedir()).map(mount => mount.target),
+      visibleDirs: directoryGrantsEnforced ? agyPrivateStateMounts(sandboxStateRoot, os.homedir()).map(mount => mount.target) : [],
       locale: this.deps.uiLocale,
     } : undefined);
     // Host reads / lists / uploads of this folder go through checkAgyTaskPath (cindy#1 QQ 6924350879 item 5).

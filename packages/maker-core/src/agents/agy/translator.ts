@@ -14,12 +14,23 @@ import {
 } from './system-sandbox.js';
 import { AGY_HOST_PATH_USER_COPY, agyCopyLocale, agyWriteOutsideTask } from './host-path-guard.js';
 
-/** Set when agy runs inside Cindy's system isolation (system-sandbox.ts). */
-export interface AgySandboxContext {
+/** File access mode chosen for this launch. */
+interface AgyFileContext {
+  isolated: boolean;
   taskDir: string; homeDir: string; visibleDirs: readonly string[];
   /** UI locale for user notices (JJ wrote zh-CN and en). */
   locale?: () => string | null | undefined;
 }
+
+// Provisional Windows/macOS wording pending JJ approval (cindy#1).
+const hostWriteCopy = {
+  completed: { en: 'Antigravity reported writing outside the task folder on this computer.',
+    'zh-CN': 'Antigravity 报告已写入这台电脑上任务文件夹以外的位置。' },
+  failed: { en: 'Antigravity reported an error while writing outside the task folder on this computer. Check the tool result for details.',
+    'zh-CN': 'Antigravity 在写入这台电脑上任务文件夹以外的位置时报告了错误。详情见工具结果。' },
+  unknownTarget: { en: 'This command may write outside the task folder on this computer. Check the tool result for details.',
+    'zh-CN': '这条命令可能写入这台电脑上任务文件夹以外的位置。详情见工具结果。' },
+};
 
 export class AgyTranslator {
   private tools = new Map<string, AcpRecord>();
@@ -28,7 +39,7 @@ export class AgyTranslator {
 
   private sandboxNotified = new Set<string>();
 
-  constructor(private emit: (event: AgentEvent) => void, private sandbox?: AgySandboxContext) {}
+  constructor(private emit: (event: AgentEvent) => void, private files?: AgyFileContext) {}
 
   beginTurn(): void {
     this.tools.clear();
@@ -75,9 +86,13 @@ export class AgyTranslator {
           // A write-type call aimed outside the task folder: only the target path decides, not agy's
           // completed / failed (cindy#1 QQ 6924350879 item 4). A notice beside the reply, not a block.
           const writeOutside = this.writeOutside(tool);
-          if (writeOutside && !this.sandboxNotified.has(writeOutside)) {
+          if (writeOutside && this.files && !this.files.isolated) {
+            const copy = writeOutside.startsWith('shell: ') ? hostWriteCopy.unknownTarget
+              : tool.status === 'completed' ? hostWriteCopy.completed : hostWriteCopy.failed;
+            event('error', { message: copy[agyCopyLocale(this.files.locale?.())], isTerminal: false, reason: 'agy_host_write_notice' });
+          } else if (writeOutside && !this.sandboxNotified.has(writeOutside)) {
             this.sandboxNotified.add(writeOutside);
-            event('error', { message: AGY_HOST_PATH_USER_COPY.writeOutside[agyCopyLocale(this.sandbox?.locale?.())],
+            event('error', { message: AGY_HOST_PATH_USER_COPY.writeOutside[agyCopyLocale(this.files?.locale?.())],
               isTerminal: false, reason: 'agy_write_outside_task' });
           }
           const denial = tool.status === 'failed' ? this.sandboxDenial(tool, fullText) : null;
@@ -116,16 +131,16 @@ export class AgyTranslator {
   tool(id: unknown): AcpRecord { return typeof id === 'string' ? this.tools.get(id) ?? {} : {}; }
 
   private writeOutside(tool: AcpRecord): string | null {
-    if (!this.sandbox) return null;
-    try { return agyWriteOutsideTask(tool, this.sandbox.taskDir, this.sandbox.homeDir, this.sandbox.visibleDirs); } catch { return null; }
+    if (!this.files) return null;
+    try { return agyWriteOutsideTask(tool, this.files.taskDir, this.files.homeDir, this.files.visibleDirs); } catch { return null; }
   }
 
   private sandboxDenial(tool: AcpRecord, errorText: string): AgySandboxDenial | null {
-    if (!this.sandbox) return null;
+    if (!this.files?.isolated) return null;
     const kind: AgySandboxDenialKind = tool.kind === 'read' || tool.kind === 'search' ? 'read'
       : tool.kind === 'edit' || tool.kind === 'delete' ? 'write' : 'unknown';
-    return detectAgySandboxDenial({ paths: agyToolPaths(tool, this.sandbox.homeDir), errorText,
-      taskDir: this.sandbox.taskDir, visibleDirs: this.sandbox.visibleDirs, kind });
+    return detectAgySandboxDenial({ paths: agyToolPaths(tool, this.files.homeDir), errorText,
+      taskDir: this.files.taskDir, visibleDirs: this.files.visibleDirs, kind });
   }
 }
 

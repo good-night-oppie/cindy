@@ -98,7 +98,7 @@ describe('agy launch goes through the system sandbox', () => {
 });
 
 describe('blocked reads and writes are not silent', () => {
-  const ctx = { taskDir: '/home/u/work/task', homeDir: '/home/u', visibleDirs: ['/home/u/.gemini'] };
+  const ctx = { isolated: true, taskDir: '/home/u/work/task', homeDir: '/home/u', visibleDirs: ['/home/u/.gemini'] };
   const run = (updates: Record<string, unknown>[]) => {
     const events: AgentEvent[] = [];
     const t = new AgyTranslator(e => events.push(e), ctx);
@@ -112,13 +112,14 @@ describe('blocked reads and writes are not silent', () => {
   ];
 
   it('tells the user and the model when a path outside the task folder was blocked', () => {
-    const events = run(failed('1', 'read', { AbsolutePath: '/home/u/.ssh/id_ed25519' }));
+    const target = path.normalize('/home/u/.ssh/id_ed25519');
+    const events = run(failed('1', 'read', { AbsolutePath: target }));
     const notice = events.find(e => e.type === 'error');
     expect(notice?.data).toMatchObject({ isTerminal: false, reason: 'agy_sandbox_blocked' });
-    expect((notice?.data as { message: string }).message).toMatch(/^\[agy_sandbox_blocked\] Antigravity tried to read "\/home\/u\/\.ssh\/id_ed25519"/);
+    expect((notice?.data as { message: string }).message).toContain(`[agy_sandbox_blocked] Antigravity tried to read "${target}"`);
     const result = events.find(e => e.type === 'tool_result_full')?.data as { fullText: string; isError: boolean };
     expect(result.isError).toBe(true);
-    expect(result.fullText).toMatch(/\[Cindy\] \/home\/u\/\.ssh\/id_ed25519 is outside this task's folder/);
+    expect(result.fullText).toContain(`[Cindy] ${target} is outside this task's folder`);
   });
 
   it('finds paths in shell commands and says it once per path per turn', () => {

@@ -351,6 +351,7 @@ describe('AgyAgent turns', () => {
     await handle.send({ type: 'user', content: 'fixture tool results' });
     const outside = joinPath(osTmpdir(), 'outside-task-fixture.txt');
     fake.update('tool_call', { toolCallId: 'write', kind: 'edit', status: 'completed', rawInput: { TargetFile: outside } });
+    fake.update('tool_call', { toolCallId: 'failed-write', kind: 'edit', status: 'failed', rawInput: { TargetFile: outside } });
     fake.update('tool_call', { toolCallId: 'read', kind: 'read', status: 'failed', rawInput: { AbsolutePath: outside },
       content: [{ type: 'content', content: { type: 'text', text: 'No such file or directory' } }] });
     fake.finish();
@@ -358,10 +359,13 @@ describe('AgyAgent turns', () => {
     await handle.close();
     await drained;
     const notices = events.filter(e => e.type === 'error').map(e => e.data);
+    expect(notices).toContainEqual(expect.objectContaining({ reason: 'agy_host_write_notice', message: expect.stringContaining('reported writing outside') }));
+    expect(notices).toContainEqual(expect.objectContaining({ reason: 'agy_host_write_notice', message: expect.stringContaining('reported an error while writing outside') }));
     expect(notices).not.toContainEqual(expect.objectContaining({ reason: 'agy_write_outside_task' }));
     expect(notices).not.toContainEqual(expect.objectContaining({ reason: 'agy_sandbox_blocked' }));
     expect(events.filter(e => e.type === 'tool_result_full').map(e => e.data)).toEqual([
       expect.objectContaining({ toolUseId: 'write', isError: false }),
+      expect.objectContaining({ toolUseId: 'failed-write', isError: true }),
       expect.objectContaining({ toolUseId: 'read', isError: true, fullText: 'No such file or directory' }),
     ]);
   });
