@@ -58,18 +58,33 @@ describe('ACP stdio transport', () => {
     expect(f.transport.getPid?.()).toBe(f.child.pid);
     f.exit(); await f.transport.close(); expect(f.transport.getPid?.()).toBeNull();
   });
-  it('accepts a Windows supervisor receipt after the job drained', async () => {
+  it('launches the Windows ACP binary directly and lets it exit on EOF', async () => {
     const f = fixture({ platformOverride: 'win32' });
+    expect(f.spawnChild).toHaveBeenCalledWith('/fake/cursor/agent', ['acp'], expect.objectContaining({
+      shell: false, detached: false, windowsHide: true,
+    }));
     const closed = f.transport.close();
+    expect(f.child.stdin.writableEnded).toBe(true);
+    expect(f.child.kill).not.toHaveBeenCalled();
     f.exit();
     await closed;
-    await f.transport.close();
+    expect(f.child.kill).not.toHaveBeenCalled();
   });
-  it('releases the transport after an abnormal Windows job owner exit', async () => {
-    const f = fixture({ platformOverride: 'win32' });
-    f.child.exitCode = 1;
-    f.child.emit('exit', 1);
-    await expect(f.transport.close()).resolves.toBeUndefined();
+  it('escalates only the direct Windows process and releases it after observed exit', async () => {
+    vi.useFakeTimers();
+    const f = fixture({ platformOverride: 'win32', shutdownGraceMs: 10, killTimeoutMs: 20 });
+    const closed = f.transport.close();
+    const failed = expect(closed).rejects.toThrow(/exit|SIGKILL/i);
+    expect(f.child.stdin.writableEnded).toBe(true);
+    expect(f.child.kill).not.toHaveBeenCalled();
+    await vi.runAllTimersAsync();
+    await failed;
+    expect(f.child.kill.mock.calls).toEqual([['SIGTERM'], ['SIGKILL']]);
+    expect(process.kill).not.toHaveBeenCalled();
+    expect(f.transport.getPid?.()).toBe(f.child.pid);
+    f.exit();
+    await f.transport.close();
+    expect(f.transport.getPid?.()).toBeNull();
   });
   it('proves failed spawn has no child and propagates stdout EOF', async () => {
     const f = fixture(); Object.assign(f.child, { pid: undefined }); f.child.emit('error', new Error('private path'));

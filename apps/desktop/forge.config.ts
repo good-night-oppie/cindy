@@ -668,19 +668,6 @@ function signPackagedExes(buildPath: string): void {
     }
     signOneExeWithExternalCommand(exe, signCmd);
   }
-  // Verify the installed relative path and publisher on the signed package.
-  // Compare against this build's app signature so certificate rotation still works.
-  const signature = spawnSync('powershell.exe', ['-NoProfile', '-NonInteractive', '-Command', [
-    "$ErrorActionPreference = 'Stop'",
-    "$app = Get-AuthenticodeSignature -LiteralPath $env:CINDY_APP_TO_VERIFY",
-    "$helper = Get-AuthenticodeSignature -LiteralPath $env:CINDY_HELPER_TO_VERIFY",
-    "if (!$app.SignerCertificate -or !$helper.SignerCertificate -or $helper.Status -eq 'HashMismatch' -or $app.SignerCertificate.Thumbprint -ne $helper.SignerCertificate.Thumbprint) { exit 1 }",
-  ].join('; ')], {
-    env: { ...process.env, CINDY_APP_TO_VERIFY: exes[0],
-      CINDY_HELPER_TO_VERIFY: path.join(buildPath, 'resources', 'tools', 'agy', 'cindy-agy-job.exe') },
-    stdio: 'inherit', windowsHide: true,
-  });
-  if (signature.error || signature.status !== 0) throw new Error('Antigravity Windows helper must be signed by the Cindy application publisher');
 }
 
 /**
@@ -2103,9 +2090,6 @@ const config: ForgeConfig = {
         console.log(
           `[forge:prePackage] verified Windows updater app-local Runtime ${runtimeManifest.version} x64`,
         );
-        const helper = spawnSync(process.execPath, [path.join(__dirname, 'native/agy-job/build.mjs'), targetArch],
-          { stdio: 'inherit', windowsHide: true });
-        if (helper.error || helper.status !== 0) throw new Error('Windows Antigravity helper build failed');
         buildCindyUpdater();
       }
       stageRipgrep(targetPlatform, targetArch);

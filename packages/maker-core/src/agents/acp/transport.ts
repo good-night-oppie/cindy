@@ -1,5 +1,4 @@
 import { spawn, type ChildProcessWithoutNullStreams } from 'node:child_process';
-import { windowsAcpLaunch, WINDOWS_HELPER_START_FAILED, WINDOWS_HELPER_STOPPED } from './windows-job.js';
 import { isAbsolute } from 'node:path';
 
 // Ported from makecindy/cindy#5611 (Cursor native ACP, by Ken / kenlinjie), which adapted the
@@ -25,25 +24,21 @@ export interface AcpTransportOptions {
   killTimeoutMs?: number;
   /** Injection is only for process/lifecycle tests; production always supplies AgentDeps.binaryPath. */
   spawnChild?: typeof spawn;
-  windowsJobHelperPath?: string;
   platformOverride?: NodeJS.Platform;
 }
 export function spawnAcpTransport(options: AcpTransportOptions): AcpTransport {
   if (!isAbsolute(options.binaryPath)) throw new Error('ACP binaryPath must be absolute');
   if (!isAbsolute(options.cwd)) throw new Error('ACP cwd must be absolute');
   const maxBytes = options.maxFrameBytes ?? 16 * 1024 * 1024;
-  const grace = options.shutdownGraceMs ?? 1_000;
-  const killWait = options.killTimeoutMs ?? 3_000;
+  const posix = (options.platformOverride ?? process.platform) !== 'win32';
+  const grace = options.shutdownGraceMs ?? (posix ? 1_000 : 1_500);
+  const killWait = options.killTimeoutMs ?? (posix ? 3_000 : 500);
   if (![maxBytes, grace, killWait].every(value => Number.isSafeInteger(value) && value > 0 && value <= 2_147_483_647)) {
     throw new Error('Invalid ACP transport limits');
   }
-  const posix = (options.platformOverride ?? process.platform) !== 'win32';
   const args = options.args ?? ['acp'];
-  const launch = posix
-    ? { binary: options.binaryPath, args, cwd: options.cwd, env: options.env }
-    : windowsAcpLaunch(options.binaryPath, args, options.cwd, options.env ?? process.env, options.windowsJobHelperPath);
-  const child = (options.spawnChild ?? spawn)(launch.binary, [...launch.args], {
-    cwd: launch.cwd, env: launch.env, stdio: ['pipe', 'pipe', 'pipe'], shell: false, detached: posix, windowsHide: true,
+  const child = (options.spawnChild ?? spawn)(options.binaryPath, [...args], {
+    cwd: options.cwd, env: options.env, stdio: ['pipe', 'pipe', 'pipe'], shell: false, detached: posix, windowsHide: true,
   }) as ChildProcessWithoutNullStreams;
   const lines = new Set<(line: string) => void>();
   const closes = new Set<(info: { reason: string }) => void>();
@@ -70,18 +65,27 @@ export function spawnAcpTransport(options: AcpTransportOptions): AcpTransport {
   child.on('error', () => {
     // A failed spawn has no process. Other child errors are not exit evidence.
     if (child.pid === undefined) exited = true;
-    fail(posix ? 'ACP process error' : WINDOWS_HELPER_START_FAILED);
+    fail('ACP process error');
   });
-  child.on('exit', (code) => {
+  let drainTimer: ReturnType<typeof setTimeout> | undefined;
+  child.on('exit', () => {
     exited = true;
-    disconnect(!posix && code !== 0 ? WINDOWS_HELPER_STOPPED : 'ACP process exited');
+    if (posix) { disconnect('ACP process exited'); return; }
+    // Allow the last ACP reply to drain, even if exit arrives before stdout.
+    // A descendant retaining a pipe must not keep a dead Windows task active.
+    drainTimer = setTimeout(() => {
+      disconnect('ACP process exited');
+      child.stdout.destroy();
+      child.stderr.destroy();
+    }, 1_000).unref();
+  });
+  child.on('close', () => {
+    clearTimeout(drainTimer);
+    disconnect('ACP process exited');
   });
   child.stdin.on('error', () => fail('ACP input disconnected'));
   child.stdout.on('error', () => fail('ACP output disconnected'));
-  child.stdout.on('end', () => {
-    if (posix) fail('ACP output ended');
-    else child.stdin.end(); // Let the job owner report its exit status.
-  });
+  child.stdout.on('end', () => fail('ACP output ended'));
   // Drain without logging. Only a short tail is retained in memory so callers can
   // classify startup failures (for example an outdated CLI); callers must redact it.
   child.stderr.on('data', (chunk: Buffer) => { stderrTail = (stderrTail + chunk.toString('utf8')).slice(-2048); });
@@ -126,7 +130,7 @@ export function spawnAcpTransport(options: AcpTransportOptions): AcpTransport {
   }
   const transport: AcpTransport = {
     writeLine(line) {
-      if (reason || !child.stdin.writable) return Promise.reject(new Error('ACP transport closed'));
+      if (reason || exited || !child.stdin.writable) return Promise.reject(new Error('ACP transport closed'));
       if (line.includes('\n') || Buffer.byteLength(line) > maxBytes) return Promise.reject(new Error('Invalid ACP output frame'));
       return new Promise((resolve, reject) => {
         child.stdin.write(`${line}\n`, 'utf8', error => error ? reject(new Error('ACP write failed')) : resolve());
@@ -163,12 +167,12 @@ export function spawnAcpTransport(options: AcpTransportOptions): AcpTransport {
           signalTree('SIGKILL');
           if (!await waitForExit(killWait)) throw new Error('ACP process exit could not be confirmed');
         } else {
-          // The helper alone owns the kill-on-close job and starts every member
-          // atomically in it. Loss of the owner also closes the last job handle.
-          if (!await waitForExit(killWait)) {
-            signalTree('SIGKILL');
-            if (!await waitForExit(killWait)) throw new Error('ACP process tree exit could not be confirmed');
-          }
+          // Match local Codex: EOF, then bounded escalation against the direct child.
+          if (await waitForExit(grace)) return;
+          signalTree('SIGTERM');
+          if (await waitForExit(options.shutdownGraceMs ?? 1_000)) return;
+          signalTree('SIGKILL');
+          if (!await waitForExit(killWait)) throw new Error('ACP process exit could not be confirmed');
         }
       })().catch(error => { closing = undefined; throw error; });
       return closing;

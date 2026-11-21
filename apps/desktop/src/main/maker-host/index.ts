@@ -2087,8 +2087,6 @@ export function getMaker(): Maker {
       return process.platform === 'win32' ? 'agy.exe' : 'agy';
     };
     const agyAgent = new AgyAgent({
-      windowsJobHelperPath: path.join(app.isPackaged ? process.resourcesPath : path.join(app.getAppPath(), 'resources'),
-        'tools', 'agy', 'cindy-agy-job.exe'),
       auth: {
         getState: async () => ({ authenticated: true, identity: 'agy-native', authSource: 'oauth' }),
         triggerLogin: async () => ({ authenticated: true, identity: 'agy-native', authSource: 'oauth' }),

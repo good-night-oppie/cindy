@@ -1,9 +1,8 @@
 import { createInterface } from 'node:readline';
-import { spawn } from 'node:child_process';
 import { existsSync, writeFileSync } from 'node:fs';
 
 const output = frame => process.stdout.write(JSON.stringify({ jsonrpc: '2.0', ...frame }) + '\n');
-const sessionId = 'win-job-test';
+const sessionId = 'win-direct-test';
 const configOptions = [
   { id: 'model', category: 'model', type: 'select', name: 'Model', currentValue: 'fixture-model',
     options: [{ value: 'fixture-model', name: 'Fixture' }] },
@@ -21,13 +20,8 @@ createInterface({ input: process.stdin }).on('line', line => {
     case 'session/set_config_option':
       return reply({ sessionId, configOptions });
     case 'session/prompt': {
-      if (!existsSync('exit-root')) {
-        const child = spawn(process.execPath, ['-e', 'setTimeout(() => {}, 60000)'], { stdio: 'ignore', windowsHide: true });
-        writeFileSync('fixture-pids.json', JSON.stringify([process.pid, child.pid]));
-        // The harness confirms both processes exist before letting only the root exit.
-        setInterval(() => { if (existsSync('exit-root')) process.exit(7); }, 20);
-        if (!existsSync('complete-first-turn')) return;
-      }
+      writeFileSync('peer-pid', String(process.pid));
+      if (existsSync('hold-turn')) return;
       const text = params.prompt.findLast(block => block.type === 'text')?.text;
       output({ method: 'session/update', params: { sessionId, update: {
         sessionUpdate: 'agent_message_chunk', content: { type: 'text', text: 'received: ' + text },
