@@ -4269,6 +4269,7 @@
         "emptyList": "萬里長風，始於一縷：點左下角「增供方」，迎君之首個模型來源。",
         "emptyModelsConnected": "已連，吾正四下尋訪可用模型；若久候仍空，請稍後再試。",
         "discoveryFailed": {
+          "bwrapMissing": "Antigravity 須借 bubblewrap 隔離載入模型。請於此 Linux 機安裝或修復 bubblewrap，再試。",
           "network": "不能連此供方，故不得模型清單。請察網路或 Proxy 之設後再試。",
           "timeout": "連此供方逾時，故不得模型清單。請察網路後再試。",
           "upstream": "此供方暫不能返模型清單。請稍後再試。",
@@ -4279,6 +4280,7 @@
           "empty": "此供方未返任何可用模型。請確認名籍權柄後再試。"
         },
         "discoveryFailedStale": {
+          "bwrapMissing": "Antigravity 須借 bubblewrap 隔離載入模型。請於此 Linux 機安裝或修復 bubblewrap，再試。",
           "network": "不能連此供方，下為前次所得之模型清單。請察網路或 Proxy 之設後再試。",
           "timeout": "連此供方逾時，下為前次所得之模型清單。請察網路後再試。",
           "upstream": "此供方暫不能返模型清單，下為前次所得。請稍後再試。",

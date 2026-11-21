@@ -4,7 +4,8 @@ import path from 'node:path';
 import { afterAll, describe, expect, it, vi } from 'vitest';
 import { AgyAgent, type AgyAgentDeps } from './index.js';
 import { AgyTranslator, agyToolPaths } from './translator.js';
-import type { AgySandboxProbe } from './system-sandbox.js';
+import { probeAgySystemSandbox, type AgySandboxProbe } from './system-sandbox.js';
+import { assertAgyBinaryUsable } from './version.js';
 import { AgentStartupStoppedError } from '../base-agent.js';
 import type { AgentEvent } from '../../types/events.js';
 import { createConsoleLogger } from '../../interfaces/logger.js';
@@ -31,6 +32,23 @@ function agentWith(extra: Partial<AgyAgentDeps>, authEnv: Record<string, string>
 }
 
 describe('agy launch goes through the system sandbox', () => {
+  it('checks the CLI version inside the real task sandbox even with a cached host version', async context => {
+    const probe = probeAgySystemSandbox();
+    if (!probe.ok) return context.skip(probe.reason);
+    const fs = await import('node:fs');
+    const task = fs.mkdtempSync(path.join(root, 'version-task-'));
+    const cli = path.join(root, 'fixture-agy');
+    // Report only this fixture's own sandbox hostname, working directory and argument.
+    fs.writeFileSync(cli, '#!/bin/sh\nprintf "%s\\n" "$(hostname)" "$PWD" "$1" > version-receipt\necho 1.5.9\n', { mode: 0o755 });
+    await assertAgyBinaryUsable(cli, async () => '1.5.9', 'host');
+    const { agent, captured } = agentWith({ binaryPath: cli, skipAgyBinaryPreflight: false,
+      agySandbox: { stateRoot: path.join(root, 'version-state'), probe } });
+    await expect(agent.startSession({ workingDir: task, model: 'gpt-oss-120b-medium' })).rejects.toThrow('transport captured');
+    expect(captured).toHaveLength(1);
+    expect(fs.readFileSync(path.join(task, 'version-receipt'), 'utf8').trim().split('\n'))
+      .toEqual(['agy-sandbox', task, '--version']);
+  }, 25_000);
+
   it('refuses catalog discovery when isolation is unavailable', async () => {
     const { agent, captured } = agentWith({ agySandbox: { probe: { ok: false, reason: 'network-isolation-missing', detail: 'unavailable' } } });
     await expect(agent.probeModels()).rejects.toBeInstanceOf(Error);

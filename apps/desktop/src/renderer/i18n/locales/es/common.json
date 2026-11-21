@@ -4368,6 +4368,7 @@
         "emptyList": "Haga clic en \"Agregar proveedor\" a continuación para conectar su primera fuente de modelo",
         "emptyModelsConnected": "Conectado: descubriendo modelos disponibles. Si permanece vacío, inténtalo de nuevo en breve.",
         "discoveryFailed": {
+          "bwrapMissing": "Antigravity necesita bubblewrap para cargar los modelos de forma aislada. Instala o repara bubblewrap en este equipo Linux y vuelve a intentarlo.",
           "network": "No se puede conectar con este proveedor, por lo que su lista de modelos no está disponible. Verifique la configuración de su red o proxy y luego vuelva a intentarlo.",
           "timeout": "Se agotó el tiempo de conexión con este proveedor, por lo que su lista de modelos no está disponible. Verifique su red y luego vuelva a intentarlo.",
           "upstream": "Este proveedor no puede devolver su lista de modelos en este momento. Vuelve a intentarlo más tarde.",
@@ -4378,6 +4379,7 @@
           "empty": "Este proveedor no devolvió ningún modelo utilizable. Verifique el acceso a su cuenta y luego vuelva a intentarlo."
         },
         "discoveryFailedStale": {
+          "bwrapMissing": "Antigravity necesita bubblewrap para cargar los modelos de forma aislada. Instala o repara bubblewrap en este equipo Linux y vuelve a intentarlo.",
           "network": "No se puede conectar con este proveedor. La lista a continuación corresponde a la última actualización exitosa. Verifique la configuración de su red o proxy y luego vuelva a intentarlo.",
           "timeout": "Se agotó el tiempo de conexión a este proveedor. La lista a continuación corresponde a la última actualización exitosa. Verifique su red y luego vuelva a intentarlo.",
           "upstream": "Este proveedor no puede devolver su lista de modelos en este momento. La lista a continuación corresponde a la última actualización exitosa. Vuelve a intentarlo más tarde.",

@@ -20,7 +20,7 @@
  * 供 translator 在工具结果后追加宿主标注、并给用户白话提示（文案待 JJ 定稿）。
  */
 
-import { spawnSync } from 'node:child_process';
+import { execFile, spawnSync } from 'node:child_process';
 import { existsSync, lstatSync, readFileSync, readlinkSync, realpathSync } from 'node:fs';
 import { chmod, mkdir, mkdtemp, opendir, lstat, writeFile } from 'node:fs/promises';
 import os from 'node:os';
@@ -172,23 +172,45 @@ export function parseBwrapVersion(text: string): [number, number, number] | null
  * Checks that bubblewrap exists and can actually create an unprivileged
  * sandbox on this host (Ubuntu 24.04+ AppArmor or container hosts may block it).
  */
+type ProbeResult = ReturnType<NonNullable<AgySandboxProbeDeps['run']>>;
+
 export function probeAgySystemSandbox(deps: AgySandboxProbeDeps = {}): AgySandboxProbe {
+  const steps = sandboxProbeSteps(deps);
+  let step = steps.next();
+  while (!step.done) step = steps.next((deps.run ?? defaultRun)(...step.value));
+  return step.value;
+}
+
+async function probeForLaunch(): Promise<AgySandboxProbe> {
+  const steps = sandboxProbeSteps({});
+  let step = steps.next();
+  while (!step.done) {
+    const [command, args] = step.value;
+    const result = await new Promise<ProbeResult>(resolve => {
+      execFile(command, args, { encoding: 'utf8', timeout: 5000 }, (error, stdout, stderr) =>
+        resolve({ status: error ? (typeof error.code === 'number' ? error.code : null) : 0, stdout, stderr }));
+    });
+    step = steps.next(result);
+  }
+  return step.value;
+}
+
+function* sandboxProbeSteps(deps: AgySandboxProbeDeps): Generator<[string, readonly string[]], AgySandboxProbe, ProbeResult> {
   const platform = deps.platform ?? process.platform;
   if (platform !== 'linux') {
     return { ok: false, reason: 'unsupported-platform', detail: `platform ${platform}` };
   }
   const exists = deps.exists ?? existsSync;
-  const run = deps.run ?? defaultRun;
   const bwrapPath = (deps.bwrapCandidates ?? DEFAULT_BWRAP_CANDIDATES).find(p => exists(p));
   if (!bwrapPath) return { ok: false, reason: 'bwrap-missing', detail: 'bubblewrap not installed' };
 
-  const v = run(bwrapPath, ['--version']);
+  const v = yield [bwrapPath, ['--version']];
   const parsed = parseBwrapVersion(v.stdout + v.stderr);
   if (v.status !== 0 || !parsed) {
     return { ok: false, reason: 'bwrap-missing', detail: (v.stderr || v.stdout).trim() || 'bwrap --version failed' };
   }
-  const trial = run(bwrapPath, ['--unshare-all', '--share-net', '--die-with-parent',
-    '--ro-bind', '/', '/', '--proc', '/proc', '--dev', '/dev', '--', '/bin/true']);
+  const trial = yield [bwrapPath, ['--unshare-all', '--share-net', '--die-with-parent',
+    '--ro-bind', '/', '/', '--proc', '/proc', '--dev', '/dev', '--', '/bin/true']];
   if (trial.status !== 0) {
     return { ok: false, reason: 'bwrap-blocked', detail: trial.stderr.trim() || `exit ${trial.status}` };
   }
@@ -196,12 +218,12 @@ export function probeAgySystemSandbox(deps: AgySandboxProbeDeps = {}): AgySandbo
   if (!pastaPath) return { ok: false, reason: 'network-isolation-missing', detail: 'pasta (passt) not installed' };
   const ipPath = (deps.ipCandidates ?? DEFAULT_IP_CANDIDATES).find(p => exists(p));
   if (!ipPath) return { ok: false, reason: 'network-isolation-missing', detail: 'iproute2 (ip) not installed' };
-  const netTrial = run(pastaPath, [...pastaNetArgs(null), '--', ...agyNetGuardCommand(ipPath), '/bin/true']);
+  const netTrial = yield [pastaPath, [...pastaNetArgs(null), '--', ...agyNetGuardCommand(ipPath), '/bin/true']];
   if (netTrial.status !== 0) {
     return { ok: false, reason: 'network-isolation-missing', detail: netTrial.stderr.trim() || `pasta exit ${netTrial.status}` };
   }
   const [maj, min] = parsed;
-  const pastaHelp = run(pastaPath, ['--help']);
+  const pastaHelp = yield [pastaPath, ['--help']];
   const pastaSupportsDnsHost = `${pastaHelp.stdout}
 ${pastaHelp.stderr}`.includes('--dns-host');
   const setprivPath = ['/usr/bin/setpriv', '/bin/setpriv'].find(p => exists(p));
@@ -575,7 +597,7 @@ export async function prepareAgySandboxedLaunch(
     hardlinkScanLimit?: number;
   },
 ): Promise<AgySandboxLaunch & { hardlinkScan: HardlinkScanResult }> {
-  const probe = input.probe ?? probeAgySystemSandbox();
+  const probe = input.probe ?? await probeForLaunch();
   if (!probe.ok) throw new AgySandboxUnavailableError(probe.reason, probe.detail);
   const hardlinkScan = await scanTaskDirForHardlinks(input.taskDir, input.hardlinkScanLimit);
   if (hardlinkScan.hardlinked) {
@@ -697,7 +719,7 @@ export async function prepareAgyFullAccessLaunch(input: {
   binaryPath: string; args: readonly string[]; taskDir: string; homeDir: string; stateRoot: string;
   env: NodeJS.ProcessEnv; passEnvKeys?: readonly string[]; probe?: AgySandboxProbe; shareCliLogin?: boolean;
 }): Promise<AgySandboxLaunch> {
-  const probe = input.probe ?? probeAgySystemSandbox();
+  const probe = input.probe ?? await probeForLaunch();
   if (!probe.ok) throw new AgySandboxUnavailableError(probe.reason, probe.detail);
   const stateMounts = await ensureAgyPrivateState(input.stateRoot, input.homeDir);
   return buildAgyFullAccessLaunch({ ...input, bwrapPath: probe.bwrapPath, stateMounts });

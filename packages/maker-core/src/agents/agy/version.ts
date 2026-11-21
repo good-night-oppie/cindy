@@ -42,7 +42,7 @@ export function readAgyVersionOutput(command: string, args: readonly string[] = 
 const cache = new Map<string, { mtimeMs: number; size: number; version: string }>();
 
 /** Resolve and gate the installed agy version. Cached per binary path + file identity. */
-export async function assertAgyBinaryUsable(binaryPath: string, reader: AgyVersionReader = readAgyVersionOutput): Promise<string> {
+export async function assertAgyBinaryUsable(binaryPath: string, reader: AgyVersionReader, isolation: string): Promise<string> {
   let info;
   try {
     info = await stat(binaryPath);
@@ -52,7 +52,8 @@ export async function assertAgyBinaryUsable(binaryPath: string, reader: AgyVersi
       `Antigravity CLI (agy) was not found or is not executable at ${binaryPath}. Install it on this computer, then reopen the task.`,
       'agy_binary_missing');
   }
-  const cached = cache.get(binaryPath);
+  const key = JSON.stringify([binaryPath, isolation]);
+  const cached = cache.get(key);
   if (cached && cached.mtimeMs === info.mtimeMs && cached.size === info.size) return cached.version;
   let output: string;
   try { output = await reader(binaryPath); } catch {
@@ -66,7 +67,7 @@ export async function assertAgyBinaryUsable(binaryPath: string, reader: AgyVersi
       `Antigravity CLI ${version} does not support ACP. Cindy needs agy ${AGY_MIN_VERSION} or newer; run "agy update" on this computer.`,
       'agy_binary_too_old');
   }
-  cache.set(binaryPath, { mtimeMs: info.mtimeMs, size: info.size, version });
+  cache.set(key, { mtimeMs: info.mtimeMs, size: info.size, version });
   return version;
 }
 

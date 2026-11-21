@@ -4312,6 +4312,7 @@
         "emptyList": "Click “Add provider” below to connect your first model source",
         "emptyModelsConnected": "Connected — discovering available models. If it stays empty, try again shortly.",
         "discoveryFailed": {
+          "bwrapMissing": "Antigravity needs bubblewrap to load models safely. Install or repair bubblewrap on this Linux computer, then retry.",
           "network": "Can't reach this provider, so its model list is unavailable. Check your network or proxy settings, then retry.",
           "timeout": "Connection to this provider timed out, so its model list is unavailable. Check your network, then retry.",
           "upstream": "This provider can't return its model list right now. Try again later.",
@@ -4322,6 +4323,7 @@
           "empty": "This provider returned no usable models. Check your account's access, then retry."
         },
         "discoveryFailedStale": {
+          "bwrapMissing": "Antigravity needs bubblewrap to load models safely. Install or repair bubblewrap on this Linux computer, then retry.",
           "network": "Can't reach this provider. The list below is from the last successful refresh. Check your network or proxy settings, then retry.",
           "timeout": "Connection to this provider timed out. The list below is from the last successful refresh. Check your network, then retry.",
           "upstream": "This provider can't return its model list right now. The list below is from the last successful refresh. Try again later.",

@@ -1,4 +1,4 @@
-import { ANTIGRAVITY_PROVIDER_ID, type ProviderView } from '@cindy/model-providers';
+import { ANTIGRAVITY_PROVIDER_ID, type ProviderModelDiscoveryFailureView, type ProviderView } from '@cindy/model-providers';
 
 interface AntigravityModel {
   id: string;
@@ -20,11 +20,36 @@ interface AntigravityModelSource {
 
 const PROBE_RETRY_MS = 60_000;
 let source: AntigravityModelSource | null = null;
-let probing = false;
-let lastFailedAt = 0;
+let pending: Promise<void> | null = null;
+let failure: ProviderModelDiscoveryFailureView | undefined;
 
 export function setAntigravityModelSource(next: AntigravityModelSource): void {
   source = next;
+  pending = null;
+  failure = undefined;
+}
+
+async function probe(current: AntigravityModelSource): Promise<void> {
+  try {
+    await current.probe();
+    if (current === source) failure = current.read().length ? undefined : { kind: 'empty', at: new Date().toISOString() };
+  } catch (error) {
+    if (current !== source) return;
+    const missingBwrap = error instanceof Error && error.name === 'AgySandboxUnavailableError'
+      && 'reason' in error && error.reason === 'bwrap-missing';
+    failure = { kind: missingBwrap ? 'bwrapMissing' : 'rejected', at: new Date().toISOString() };
+  } finally {
+    if (current === source) {
+      pending = null;
+      current.changed();
+    }
+  }
+}
+
+export async function retryAntigravityModels(): Promise<ProviderModelDiscoveryFailureView | null> {
+  const current = source;
+  if (current) await (pending ??= Promise.resolve().then(() => probe(current)));
+  return failure ?? null;
 }
 
 /**
@@ -37,15 +62,10 @@ export function attachAntigravityModels(provider: ProviderView): ProviderView {
   if (provider.id !== ANTIGRAVITY_PROVIDER_ID || !provider.connected || !source) return provider;
   const models = source.read();
   if (!models.length) {
-    if (!probing && Date.now() - lastFailedAt > PROBE_RETRY_MS) {
-      probing = true;
-      const current = source;
-      void current.probe()
-        .then(() => { if (current.read().length) current.changed(); })
-        .catch(() => { lastFailedAt = Date.now(); })
-        .finally(() => { probing = false; });
+    if (!pending && (!failure || (failure.kind !== 'bwrapMissing' && Date.now() - Date.parse(failure.at) > PROBE_RETRY_MS))) {
+      void retryAntigravityModels();
     }
-    return provider;
+    return failure ? { ...provider, modelDiscoveryFailure: failure } : provider;
   }
   return {
     ...provider,

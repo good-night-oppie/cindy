@@ -164,6 +164,29 @@ describe('AgyAgent startup and configuration receipts', () => {
     }
   });
 
+  it.each([true, false])('reports the first catalog failure when cleanup fails (session failed: %s)', async sessionFails => {
+    const fs = await import('node:fs');
+    const root = fs.mkdtempSync(joinPath(osTmpdir(), 'agy-probe-errors-'));
+    const fake = new FakeAgy();
+    if (sessionFails) fake.failSessionNew = { code: -32000, message: 'catalog unavailable for fixture' };
+    const close = vi.spyOn(fake, 'close').mockRejectedValue(new Error('fixture cleanup failed'));
+    const { agent } = create(fake, {
+      binaryPath: fs.realpathSync(process.execPath), readAgyVersion: async () => '1.5.9',
+      agySandbox: { stateRoot: root, allowWithoutSystemSandbox: true, probe: {
+        ok: true, bwrapPath: '/usr/bin/bwrap', pastaPath: '/usr/bin/pasta', ipPath: '/usr/sbin/ip',
+        version: '0.6.1', supportsDisableUserns: false,
+      } },
+    });
+    try {
+      await expect(agent.probeModels()).rejects.toThrow(sessionFails ? 'catalog unavailable for fixture' : 'fixture cleanup failed');
+      expect(close).toHaveBeenCalledTimes(1);
+      expect(agent.capabilities.availableModels).toHaveLength(0);
+    } finally {
+      clearAgyVersionCache();
+      fs.rmSync(root, { recursive: true, force: true });
+    }
+  });
+
   // Regression #25: startSession/setModel/send must not use an unspecified or
   // host-disallowed model. Existing tests only covered explicit receipt mismatch.
   // Unit tier: in-memory transport, no real CLI/auth/files. Minimal inputs are a

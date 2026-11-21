@@ -237,6 +237,19 @@ afterEach(() => {
 });
 
 describe('ProvidersSection — 深链定位', () => {
+  it('offers a retry from the bubblewrap installation hint for Antigravity', async () => {
+    providersState.providers = [makeProvider('antigravity', {
+      connected: true, agents: ['agy'], models: { agy: [] },
+      modelDiscoveryFailure: { kind: 'bwrapMissing', at: '2026-11-20T00:00:00Z' },
+    })];
+    const retry = vi.fn().mockResolvedValue({ ok: true });
+    window.electronAPI.maker.rediscoverModels = retry;
+    renderAt('?tab=providers&connect=antigravity');
+    expect(await screen.findByText('settings.providers.detail.discoveryFailed.bwrapMissing')).toBeTruthy();
+    fireEvent.click(screen.getByRole('button', { name: 'settings.providers.button.retry' }));
+    await waitFor(() => expect(retry).toHaveBeenCalledExactlyOnceWith('antigravity'));
+  });
+
   // 2026-11-14 recording, unit: the account list can finish reading before its header.
   // Existing reconnect tests only inspected the settled page, missing the header's later
   // legacy-to-pool remount that erased already-visible rows and flashed a loading spinner.

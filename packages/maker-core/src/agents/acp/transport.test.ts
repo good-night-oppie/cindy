@@ -1,7 +1,7 @@
 // Ported from makecindy/cindy#5611 (Ken / kenlinjie), source ref 87cbe126f42dcc3dd436297f3abb5c55ddf36620.
 import { EventEmitter } from 'node:events';
 import { PassThrough } from 'node:stream';
-import { spawn, type ChildProcess } from 'node:child_process';
+import { spawn } from 'node:child_process';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { spawnAcpTransport } from './transport.js';
 vi.mock('node:child_process', () => ({ spawn: vi.fn() }));
@@ -58,29 +58,18 @@ describe('ACP stdio transport', () => {
     expect(f.transport.getPid?.()).toBe(f.child.pid);
     f.exit(); await f.transport.close(); expect(f.transport.getPid?.()).toBeNull();
   });
-  it.each([1, 128])('keeps Windows tree termination unconfirmed after taskkill exit %i', async code => {
-    vi.useFakeTimers();
-    const killer = Object.assign(new EventEmitter(), { kill: vi.fn() });
-    vi.mocked(spawn).mockReturnValue(killer as unknown as ChildProcess);
-    const f = fixture({ platformOverride: 'win32', killTimeoutMs: 20 });
-    f.child.kill.mockImplementation(() => { f.exit(); });
+  it('accepts a Windows supervisor receipt after the job drained', async () => {
+    const f = fixture({ platformOverride: 'win32' });
     const closed = f.transport.close();
-    const rejected = expect(closed).rejects.toThrow('tree exit could not be confirmed');
-    killer.emit('exit', code); await rejected;
-    await expect(f.transport.close()).rejects.toThrow('tree exit could not be confirmed');
-    expect(spawn).toHaveBeenCalledWith(expect.stringMatching(/taskkill\.exe$/), ['/PID', String(f.child.pid), '/T', '/F'], expect.objectContaining({ shell: false }));
-  });
-  it('keeps the tree unconfirmed if its root exited before close', async () => {
-    const f = fixture({ platformOverride: 'win32' });
     f.exit();
-    await expect(f.transport.close()).rejects.toThrow('tree exit could not be confirmed');
+    await closed;
+    await f.transport.close();
   });
-  it('accepts Windows shutdown only after successful tree kill and child exit', async () => {
-    const killer = Object.assign(new EventEmitter(), { kill: vi.fn() });
-    vi.mocked(spawn).mockReturnValue(killer as unknown as ChildProcess);
+  it('rejects an unconfirmed Windows supervisor exit', async () => {
     const f = fixture({ platformOverride: 'win32' });
-    const closed = f.transport.close(); f.exit(); killer.emit('exit', 0); await closed;
-    expect(f.transport.getPid?.()).toBeNull();
+    f.child.exitCode = 1;
+    f.child.emit('exit', 1);
+    await expect(f.transport.close()).rejects.toThrow('tree exit could not be confirmed');
   });
   it('proves failed spawn has no child and propagates stdout EOF', async () => {
     const f = fixture(); Object.assign(f.child, { pid: undefined }); f.child.emit('error', new Error('private path'));

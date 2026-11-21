@@ -4312,6 +4312,7 @@
         "emptyList": "Klicke unten auf „Anbieter hinzufügen“, um deine erste Modellquelle zu verbinden",
         "emptyModelsConnected": "Verbunden — verfügbare Modelle werden ermittelt. Falls die Liste leer bleibt, versuche es in Kürze erneut.",
         "discoveryFailed": {
+          "bwrapMissing": "Antigravity benötigt bubblewrap, um Modelle isoliert zu laden. Installiere oder repariere bubblewrap auf diesem Linux-Rechner und versuche es erneut.",
           "network": "Dieser Anbieter ist nicht erreichbar, daher ist seine Modellliste nicht verfügbar. Prüfe deine Netzwerk- oder Proxy-Einstellungen und versuche es erneut.",
           "timeout": "Zeitüberschreitung bei der Verbindung zu diesem Anbieter, daher ist seine Modellliste nicht verfügbar. Prüfe dein Netzwerk und versuche es erneut.",
           "upstream": "Dieser Anbieter kann seine Modellliste derzeit nicht zurückgeben. Versuche es später erneut.",
@@ -4322,6 +4323,7 @@
           "empty": "Dieser Anbieter hat keine nutzbaren Modelle zurückgegeben. Prüfe die Zugriffsrechte deines Kontos und versuche es erneut."
         },
         "discoveryFailedStale": {
+          "bwrapMissing": "Antigravity benötigt bubblewrap, um Modelle isoliert zu laden. Installiere oder repariere bubblewrap auf diesem Linux-Rechner und versuche es erneut.",
           "network": "Dieser Anbieter ist nicht erreichbar. Die Liste unten stammt von der letzten erfolgreichen Aktualisierung. Prüfe deine Netzwerk- oder Proxy-Einstellungen und versuche es erneut.",
           "timeout": "Zeitüberschreitung bei der Verbindung zu diesem Anbieter. Die Liste unten stammt von der letzten erfolgreichen Aktualisierung. Prüfe dein Netzwerk und versuche es erneut.",
           "upstream": "Dieser Anbieter kann seine Modellliste derzeit nicht zurückgeben. Die Liste unten stammt von der letzten erfolgreichen Aktualisierung. Versuche es später erneut.",

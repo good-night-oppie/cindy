@@ -4269,6 +4269,7 @@
         "emptyList": "點選左下角「新增供應商」連接你的第一個模型來源",
         "emptyModelsConnected": "已連線，正在自動發現可用模型；若持續為空，請稍後重試。",
         "discoveryFailed": {
+          "bwrapMissing": "Antigravity 需要 bubblewrap 才能隔離載入模型。請在這台 Linux 電腦上安裝或修復 bubblewrap，然後重試。",
           "network": "無法連線到該供應商，因此拿不到模型列表。請檢查網路或 Proxy 設定後重試。",
           "timeout": "連線至該供應商逾時，因此拿不到模型列表。請檢查網路後重試。",
           "upstream": "該供應商暫時無法返回模型列表。請稍後重試。",
@@ -4279,6 +4280,7 @@
           "empty": "該供應商沒有返回任何可用模型。請確認帳號權限後重試。"
         },
         "discoveryFailedStale": {
+          "bwrapMissing": "Antigravity 需要 bubblewrap 才能隔離載入模型。請在這台 Linux 電腦上安裝或修復 bubblewrap，然後重試。",
           "network": "無法連線到該供應商，下面是上次取得的模型列表。請檢查網路或 Proxy 設定後重試。",
           "timeout": "連線至該供應商逾時，下面是上次取得的模型列表。請檢查網路後重試。",
           "upstream": "該供應商暫時無法傳回模型列表，下面是上次取得的結果。請稍後重試。",

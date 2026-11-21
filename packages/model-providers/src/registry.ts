@@ -58,6 +58,7 @@ export interface ProviderModelDiscoveryFailure {
     | 'network'
     | 'timeout'
     | 'upstream'
+    | 'bwrapMissing'
     | 'regionBlocked'
     | 'unauthorized'
     | 'forbidden'

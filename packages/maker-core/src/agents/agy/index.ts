@@ -183,6 +183,14 @@ export class AgyAgent extends BaseAgent {
     }
   }
 
+  private checkLaunchVersion(binaryPath: string, launch: { command: string; args: readonly string[]; env: NodeJS.ProcessEnv },
+    cliArgCount: number, cwd: string, isolation: 'host' | 'sandbox' | 'full'): Promise<string> {
+    // The prepared launch ends in the CLI arguments; preserve its wrapper and all mount/network options.
+    const args = [...launch.args.slice(0, -cliArgCount), '--version'];
+    return assertAgyBinaryUsable(binaryPath, this.deps.readAgyVersion ?? (() =>
+      readAgyVersionOutput(launch.command, args, { cwd, env: launch.env })), isolation);
+  }
+
   /** Discover the catalog in an empty task directory with the normal isolation policy. */
   async probeModels(): Promise<void> {
     if (this.capabilities.availableModels.length) return;
@@ -195,6 +203,7 @@ export class AgyAgent extends BaseAgent {
         throw new AgySandboxUnavailableError('unsupported-platform', process.platform);
       }
       const cwd = await mkdtemp(path.join(os.tmpdir(), 'cindy-agy-models-'));
+      let failed = false;
       try {
         const homeDir = os.homedir();
         const authEnv = await this.deps.auth.getAuthEnv();
@@ -205,16 +214,14 @@ export class AgyAgent extends BaseAgent {
               homeDir, env, passEnvKeys, probe: config?.probe, shareCliLogin: config?.shareCliLogin,
               stateRoot: config?.stateRoot ?? path.join(homeDir, '.cindy', 'agy-sandbox', 'state') })
           : { command: binaryPath, args: AGY_ACP_ARGS, env: filterAgyUnsandboxedEnv(env, homeDir, cwd, passEnvKeys) };
-        // Both launch builders append the CLI arguments last. Run the version check
-        // with the same isolation, cwd and filtered environment as catalog discovery.
-        const versionArgs = [...launch.args.slice(0, -AGY_ACP_ARGS.length), '--version'];
-        await assertAgyBinaryUsable(binaryPath, this.deps.readAgyVersion ?? (() =>
-          readAgyVersionOutput(launch.command, versionArgs, { cwd, env: launch.env })));
+        await this.checkLaunchVersion(binaryPath, launch, AGY_ACP_ARGS.length, cwd,
+          process.platform === 'linux' ? 'sandbox' : 'host');
         const transport = (this.deps.createAgyTransport ?? spawnAcpTransport)({
           binaryPath: launch.command, args: launch.args, cwd, env: launch.env,
         });
         const client = new AcpClient(transport, { requestTimeoutMs: CONTROL_TIMEOUT });
         let catalog: ReturnType<typeof readAgyCatalog>;
+        let probeFailed = false;
         try {
           const init = record(await client.request('initialize', {
             protocolVersion: 1,
@@ -224,19 +231,33 @@ export class AgyAgent extends BaseAgent {
           if (init.protocolVersion !== 1) throw new Error('agy ACP protocol version is unsupported');
           const result = record(await client.request('session/new', { cwd, mcpServers: [] }));
           catalog = readAgyCatalog(result);
+        } catch (error) {
+          probeFailed = true;
+          throw error;
         } finally {
-          await client.close();
+          try { await client.close(); } catch (closeError) {
+            if (!probeFailed) throw closeError;
+            this.deps.logger.warn('agy catalog probe also failed to close its transport');
+          }
         }
         this.capabilities.availableModels = catalog.models;
         this.capabilities.switchModel = catalog.models.length ? yes : no;
         this.capabilities.effort = catalog.currentEfforts.length ? yes : no;
         this.capabilities.effortLevels = catalog.currentEfforts.map(id => ({ id, displayName: id }));
         this.capabilities.planMode = catalog.modes.includes(AGY_PLAN_MODE) ? yes : no;
+      } catch (error) {
+        failed = true;
+        throw error;
       } finally {
-        await rm(cwd, { recursive: true, force: true });
+        try {
+          await rm(cwd, { recursive: true, force: true, maxRetries: 3 });
+        } catch (cleanupError) {
+          if (!failed) throw cleanupError;
+          this.deps.logger.warn('agy catalog probe could not remove its temporary directory');
+        }
       }
     })();
-    try { await this.probePromise; } catch (error) { this.probePromise = null; throw error; }
+    try { await this.probePromise; } finally { this.probePromise = null; }
   }
 
   override async dispose(): Promise<void> {
@@ -603,10 +624,6 @@ export class AgyAgent extends BaseAgent {
       if (opts.remoteHostId || opts.deviceHosted) throw new Error('agy currently runs only on the task host computer');
       if (!path.isAbsolute(opts.workingDir)) throw new Error('agy ACP requires an absolute working directory');
       if (!this.capabilities.permissionModes.some(option => option.id === mode)) throw new NotSupportedError('permissionMode', no);
-      if (!this.deps.skipAgyBinaryPreflight) {
-        const version = await assertAgyBinaryUsable(this.deps.binaryPath, this.deps.readAgyVersion);
-        this.deps.logger.debug('agy binary accepted', { version });
-      }
       const authEnv = await this.deps.auth.getAuthEnv();
       const env = { ...process.env, ...authEnv };
       const memoryEnabled = (opts.makerMemoryEnabled ?? this.deps.runtimeConfig.makerMemoryEnabled) === true;
@@ -675,6 +692,11 @@ export class AgyAgent extends BaseAgent {
             env: unsandboxedByPlatform
               ? filterAgyUnsandboxedEnv(env, os.homedir(), agyWorkingDir, Object.keys(authEnv))
               : env };
+      if (!this.deps.skipAgyBinaryPreflight) {
+        const version = await this.checkLaunchVersion(this.deps.binaryPath, launch, acpArgs.length, agyWorkingDir,
+          fullAccessLaunch ? 'full' : useSandbox ? 'sandbox' : 'host');
+        this.deps.logger.debug('agy binary accepted', { version });
+      }
       assertCurrent();
       const transport = (this.deps.createAgyTransport ?? spawnAcpTransport)({ binaryPath: launch.command, args: launch.args, cwd: agyWorkingDir, env: launch.env });
       client = new AcpClient(transport, {

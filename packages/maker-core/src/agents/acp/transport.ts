@@ -1,4 +1,5 @@
 import { spawn, type ChildProcessWithoutNullStreams } from 'node:child_process';
+import { windowsAcpLaunch } from './windows-job.js';
 import { isAbsolute } from 'node:path';
 
 // Ported from makecindy/cindy#5611 (Cursor native ACP, by Ken / kenlinjie), which adapted the
@@ -36,8 +37,12 @@ export function spawnAcpTransport(options: AcpTransportOptions): AcpTransport {
     throw new Error('Invalid ACP transport limits');
   }
   const posix = (options.platformOverride ?? process.platform) !== 'win32';
-  const child = (options.spawnChild ?? spawn)(options.binaryPath, [...(options.args ?? ['acp'])], {
-    cwd: options.cwd, env: options.env, stdio: ['pipe', 'pipe', 'pipe'], shell: false, detached: posix,
+  const args = options.args ?? ['acp'];
+  const launch = posix
+    ? { binary: options.binaryPath, args, cwd: options.cwd, env: options.env }
+    : windowsAcpLaunch(options.binaryPath, args, options.cwd, options.env ?? process.env);
+  const child = (options.spawnChild ?? spawn)(launch.binary, [...launch.args], {
+    cwd: launch.cwd, env: launch.env, stdio: ['pipe', 'pipe', 'pipe'], shell: false, detached: posix, windowsHide: true,
   }) as ChildProcessWithoutNullStreams;
   const lines = new Set<(line: string) => void>();
   const closes = new Set<(info: { reason: string }) => void>();
@@ -48,7 +53,7 @@ export function spawnAcpTransport(options: AcpTransportOptions): AcpTransport {
   let reason: string | undefined;
   let exited = child.exitCode !== null || child.signalCode !== null;
   let closing: Promise<void> | undefined;
-  let windowsTreeUnconfirmed = false;
+
   let stderrTail = '';
   const disconnect = (why: string) => {
     if (reason) return;
@@ -112,20 +117,6 @@ export function spawnAcpTransport(options: AcpTransportOptions): AcpTransport {
     }
     if (!exited) { try { child.kill(signal); } catch { /* verified by waitForExit */ } }
   }
-  async function killWindowsTree(): Promise<boolean> {
-    if (child.pid === undefined) return true;
-    if (exited) return false;
-    return new Promise(resolve => {
-      // taskkill is a system utility, never a PATH-selected executable or shell command.
-      const systemRoot = process.env.SystemRoot ?? 'C:\\Windows';
-      const killer = spawn(`${systemRoot}\\System32\\taskkill.exe`, ['/PID', String(child.pid), '/T', '/F'], { stdio: 'ignore', shell: false });
-      let finished = false;
-      const done = (success: boolean) => { if (finished) return; finished = true; clearTimeout(timer); resolve(success); };
-      const timer = setTimeout(() => { try { killer.kill(); } catch { /* best effort */ } done(false); }, killWait);
-      // A missing root cannot confirm that its descendants stopped.
-      killer.once('error', () => done(false)); killer.once('exit', code => done(code === 0));
-    });
-  }
   const transport: AcpTransport = {
     writeLine(line) {
       if (reason || !child.stdin.writable) return Promise.reject(new Error('ACP transport closed'));
@@ -157,9 +148,7 @@ export function spawnAcpTransport(options: AcpTransportOptions): AcpTransport {
       if (closing) return closing;
       disconnect('ACP transport closed');
       closing = (async () => {
-        // On Windows the tree is stopped while its root is still alive, so taskkill can see every
-        // descendant; closing the input first lets the root exit and hides them.
-        if (posix) { try { child.stdin.end(); } catch { /* best effort */ } }
+        try { child.stdin.end(); } catch { /* verify termination below */ }
         if (posix) {
           signalTree('SIGTERM');
           await waitForExit(grace);
@@ -167,11 +156,11 @@ export function spawnAcpTransport(options: AcpTransportOptions): AcpTransport {
           signalTree('SIGKILL');
           if (!await waitForExit(killWait)) throw new Error('ACP process exit could not be confirmed');
         } else {
-          const treeStopped = !windowsTreeUnconfirmed && await killWindowsTree();
-          try { child.stdin.end(); } catch { /* best effort */ }
-          if (!treeStopped) windowsTreeUnconfirmed = true;
-          if (!treeStopped) signalTree('SIGKILL');
-          if (!await waitForExit(killWait) || !treeStopped) throw new Error('ACP process tree exit could not be confirmed');
+          // EOF asks the job owner to stop all members. Its successful exit proves
+          // the job reported zero active processes, even if agy exited first.
+          if (!await waitForExit(killWait) || (child.pid !== undefined && child.exitCode !== 0)) {
+            throw new Error('ACP process tree exit could not be confirmed');
+          }
         }
       })().catch(error => { closing = undefined; throw error; });
       return closing;
