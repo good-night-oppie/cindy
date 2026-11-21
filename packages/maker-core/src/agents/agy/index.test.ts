@@ -343,6 +343,29 @@ describe('AgyAgent startup and configuration receipts', () => {
 });
 
 describe('AgyAgent turns', () => {
+  it.skipIf(process.platform === 'linux')('preserves host tool results without claiming sandbox protection', async () => {
+    const { fake, start } = create(new FakeAgy(), { agySandbox: { allowWithoutSystemSandbox: true } });
+    const handle = await start();
+    const events: AgentEvent[] = [];
+    const drained = drain(handle, events);
+    await handle.send({ type: 'user', content: 'fixture tool results' });
+    const outside = joinPath(osTmpdir(), 'outside-task-fixture.txt');
+    fake.update('tool_call', { toolCallId: 'write', kind: 'edit', status: 'completed', rawInput: { TargetFile: outside } });
+    fake.update('tool_call', { toolCallId: 'read', kind: 'read', status: 'failed', rawInput: { AbsolutePath: outside },
+      content: [{ type: 'content', content: { type: 'text', text: 'No such file or directory' } }] });
+    fake.finish();
+    await ticks();
+    await handle.close();
+    await drained;
+    const notices = events.filter(e => e.type === 'error').map(e => e.data);
+    expect(notices).not.toContainEqual(expect.objectContaining({ reason: 'agy_write_outside_task' }));
+    expect(notices).not.toContainEqual(expect.objectContaining({ reason: 'agy_sandbox_blocked' }));
+    expect(events.filter(e => e.type === 'tool_result_full').map(e => e.data)).toEqual([
+      expect.objectContaining({ toolUseId: 'write', isError: false }),
+      expect.objectContaining({ toolUseId: 'read', isError: true, fullText: 'No such file or directory' }),
+    ]);
+  });
+
   it('streams text, thoughts, tools and usage, then completes with prompt usage', async () => {
     const { fake, start } = create();
     const handle = await start();

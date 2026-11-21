@@ -345,14 +345,13 @@ export class AgyAgent extends BaseAgent {
     // isolation. The choice is fixed for this process; the host relaunches agy (resume) when the
     // mode later crosses this line, so `mode` here is the mode this process was started with.
     const fullAccessLaunch = useSandbox && mode === 'bypassPermissions';
+    const directoryGrantsEnforced = useSandbox && !fullAccessLaunch;
     const sandboxStateRoot = this.deps.agySandbox?.stateRoot ?? path.join(os.homedir(), '.cindy', 'agy-sandbox', 'state');
     // agy sees the task folder by its real path inside the sandbox; a symlinked workingDir does not exist there.
     const agyWorkingDir = wantsIsolation ? realpathOr(opts.workingDir) : opts.workingDir;
-    const translator = new AgyTranslator(emit, wantsIsolation && !fullAccessLaunch ? {
+    const translator = new AgyTranslator(emit, directoryGrantsEnforced ? {
       taskDir: agyWorkingDir, homeDir: os.homedir(),
-      visibleDirs: useSandbox
-        ? agyPrivateStateMounts(sandboxStateRoot, os.homedir()).map(mount => mount.target)
-        : [],
+      visibleDirs: agyPrivateStateMounts(sandboxStateRoot, os.homedir()).map(mount => mount.target),
       locale: this.deps.uiLocale,
     } : undefined);
     // Host reads / lists / uploads of this folder go through checkAgyTaskPath (cindy#1 QQ 6924350879 item 5).
@@ -611,7 +610,6 @@ export class AgyAgent extends BaseAgent {
       // every folder the user can, so a teammate's own folders and the Library need no grant (and
       // read-only cannot be enforced there, as for any agy task). Inside the Linux sandbox they
       // would be silently unreachable, so that case is refused.
-      const directoryGrantsEnforced = useSandbox && !fullAccessLaunch;
       if (directoryGrantsEnforced && (opts[LIBRARY_READ_ROOT] || opts.extraDirs?.length || opts.writableDirs?.length)) {
         throw new Error('agy ACP cannot enforce additional directory grants or a read-only Library root');
       }
