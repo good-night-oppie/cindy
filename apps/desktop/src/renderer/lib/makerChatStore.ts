@@ -2589,7 +2589,7 @@ export type MessageDeliveryMode = 'queue' | 'steer';
 
 /** 仅影响 selector/chip 的乐观展示；agentKind 始终保留真实 reducer 路由。 */
 export interface AgentSwitchIntentRecord {
-  target: 'claude-code' | 'codex' | 'pi';
+  target: 'claude-code' | 'codex' | 'pi' | 'agy';
   model: string;
   providerId: string | null;
   effort?: string;
@@ -18813,7 +18813,7 @@ function sendUiTrigger(sessionId: string, prompt: string): Promise<void> {
  * sdkSessionId——否则 buildCreateOpts 会把旧引擎的原生会话 id 当 resume 目标
  * (main 侧 reconcileCreateOptsWithDb 是兜底,这里是第一现场收敛)。
  */
-function noteAgentSwitched(sessionId: string, agentKind: 'claude-code' | 'codex' | 'pi'): void {
+function noteAgentSwitched(sessionId: string, agentKind: 'claude-code' | 'codex' | 'pi' | 'agy'): void {
   if (!sessionId) return;
   setState(sessionId, (s) => {
     const nextProviderId = s.agentSwitchIntent ? s.agentSwitchIntent.providerId : s.sessionProviderId;
@@ -18845,7 +18845,7 @@ function noteAgentSwitched(sessionId: string, agentKind: 'claude-code' | 'codex'
  */
 function noteAgentSwitchIntent(
   sessionId: string,
-  target: 'claude-code' | 'codex' | 'pi',
+  target: 'claude-code' | 'codex' | 'pi' | 'agy',
   opts: {
     model: string;
     providerId: string | null;

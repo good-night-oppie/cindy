@@ -52,3 +52,14 @@ export function isLaunchableDbAgentKind(value: unknown): value is LaunchableDbAg
 export function isLaunchableMakerAgentKind(value: unknown): value is LaunchableMakerAgentKind {
   return value === 'claude-code' || value === 'codex' || value === 'pi';
 }
+
+/**
+ * An engine an existing task can be switched to from its model picker. Antigravity runs only on
+ * the computer that hosts the task, so it is a target only when the task runs on this computer.
+ */
+export function isSessionSwitchTargetAgentKind(
+  value: unknown,
+  sessionRunsOnThisComputer: boolean,
+): value is MakerAgentKindWire {
+  return isLaunchableMakerAgentKind(value) || (value === 'agy' && sessionRunsOnThisComputer);
+}

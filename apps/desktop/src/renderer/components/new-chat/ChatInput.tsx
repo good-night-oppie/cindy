@@ -330,7 +330,7 @@ import type { Effort, PermissionMode } from '@/lib/userPreferences.types';
 import { getAppShortcutCombos } from '@/lib/appShortcutStore';
 import { getNextPermissionMode } from '@/lib/permissionModeCycle';
 import { matchesKeyboardEvent } from '../../../shared/appShortcuts';
-import { isLaunchableMakerAgentKind, makerToDbAgentKind } from '../../../shared/agentKindConversion';
+import { isLaunchableMakerAgentKind, isSessionSwitchTargetAgentKind, makerToDbAgentKind } from '../../../shared/agentKindConversion';
 import {
   getComposerSendShortcutPreference,
   getComposerSendShortcutLabel,
@@ -2071,6 +2071,9 @@ export function ChatInput({
   const sessionAgentSwitchSupported =
     sessionOrcaRole !== undefined && runtimeAgentKind != null &&
     (!deviceLinkDeviceId || ccSupportsSessionAgentSwitch || codexSupportsSessionAgentSwitch);
+  // Antigravity runs only on the computer that hosts the task: a task on this computer may switch
+  // to it; a task reached through device link or SSH may not.
+  const sessionRunsOnThisComputer = !deviceLinkDeviceId && !remoteHostId;
 
   // 切换写入的串行链与写序号都按 session 存在**模块级**协调层(agentSwitchCoordinator),
   // 不放组件 ref:用户切走再切回时旧组件已卸载但 invoke 仍在飞,新组件若另起空队列 /
@@ -7423,7 +7426,7 @@ export function ChatInput({
     ) => void | boolean | Promise<void | boolean>;
   }>({ byProvider: () => {}, byModel: () => {} });
   const confirmAgentBrowseSwitch = useCallback(
-    (targetAgent: 'claude-code' | 'codex' | 'pi' | null) =>
+    (targetAgent: 'claude-code' | 'codex' | 'pi' | 'agy' | null) =>
       confirmAgentSwitchRisk({
         // 不必再问的两种:回原引擎(same-engine no-op),或点的就是已经确认过的意图目标
         // Harness(只换模型,不换引擎)。换到第三家仍要问(Chris 2026-08-20:Claude 任务里
@@ -7447,7 +7450,7 @@ export function ChatInput({
   );
   const performAgentSwitch = useCallback(
     async (
-      targetAgentKind: 'claude-code' | 'codex' | 'pi',
+      targetAgentKind: 'claude-code' | 'codex' | 'pi' | 'agy',
       newModelId: string,
       providerId: string | null = null,
       // 意图期内的档位/Fast/思考开关改动经此显式覆盖(用户手选优先于记忆/默认解析)。
@@ -7565,7 +7568,9 @@ export function ChatInput({
               ? codexCaps.capabilities
               : targetAgentKind === 'pi'
                 ? piCaps.capabilities
-                : ccCaps.capabilities,
+                : targetAgentKind === 'agy'
+                  ? agyCaps.capabilities
+                  : ccCaps.capabilities,
           providerId,
           modelId: newModelId,
           agentKind: targetAgentKind,
@@ -7737,7 +7742,9 @@ export function ChatInput({
                     ? 'Codex'
                     : targetAgentKind === 'pi'
                       ? 'Pi'
-                      : 'Claude Code',
+                      : targetAgentKind === 'agy'
+                        ? 'Antigravity'
+                        : 'Claude Code',
                 model: newModelId,
               }),
               { duration: 4000 },
@@ -7899,8 +7906,8 @@ export function ChatInput({
         fast?: boolean | 'ultrafast';
         favoriteUid?: string | null;
       }): Promise<boolean> => {
-        // agy 只保留历史身份,不是可切换目标;显式拒绝,选择器留在原地。
-        if (!isLaunchableMakerAgentKind(targetAgent)) return false;
+        // Antigravity 只在任务所在的这台电脑上跑:本机任务可以切过去,远程任务显式拒绝,选择器留在原地。
+        if (!isSessionSwitchTargetAgentKind(targetAgent, sessionRunsOnThisComputer)) return false;
         // 取消 = 什么都不改;返回 false 让选择器留在原地(用户还能挑别的行)。
         // 目标显式传给确认门:同一目标不重复弹,换目标要重新确认(见 confirmAgentBrowseSwitch)。
         if (!(await confirmAgentBrowseSwitch(targetAgent))) return false;
@@ -8203,7 +8210,7 @@ export function ChatInput({
           expectedAgentSwitchRevision === undefined) {
         const intent = makerChatStore.getAgentSwitchIntent(sessionId);
         const switchTarget = intent?.target ?? runtimeAgentKind;
-        if (!isLaunchableMakerAgentKind(switchTarget)) return false;
+        if (!isSessionSwitchTargetAgentKind(switchTarget, sessionRunsOnThisComputer)) return false;
         return performAgentSwitch(switchTarget, newModelId,
           intent ? intent.providerId : effectiveSourceId ?? null);
       }
@@ -8816,7 +8823,7 @@ export function ChatInput({
           expectedAgentSwitchRevision === undefined) {
         const intent = makerChatStore.getAgentSwitchIntent(sessionId);
         const switchTarget = intent?.target ?? runtimeAgentKind;
-        if (!isLaunchableMakerAgentKind(switchTarget)) return false;
+        if (!isSessionSwitchTargetAgentKind(switchTarget, sessionRunsOnThisComputer)) return false;
         return performAgentSwitch(switchTarget,
           reconciledModelId ?? intent?.model ?? activeModel, newProviderId, {
             effort: reconciledEffort,

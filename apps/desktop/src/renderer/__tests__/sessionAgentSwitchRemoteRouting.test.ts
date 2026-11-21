@@ -16,6 +16,7 @@ import { beforeEach, describe, expect, it, vi } from 'vitest';
 import type { Session } from '@/lib/ccAgent.types';
 import { resolveManualCompactChannel } from '@/hooks/useAgentCapabilities';
 import { createSessionScopedRequestGuard } from '@/features/cc-agent/sessionScopedRequestGuard';
+import { isSessionSwitchTargetAgentKind } from '../../shared/agentKindConversion';
 
 const sess = (id: string): Session => ({ id }) as unknown as Session;
 
@@ -910,6 +911,7 @@ describe("ChatInput 的入口门控与调用路由", () => {
     const switchAgent = vi.fn(async () => true);
     const bindings = { sessionOrcaRole, settingsLocked: false, sessionId: 's1',
       sessionAgentSwitchSupported: true, remoteHostId: null, runtimeAgentKind: 'codex',
+      isSessionSwitchTargetAgentKind, sessionRunsOnThisComputer: true,
       makerChatStore: { getAgentSwitchIntent: () => null }, performAgentSwitch: switchAgent,
       effectiveSourceId: 'provider-old', activeModel: 'model-old' };
     function callback(name: string) {

@@ -6771,7 +6771,7 @@ interface ElectronAPI {
      */
     switchSessionAgent: (
       sessionId: string,
-      targetAgentKind: 'claude-code' | 'codex' | 'pi',
+      targetAgentKind: 'claude-code' | 'codex' | 'pi' | 'agy',
       model: string,
       providerId?: string | null,
       effort?: string,
@@ -6781,7 +6781,7 @@ interface ElectronAPI {
       thinking?: boolean,
     ) => Promise<{
       switched: boolean;
-      agentKind: 'claude-code' | 'codex' | 'pi';
+      agentKind: 'claude-code' | 'codex' | 'pi' | 'agy';
       model: string;
       engineReady: boolean;
       deferred?: boolean;

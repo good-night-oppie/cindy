@@ -647,11 +647,13 @@ export function resolveModelSelectorAgentIdentity(
   runtimeAgentKind: AgentKind | null | undefined,
   pendingTarget: AgentKind | null | undefined,
 ): ModelSelectorAgentIdentity | undefined {
-  // agy 可以作为新任务引擎,但不是会话内可切换目标:这里保持「不看它」的既有口径
-  // (agy 会话的引擎标识走 VendorIcon 的中性图标,见 agyVendorIcon 用例)。
+  // A task already running on Antigravity keeps the existing rule: no engine name on the chip
+  // (its mark is the neutral VendorIcon, see the agyVendorIcon cases). A registered switch *to*
+  // Antigravity is named like any other pending target, so the chip does not keep showing the
+  // engine the task is leaving.
   const toVendorKey = (kind: AgentKind): SelectableVendor | null =>
     kind === 'agy' ? null : kind === 'codex' ? 'codex' : kind === 'pi' ? 'pi' : 'cc';
-  const pendingKey = pendingTarget ? toVendorKey(pendingTarget) : null;
+  const pendingKey = pendingTarget === 'agy' ? 'agy' : pendingTarget ? toVendorKey(pendingTarget) : null;
   if (pendingKey) {
     return {
       vendorKey: pendingKey,

@@ -1222,9 +1222,11 @@ describe('ModelSelector trigger variants', () => {
 
   it('gives an Antigravity session no engine identity instead of the Claude mark (cindy#2)', () => {
     expect(resolveModelSelectorAgentIdentity('agy', null)).toBeUndefined();
-    // agy 不是可切换引擎:待切换目标是 agy 时忽略,按当前引擎判断。
-    expect(resolveModelSelectorAgentIdentity('agy', 'agy')).toBeUndefined();
-    expect(resolveModelSelectorAgentIdentity('claude-code', 'agy')).toEqual({ vendorKey: 'cc', state: 'current' });
+  });
+
+  it('names a registered switch to Antigravity instead of the engine the task is leaving', () => {
+    expect(resolveModelSelectorAgentIdentity('claude-code', 'agy')).toEqual({ vendorKey: 'agy', state: 'pending' });
+    expect(resolveModelSelectorAgentIdentity('agy', 'agy')).toEqual({ vendorKey: 'agy', state: 'pending' });
   });
 
   it('keeps the engine identity of the other three engines unchanged', () => {
