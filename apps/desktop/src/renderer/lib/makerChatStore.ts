@@ -620,6 +620,7 @@ export interface ChatMessage {
    * agentMeta.goalCompletion 派生(仿 fork divider 从 session 元数据派生),重开会话仍在。
    */
   systemCardType?:
+    | 'agy-file-access'
     | 'plugin-model-route'
     | 'voice-call'
     | 'voice-call-task'
@@ -20009,6 +20010,13 @@ function mapServerMessages(serverMsgs: Message[]): ChatMessage[] {
   }
   const legacyUserTurnCosts = projectLegacyUserTurnCosts(ordered);
   const mapped = ordered.map((m) => {
+    if (m.role === 'assistant' && m.agentMeta?.agyFileAccessNotice === true && typeof m.content === 'string') {
+      return {
+        clientId: m.clientId, role: 'assistant' as const, content: '', isStreaming: false,
+        systemCardType: 'agy-file-access' as const, systemCardData: { text: decodeRemoteErrorMessage(m.content) },
+        botPrivateReply: m.agentMeta.botPrivateReply,
+      };
+    }
     if (m.role === 'assistant' && m.agentMeta?.voiceCall?.version === 1) return {
       clientId: m.clientId, role: 'assistant' as const, content: '', isStreaming: false,
       systemCardType: 'voice-call' as const, systemCardData: { record: m.agentMeta.voiceCall },

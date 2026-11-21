@@ -700,6 +700,28 @@ describe('production Session event pipeline', () => {
     } finally { await h.dispose(); }
   });
 
+  it.each(['agy_host_write_notice', 'agy_write_outside_task', 'agy_sandbox_blocked'])(
+    'persists %s as a separate task message before turn completion', async reason => {
+      const h = harness();
+      h.deps.redactEventForRenderer.mockImplementation(value => value);
+      try {
+        h.emit(event('error', { reason, message: 'File access notice', isTerminal: false }, { source: 'agy' }));
+        expect(effects.fn('onStandaloneTextEvent')).toHaveBeenCalledWith('task', 'File access notice',
+          expect.objectContaining({ agyFileAccessNotice: true }));
+        h.emit(event('done', {}, { source: 'agy' }));
+        expect(effects.fn('onStandaloneTextEvent')).toHaveBeenCalledTimes(1);
+      } finally { await h.dispose(); }
+    });
+
+  it('keeps terminal errors and other providers on their existing paths', async () => {
+    const h = harness();
+    try {
+      h.emit(event('error', { reason: 'agy_host_write_notice', message: 'SDK error', isTerminal: false }, { source: 'codex' }));
+      h.emit(event('error', { reason: 'agy_host_write_notice', message: 'SDK error', isTerminal: true }, { source: 'agy' }));
+      expect(effects.fn('onStandaloneTextEvent')).not.toHaveBeenCalled();
+    } finally { await h.dispose(); }
+  });
+
   it('keeps terminal failures and runtime recovery notices visible during coordination', async () => {
     const h = harness();
     h.deps.redactEventForRenderer.mockImplementation(value => value);

@@ -66,6 +66,7 @@ import { getSessionDeviceId } from '@/features/device-link/remoteProjectsStore';
 
 interface SystemCardProps {
   cardType:
+    | 'agy-file-access'
     | 'plugin-model-route'
     | 'voice-call'
     | 'voice-call-task'
@@ -1546,6 +1547,13 @@ export function SystemCard({
     cardType === 'cindy-make-complete'
   ) return null;
   switch (cardType) {
+    case 'agy-file-access':
+      return typeof data?.text === 'string' ? (
+        <div role="note" className="flex items-start gap-2 py-1 text-sm text-foreground">
+          <Info aria-hidden="true" className="mt-0.5 size-4 shrink-0 text-muted-foreground" />
+          <span className="min-w-0 whitespace-pre-wrap break-words">{data.text}</span>
+        </div>
+      ) : null;
     case 'help':
       return <HelpCard data={data} />;
     case 'cost':
