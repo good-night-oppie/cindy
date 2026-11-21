@@ -14621,6 +14621,7 @@
     "verificationFailed": "ChatGPT ログインが復旧したか確認できませんでした。再確認してください。"
   },
   "chat": {
+    "agyIdleExit": "タスクの待機中に Antigravity が終了しました。ここでメッセージを送ると再開できます。",
     "pluginModelRoute": {
       "routed": "がこのタスクに選んだモデル：",
       "kept": {

@@ -14681,6 +14681,7 @@
     "verificationFailed": "Cindy couldn’t confirm whether the ChatGPT sign-in has recovered. Check again."
   },
   "chat": {
+    "agyIdleExit": "Antigravity stopped while this task was idle. Send a message here to resume.",
     "pluginModelRoute": {
       "routed": "chose for this task",
       "kept": {

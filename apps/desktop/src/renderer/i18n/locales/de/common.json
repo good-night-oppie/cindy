@@ -14681,6 +14681,7 @@
     "verificationFailed": "Cindy konnte nicht bestätigen, ob die ChatGPT-Anmeldung wiederhergestellt ist. Prüfe es erneut."
   },
   "chat": {
+    "agyIdleExit": "Antigravity wurde beendet, während diese Aufgabe inaktiv war. Sende hier eine Nachricht, um fortzufahren.",
     "pluginModelRoute": {
       "routed": "hat für diese Aufgabe gewählt:",
       "kept": {

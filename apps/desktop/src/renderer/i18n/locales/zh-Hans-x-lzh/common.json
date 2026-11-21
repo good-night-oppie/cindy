@@ -14621,6 +14621,7 @@
     "verificationFailed": "暂未能确知 ChatGPT 登录已复否，请再察。"
   },
   "chat": {
+    "agyIdleExit": "任务闲时，Antigravity 已退。于此发讯即可续之。",
     "teammateProcess": {
       "empty": "此番无可示之处理记录",
       "unavailable": "未能读取处理记录",

@@ -881,8 +881,8 @@ export class AgyAgent extends BaseAgent {
                     message: stalled ? stallMessage(stallTimeoutMs)
                       : userCancelled ? 'agy turn cancelled'
                       : error instanceof AcpRpcError ? safeError(error)
-                        : error instanceof Error && error.message === WINDOWS_HELPER_STOPPED ? WINDOWS_HELPER_STOPPED
-                        : `Antigravity CLI (agy) stopped unexpectedly during this turn${stderrHint(client)}. Reopen this task to resume.`,
+                        : error instanceof Error && error.message === WINDOWS_HELPER_STOPPED ? 'The Antigravity Windows helper stopped. Select Retry to continue here.'
+                        : `Antigravity CLI (agy) stopped unexpectedly during this turn${stderrHint(client)}. Select Retry to continue here.`,
                     isTerminal: true,
                     reason: stalled ? 'agy_stall_timeout' : userCancelled ? 'agy_cancelled' : error instanceof AcpRpcError ? 'agy_acp_error' : 'agy_acp_disconnected' } });
                 }

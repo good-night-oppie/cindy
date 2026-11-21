@@ -57,6 +57,8 @@ vi.mock('@/lib/composerDraftStore', () => ({
 }));
 
 import { EMPTY_SESSION_STATE, handleStreamEvent, makerChatStore } from '@/lib/makerChatStore';
+import { toast, getToastSnapshot } from '@/lib/toast';
+import { i18n } from '@/i18n';
 import { findActiveReconnect } from '@/lib/autoResumePresentation';
 import * as messageService from '@/lib/messageService';
 import type { Message } from '@/lib/ccAgent.types';
@@ -533,6 +535,44 @@ describe('applyInputProjection 自愈进行中提示', () => {
         .getSnapshot(SID)
         .messages.some((m) => m.clientId === '__codex_reconnect_pending__'),
     ).toBe(false);
+  });
+
+  it('shows the idle agy exit notice in the active task and keeps it visible after close', async () => {
+    vi.useFakeTimers();
+    const leave = makerChatStore.enterView(SID);
+    try {
+      const sendExit = (isTerminal: boolean) => makerEventCb!({
+        sessionId: SID,
+        event: { type: 'error', source: 'agy', data: {
+          message: 'The CLI has exited.', reason: 'agy_acp_disconnected', isTerminal,
+        } },
+      });
+      sendExit(false);
+      makerStatusCb!({ sessionId: SID, status: 'closed' });
+      const notice = () => getToastSnapshot().filter(item =>
+        item.message === i18n.t('chat.agyIdleExit') && !item.exiting);
+      expect(notice()).toHaveLength(1);
+      expect(notice()[0]).toMatchObject({ variant: 'info' });
+      const { ToastContainer } = await import('@/components/ui/toast/ToastContainer');
+      const { createElement } = await import('react');
+      const { renderToStaticMarkup } = await import('react-dom/server');
+      expect(renderToStaticMarkup(createElement(ToastContainer))).toContain(i18n.t('chat.agyIdleExit'));
+      vi.advanceTimersByTime(4000);
+      expect(notice()).toHaveLength(1);
+      expect(makerChatStore.getSnapshot(SID)).toMatchObject({
+        isStreaming: false, agentStatus: { isRunning: false }, error: null, errorRetryText: null,
+      });
+
+      sendExit(true);
+      expect(notice()).toHaveLength(1);
+      leave();
+      sendExit(false);
+      expect(notice()).toHaveLength(1);
+    } finally {
+      toast.dismissAll();
+      vi.advanceTimersByTime(400);
+      if (makerChatStore.__activeViewTest.getActiveSessionIds().includes(SID)) leave();
+    }
   });
 
   it('status=closed 即使缺少 done 也会撤掉 Cindy 接管活动行', () => {

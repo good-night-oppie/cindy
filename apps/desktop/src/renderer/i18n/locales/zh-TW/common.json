@@ -14621,6 +14621,7 @@
     "verificationFailed": "暫時無法確認 ChatGPT 登入是否已恢復，請重新檢測。"
   },
   "chat": {
+    "agyIdleExit": "任務閒置時 Antigravity 已結束。在這裡傳送訊息即可繼續。",
     "pluginModelRoute": {
       "routed": "為這個任務選了",
       "kept": {

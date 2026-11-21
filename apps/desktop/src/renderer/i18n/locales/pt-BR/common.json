@@ -14803,6 +14803,7 @@
     "verificationFailed": "O Cindy não conseguiu confirmar se o login do ChatGPT foi restaurado. Verifique novamente."
   },
   "chat": {
+    "agyIdleExit": "O Antigravity foi encerrado enquanto a tarefa estava inativa. Envie uma mensagem aqui para continuar.",
     "pluginModelRoute": {
       "routed": "escolheu para esta tarefa",
       "kept": {

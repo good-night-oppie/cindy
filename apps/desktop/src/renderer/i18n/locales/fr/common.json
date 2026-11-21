@@ -14803,6 +14803,7 @@
     "verificationFailed": "Cindy n'a pas pu confirmer le rétablissement de la connexion ChatGPT. Vérifiez à nouveau."
   },
   "chat": {
+    "agyIdleExit": "Antigravity s’est arrêté pendant que cette tâche était inactive. Envoyez un message ici pour reprendre.",
     "pluginModelRoute": {
       "routed": "a choisi pour cette tâche",
       "kept": {

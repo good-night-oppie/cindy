@@ -411,6 +411,7 @@ describe('AgyAgent turns', () => {
     const error = events.find(event => event.type === 'error')!.data as Record<string, unknown>;
     expect(error).toMatchObject({ isTerminal: true, reason: 'agy_acp_disconnected' });
     expect(String(error.message)).toContain('panic: something broke');
+    expect(String(error.message)).toContain('Select Retry');
   });
 });
 

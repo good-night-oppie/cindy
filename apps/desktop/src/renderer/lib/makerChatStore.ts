@@ -8532,6 +8532,18 @@ function initGlobalListeners(options: GlobalListenerOptions = {}): void {
       return;
     }
 
+    // An idle disconnect ends the runtime after a completed turn. Its closed
+    // status clears turn errors, so show the notice independently of that state.
+    if (event.type === 'error' && event.source === 'agy') {
+      const data = event.data as { reason?: string; isTerminal?: boolean } | null;
+      if (data?.reason === 'agy_acp_disconnected' && data.isTerminal === false) {
+        if (!ingress.remoteDeviceId && _activeViewSessions.has(sessionId)) {
+          toast.info(i18n.t('chat.agyIdleExit'), { duration: 8000 });
+        }
+        return;
+      }
+    }
+
     if (isTextDeltaEvent(event)) {
       enqueueTextDeltaPayload(sessionId, event, persistId, ingress);
       return;
