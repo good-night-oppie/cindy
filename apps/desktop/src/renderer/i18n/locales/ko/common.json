@@ -4342,6 +4342,8 @@
         "metaApiKey": "API key",
         "metaNoAuth": "로컬 / 자체 호스팅 · 인증 없음",
         "customAction": "찾는 항목이 없나요? 직접 추가",
+        "antigravityDesc": "이 컴퓨터에서 Antigravity CLI에 로그인한 Google 계정을 사용합니다. API 키는 필요하지 않습니다.",
+        "antigravityNotSignedIn": "이 컴퓨터의 Antigravity CLI에 아직 로그인하지 않았습니다. 터미널에서 agy를 실행하고 Google 계정으로 로그인한 후 다시 시도하세요.",
         "oauthDesc": "브라우저에서 로그인합니다. API key는 필요하지 않습니다.",
         "deviceOAuthDesc": "일회용 기기 코드를 사용해 제공자 인증 페이지에서 인증하세요",
         "authorizeInBrowser": "브라우저에서 인증",

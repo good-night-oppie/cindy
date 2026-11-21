@@ -1,6 +1,8 @@
-import { spawnSync } from 'node:child_process';
+import { execFile, spawnSync } from 'node:child_process';
 import { linkSync, mkdirSync, mkdtempSync, readFileSync, realpathSync, rmSync, statSync, writeFileSync, existsSync } from 'node:fs';
 import net from 'node:net';
+import http from 'node:http';
+import { promisify } from 'node:util';
 import os from 'node:os';
 import path from 'node:path';
 import { afterAll, describe, expect, it } from 'vitest';
@@ -396,6 +398,31 @@ const probe = probeAgySystemSandbox(process.env.AGY_SANDBOX_TEST_PASTA ? { pasta
 describe.runIf(probe.ok)('real bubblewrap decoy check', () => {
   const root = realpathSync(mkdtempSync(path.join(os.tmpdir(), 'agy-sbx-test-')));
   afterAll(() => rmSync(root, { recursive: true, force: true }));
+
+  it('receives a reply from the configured loopback bridge inside the real sandbox', async () => {
+    const task = mkdtempSync(path.join(root, 'bridge-task-'));
+    const server = http.createServer((req, res) => res.end(req.url === '/health' ? 'bridge ready' : 'unexpected path'));
+    await new Promise<void>((resolve, reject) => {
+      server.once('error', reject);
+      server.listen(0, '127.0.0.1', resolve);
+    });
+    try {
+      const port = (server.address() as net.AddressInfo).port;
+      const url = 'http://127.0.0.1:' + port + '/health';
+      const launch = await prepareAgySandboxedLaunch({
+        binaryPath: realpathSync(process.execPath), taskDir: task, homeDir: os.homedir(),
+        stateRoot: path.join(root, 'bridge-state'), probe, env: {}, hostLoopbackPorts: [port],
+        args: ['-e', "fetch(process.argv[1], { signal: AbortSignal.timeout(3000) }).then(r => r.text()).then(console.log)", url],
+      });
+      const { stdout } = await promisify(execFile)(launch.command, launch.args, {
+        cwd: task, env: launch.env, timeout: 7000,
+      });
+      expect(stdout.trim()).toBe('bridge ready');
+    } finally {
+      server.closeAllConnections();
+      await new Promise<void>(resolve => server.close(() => resolve()));
+    }
+  }, 10_000);
 
   it('blocks reads and writes outside the task dir and allows them inside', async () => {
     const task = path.join(root, 'task');

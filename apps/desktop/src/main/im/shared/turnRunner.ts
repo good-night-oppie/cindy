@@ -2383,7 +2383,17 @@ export function createTurnRunner(
     const target = await resolveExistingRouteTarget(botContextId, userId, scopeKey);
     if (!target) return;
     if (!target.attached) return;
-    await ensureSessionWired(target, userId);
+    if (target.row.agentKind !== 'agy' || !deps.acquirePendingAgentSwitch) {
+      await ensureSessionWired(target, userId);
+      return;
+    }
+    const release = await deps.acquirePendingAgentSwitch(target.row.id, { channelOwned: false });
+    try {
+      const current = await resolveExistingRouteTarget(botContextId, userId, scopeKey);
+      if (current?.attached && current.row.id === target.row.id) await ensureSessionWired(current, userId);
+    } finally {
+      release();
+    }
   }
 
   async function replyMissingAuth(

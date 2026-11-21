@@ -56,7 +56,8 @@ export async function assertAgyBinaryUsable(binaryPath: string, reader: AgyVersi
   const cached = cache.get(key);
   if (cached && cached.mtimeMs === info.mtimeMs && cached.size === info.size) return cached.version;
   let output: string;
-  try { output = await reader(binaryPath); } catch {
+  try { output = await reader(binaryPath); } catch (error) {
+    if (error instanceof AgyBinaryUnavailableError) throw error;
     throw new AgyBinaryUnavailableError(`Could not read the Antigravity CLI version from ${binaryPath}.`, 'agy_version_unknown');
   }
   const parsed = parseAgyVersion(output);

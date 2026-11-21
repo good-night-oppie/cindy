@@ -4821,8 +4821,8 @@ it.each(['unpublished', 'published'] as const)(
   },
 );
 
-it.runIf(process.platform === 'win32').each(['active', 'idle'] as const)('recovers the same agy task after its root exits with a live child while %s', async phase => {
-  const folder = mkdtempSync(path.join(tmpdir(), 'cindy-job-'));
+function windowsAgyTask(folder: string, helperPath?: () => string | undefined) {
+  let supervisorPid: number | null = null;
   const peer = fileURLToPath(new URL('./agents/acp/windows-job-peer.fixture.mjs', import.meta.url));
   const logger = createLogger();
   setAgyTaskDirStoreFile(path.join(folder, 'task-dirs.json'));
@@ -4830,10 +4830,31 @@ it.runIf(process.platform === 'win32').each(['active', 'idle'] as const)('recove
     binaryPath: process.execPath, runtimeConfig: {}, logger, skipAgyBinaryPreflight: true,
     auth: { getState: async () => ({ authenticated: true }), getAuthEnv: async () => ({}),
       triggerLogin: async () => ({ authenticated: true }), logout: async () => {} },
-    createAgyTransport: opts => spawnAcpTransport({ ...opts, args: [peer] }),
+    createAgyTransport: opts => {
+      const transport = spawnAcpTransport({ ...opts, args: [peer], windowsJobHelperPath: helperPath?.() });
+      supervisorPid = transport.getPid?.() ?? null;
+      return transport;
+    },
   } as AgyAgentDeps);
   const maker = new Maker({ agents: { agy: agent }, storage: createStorage(), logger });
   const options = { id: 'windows-recovery', agentKind: 'agy' as const, workingDir: folder, model: 'fixture-model' };
+  const cleanup = async () => {
+    try { await maker.shutdown(); } finally {
+      setAgyTaskDirStoreFile(null);
+      await fsPromises.rm(folder, { recursive: true, force: true, maxRetries: 10, retryDelay: 100 });
+    }
+  };
+  return { maker, options, getSupervisorPid: () => supervisorPid, cleanup };
+}
+
+it.runIf(process.platform === 'win32').each([
+  { phase: 'active', target: 'root' },
+  { phase: 'idle', target: 'root' },
+  { phase: 'active', target: 'helper' },
+  { phase: 'idle', target: 'helper' },
+])('recovers the same agy task after its $target exits with a live child while $phase', async ({ phase, target }) => {
+  const folder = mkdtempSync(path.join(tmpdir(), 'cindy-job-'));
+  const { maker, options, getSupervisorPid, cleanup } = windowsAgyTask(folder);
   try {
     const first = await maker.createSession(options);
     const errors = vi.fn();
@@ -4845,10 +4866,25 @@ it.runIf(process.platform === 'win32').each(['active', 'idle'] as const)('recove
     await vi.waitFor(() => fsPromises.access(pidsFile), { timeout: 5000 });
     const [root, child]: number[] = JSON.parse(await fsPromises.readFile(pidsFile, 'utf8'));
     for (const pid of [root, child]) expect(process.kill(pid, 0)).toBe(true);
-    writeFileSync(path.join(folder, 'exit-root'), '');
+    if (target === 'helper') {
+      // Only stop the supervisor we started. The fixture root stays alive until its job closes.
+      const supervisor = getSupervisorPid();
+      expect(supervisor).toBeGreaterThan(0);
+      expect([root, child]).not.toContain(supervisor);
+      process.kill(supervisor!);
+    } else {
+      writeFileSync(path.join(folder, 'exit-root'), '');
+    }
     await vi.waitFor(() => expect(errors).toHaveBeenCalledWith(expect.objectContaining({
       type: 'error', data: expect.objectContaining({ isTerminal: phase === 'active', reason: 'agy_acp_disconnected' }),
     })), { timeout: 10000 });
+    if (target === 'helper') {
+      expect(errors).toHaveBeenCalledWith(expect.objectContaining({
+        type: 'error', data: expect.objectContaining({ message: expect.stringMatching(/Windows helper.*(?:try again|send another|retry|reinstall)/is) }),
+      }));
+      // Make only the restarted fixture echo the recovery prompt.
+      writeFileSync(path.join(folder, 'exit-root'), '');
+    }
     await vi.waitFor(() => expect(first.getStatus()).toBe('closed'), { timeout: 5000 });
     expect(maker.getSession(options.id)).toBeUndefined();
     const restored = maker.getSession(options.id) ?? await maker.createSession(options);
@@ -4862,9 +4898,27 @@ it.runIf(process.platform === 'win32').each(['active', 'idle'] as const)('recove
       type: 'text', data: expect.objectContaining({ text: expect.stringContaining('received: second turn') }),
     })), { timeout: 5000 });
   } finally {
-    try { await maker.shutdown(); } finally {
-      setAgyTaskDirStoreFile(null);
-      rmSync(folder, { recursive: true, force: true });
-    }
+    await cleanup();
+  }
+}, 45000);
+
+it.runIf(process.platform === 'win32')('explains a missing Windows helper and lets the same task start after repair', async () => {
+  const folder = mkdtempSync(path.join(tmpdir(), 'cindy-job-'));
+  let helperPath: string | undefined = path.join(folder, 'not-installed.exe');
+  const { maker, options, cleanup } = windowsAgyTask(folder, () => helperPath);
+  try {
+    await expect(maker.createSession(options)).rejects.toThrow(/Windows helper.*(?:try again|retry|reinstall)/is);
+    expect(maker.getSession(options.id)).toBeUndefined();
+    helperPath = undefined;
+    writeFileSync(path.join(folder, 'exit-root'), '');
+    const session = await maker.createSession(options);
+    const observed = vi.fn();
+    session.onEvent(observed);
+    await session.send('after repair');
+    await vi.waitFor(() => expect(observed).toHaveBeenCalledWith(expect.objectContaining({
+      type: 'text', data: expect.objectContaining({ text: expect.stringContaining('received: after repair') }),
+    })), { timeout: 5000 });
+  } finally {
+    await cleanup();
   }
 }, 45000);

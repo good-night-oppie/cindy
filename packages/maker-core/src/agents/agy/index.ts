@@ -31,6 +31,7 @@ import {
 } from '../base-agent.js';
 import { LIBRARY_READ_ROOT } from '../shared/library-native-read.js';
 import { AcpClient, AcpRpcError } from '../acp/client.js';
+import { windowsAcpLaunch, WINDOWS_HELPER_START_FAILED, WINDOWS_HELPER_STOPPED } from '../acp/windows-job.js';
 import { spawnAcpTransport, type AcpTransport } from '../acp/transport.js';
 import type { Capabilities } from '../../types/capabilities.js';
 import { NotSupportedError } from '../../types/capabilities.js';
@@ -73,7 +74,7 @@ export const AGY_ACP_ARGS = ['acp', '--disable-telemetry'] as const;
 const yes = { supported: true } as const;
 const no = { supported: false, reason: 'not-implemented' } as const;
 // Wording pending JJ (cindy#1 6908586833 item 4): say exactly what the isolation does and does not do.
-const NATIVE_PERMISSION_DESCRIPTION = 'Antigravity can change files in this task folder and its private CLI state. Cindy tools run on the host and may request access to other files. Cindy handles approval requests from the CLI and tools.';
+const NATIVE_PERMISSION_DESCRIPTION = 'Antigravity can read and change this task folder and its own settings. It can read the system files it needs and reach the internet. Other home folders stay hidden. When you share your CLI sign-in, it can read the login token but cannot change it. Cindy tools run on your computer and may ask to use other files.';
 // Used only where no system-level isolation exists (Windows, macOS). Wording pending JJ.
 const UNSANDBOXED_PERMISSION_DESCRIPTION = 'Antigravity runs without system-level file isolation on this computer: it can reach any file your user account can, limited only by the approval requests it sends to Cindy. Requests outside this task\'s folder are worth reading before you allow them.';
 // Same meaning as Full access on the other engines: no file isolation, network commands allowed, no questions.
@@ -89,6 +90,7 @@ export interface AgyAgentDeps extends AgentDeps {
   /** Optional trusted-host restriction; absent permits any explicitly selected catalog model. */
   agyAllowedModels?: readonly string[];
   /** Test/embedding seam; production spawns the exact host-resolved executable. */
+  windowsJobHelperPath?: string;
   createAgyTransport?: (options: { binaryPath: string; args: readonly string[]; cwd: string; env: NodeJS.ProcessEnv }) => AcpTransport;
   /** Test seam for `agy --version`. */
   readAgyVersion?: AgyVersionReader;
@@ -187,8 +189,18 @@ export class AgyAgent extends BaseAgent {
     cliArgCount: number, cwd: string, isolation: 'host' | 'sandbox' | 'full'): Promise<string> {
     // The prepared launch ends in the CLI arguments; preserve its wrapper and all mount/network options.
     const args = [...launch.args.slice(0, -cliArgCount), '--version'];
-    return assertAgyBinaryUsable(binaryPath, this.deps.readAgyVersion ?? (() =>
-      readAgyVersionOutput(launch.command, args, { cwd, env: launch.env })), isolation);
+    return assertAgyBinaryUsable(binaryPath, this.deps.readAgyVersion ?? (async () => {
+      if (process.platform !== 'win32') return readAgyVersionOutput(launch.command, args, { cwd, env: launch.env });
+      const helper = windowsAcpLaunch(launch.command, args, cwd, launch.env, this.deps.windowsJobHelperPath);
+      try {
+        return await readAgyVersionOutput(helper.binary, [...helper.args, '--version-check'], { cwd: helper.cwd, env: helper.env });
+      } catch (error) {
+        if (['ENOENT', 'EACCES', 'EPERM'].includes((error as NodeJS.ErrnoException).code ?? '')) {
+          throw new AgyBinaryUnavailableError(WINDOWS_HELPER_START_FAILED, 'agy_version_unknown');
+        }
+        throw error;
+      }
+    }), isolation);
   }
 
   /** Discover the catalog in an empty task directory with the normal isolation policy. */
@@ -202,7 +214,7 @@ export class AgyAgent extends BaseAgent {
       if (process.platform !== 'linux' && !config?.allowWithoutSystemSandbox) {
         throw new AgySandboxUnavailableError('unsupported-platform', process.platform);
       }
-      const cwd = await mkdtemp(path.join(os.tmpdir(), 'cindy-agy-models-'));
+      const cwd = realpathSync(await mkdtemp(path.join(os.tmpdir(), 'cindy-agy-models-')));
       let failed = false;
       try {
         const homeDir = os.homedir();
@@ -217,7 +229,7 @@ export class AgyAgent extends BaseAgent {
         await this.checkLaunchVersion(binaryPath, launch, AGY_ACP_ARGS.length, cwd,
           process.platform === 'linux' ? 'sandbox' : 'host');
         const transport = (this.deps.createAgyTransport ?? spawnAcpTransport)({
-          binaryPath: launch.command, args: launch.args, cwd, env: launch.env,
+          windowsJobHelperPath: this.deps.windowsJobHelperPath, binaryPath: launch.command, args: launch.args, cwd, env: launch.env,
         });
         const client = new AcpClient(transport, { requestTimeoutMs: CONTROL_TIMEOUT });
         let catalog: ReturnType<typeof readAgyCatalog>;
@@ -567,7 +579,7 @@ export class AgyAgent extends BaseAgent {
         cancelled = true;
         preparingController?.abort();
         clearInteractions();
-        if (running && sessionId) await client?.notify('session/cancel', { sessionId }).catch(() => {});
+        if (running && sessionId) void client?.notify('session/cancel', { sessionId }).catch(() => {});
         await client?.close();
         await active?.catch(() => {});
         releaseTaskDir?.(); releaseTaskDir = undefined;
@@ -585,12 +597,11 @@ export class AgyAgent extends BaseAgent {
       cancelled = true;
       preparingController?.abort();
       clearInteractions();
-      await client!.notify('session/cancel', { sessionId }).catch(() => {});
+      const notification = client!.notify('session/cancel', { sessionId }).catch(() => {});
       const current = active;
-      if (!current) return;
       let timer: ReturnType<typeof setTimeout> | undefined;
       try {
-        await Promise.race([current.catch(() => {}), new Promise<never>((_, reject) => {
+        await Promise.race([Promise.all([notification, current?.catch(() => {})]), new Promise<never>((_, reject) => {
           timer = setTimeout(() => reject(new Error('agy did not confirm cancellation')), CANCEL_TIMEOUT);
         })]);
       } catch {
@@ -698,7 +709,7 @@ export class AgyAgent extends BaseAgent {
         this.deps.logger.debug('agy binary accepted', { version });
       }
       assertCurrent();
-      const transport = (this.deps.createAgyTransport ?? spawnAcpTransport)({ binaryPath: launch.command, args: launch.args, cwd: agyWorkingDir, env: launch.env });
+      const transport = (this.deps.createAgyTransport ?? spawnAcpTransport)({ windowsJobHelperPath: this.deps.windowsJobHelperPath, binaryPath: launch.command, args: launch.args, cwd: agyWorkingDir, env: launch.env });
       client = new AcpClient(transport, {
         requestTimeoutMs: CONTROL_TIMEOUT, onRequest,
         onNotification: (method, raw) => {
@@ -714,14 +725,14 @@ export class AgyAgent extends BaseAgent {
           }
           if (running && !loading) translator.update(update);
         },
-        onClose: () => {
+        onClose: (error) => {
           clearInteractions();
           watchdog.stop();
           if (!loading && !running && !fenced && !closed) {
             fenced = true;
             // A completed turn already has its terminal event. Report the runtime loss
             // separately and end the stream after cleanup so the next send can lazy-resume.
-            emit({ type: 'error', data: { message: 'Antigravity CLI (agy) exited while idle. Send another message to resume.', isTerminal: false, reason: 'agy_acp_disconnected' } });
+            emit({ type: 'error', data: { message: error.message === WINDOWS_HELPER_STOPPED ? WINDOWS_HELPER_STOPPED : 'Antigravity CLI (agy) exited while idle. Send another message to resume.', isTerminal: false, reason: 'agy_acp_disconnected' } });
             void Promise.resolve().then(close).catch(() => {
               emit({ type: 'error', data: { message: 'agy process stop is not confirmed. Retry closing this task.', isTerminal: false, reason: 'agy_cleanup_pending' } });
             });
@@ -870,6 +881,7 @@ export class AgyAgent extends BaseAgent {
                     message: stalled ? stallMessage(stallTimeoutMs)
                       : userCancelled ? 'agy turn cancelled'
                       : error instanceof AcpRpcError ? safeError(error)
+                        : error instanceof Error && error.message === WINDOWS_HELPER_STOPPED ? WINDOWS_HELPER_STOPPED
                         : `Antigravity CLI (agy) stopped unexpectedly during this turn${stderrHint(client)}. Reopen this task to resume.`,
                     isTerminal: true,
                     reason: stalled ? 'agy_stall_timeout' : userCancelled ? 'agy_cancelled' : error instanceof AcpRpcError ? 'agy_acp_error' : 'agy_acp_disconnected' } });

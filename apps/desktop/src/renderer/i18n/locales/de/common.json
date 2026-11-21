@@ -4385,6 +4385,8 @@
         "metaApiKey": "API-Schlüssel",
         "metaNoAuth": "Lokal / selbst gehostet · keine Authentifizierung",
         "customAction": "Nicht aufgeführt? Benutzerdefiniert hinzufügen",
+        "antigravityDesc": "Verwendet das Google-Konto, mit dem du auf diesem Computer bei Antigravity CLI angemeldet bist. Ein API-Schlüssel ist nicht erforderlich.",
+        "antigravityNotSignedIn": "Du bist auf diesem Computer nicht bei Antigravity CLI angemeldet. Führe agy in einem Terminal aus, melde dich mit Google an und versuche es erneut.",
         "oauthDesc": "Melde dich über deinen Browser an. Kein API-Schlüssel erforderlich.",
         "deviceOAuthDesc": "Auf der Verifizierungsseite des Anbieters mit einem einmaligen Gerätecode autorisieren",
         "authorizeInBrowser": "Im Browser autorisieren",

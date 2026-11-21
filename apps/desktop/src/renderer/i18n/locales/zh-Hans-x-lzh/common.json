@@ -4342,6 +4342,8 @@
         "metaApiKey": "API key",
         "metaNoAuth": "此机 / 自托管 · 无须鉴权",
         "customAction": "未得？增自订",
+        "antigravityDesc": "用本机已登 Antigravity CLI 之 Google 账号，无须 API key。",
+        "antigravityNotSignedIn": "本机 Antigravity CLI 尚未登门。请于终端运行 agy，以 Google 账号登门，再试之。",
         "oauthDesc": "于浏览器中登门，无须 API key。",
         "deviceOAuthDesc": "以一次性设备码，于供方验证页完成授权",
         "authorizeInBrowser": "于浏览器授权",

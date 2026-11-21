@@ -4441,6 +4441,8 @@
         "metaApiKey": "Clave API",
         "metaNoAuth": "Local/autohospedado · sin autenticación",
         "customAction": "¿No aparece? Añadir personalizado",
+        "antigravityDesc": "Se utiliza la cuenta de Google con la que ha iniciado sesión en Antigravity CLI en este equipo. No se requiere una clave API.",
+        "antigravityNotSignedIn": "No ha iniciado sesión en Antigravity CLI en este equipo. Ejecute agy en un terminal, inicie sesión con Google y vuelva a intentarlo.",
         "oauthDesc": "Inicie sesión a través de su navegador. No se requiere clave API.",
         "deviceOAuthDesc": "Autorizar en la página de verificación del proveedor con un código de dispositivo único",
         "authorizeInBrowser": "Autorizar en el navegador",

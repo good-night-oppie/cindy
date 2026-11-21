@@ -33,6 +33,7 @@ class FakeAgy implements AcpTransport {
   receiptOverride?: (configId: string, value: string) => Record<string, string | undefined>;
   failSessionNew?: { code: number; message: string; data?: unknown };
   cancelResolves = true;
+  cancelWriteBlocked = false;
   stderr = '';
   configOptions() {
     return [MODEL_OPTION(this.config.model), ...(this.config.thought_level ? [EFFORT_OPTION(this.config.thought_level)] : []), MODE_OPTION(this.config.mode)];
@@ -64,6 +65,7 @@ class FakeAgy implements AcpTransport {
         return reply({ configOptions: this.configOptions() });
       }
       case 'session/cancel': {
+        if (this.cancelWriteBlocked) return new Promise<void>(() => {});
         if (!this.cancelResolves) return;
         const prompt = this.lastPrompt();
         if (prompt) queueMicrotask(() => this.emit({ jsonrpc: '2.0', id: prompt.id, result: { stopReason: 'cancelled' } }));
@@ -380,10 +382,11 @@ describe('AgyAgent turns', () => {
     expect(events.find(event => event.type === 'done')?.data).toMatchObject({ stopReason: 'cancelled', cancelled: true });
   });
 
-  it('fences the process when agy does not confirm cancellation', async () => {
+  it.each([false, true])('fences the process when cancellation does not complete (blocked write: %s)', async blocked => {
     vi.useFakeTimers();
     const fake = new FakeAgy();
     fake.cancelResolves = false;
+    fake.cancelWriteBlocked = blocked;
     const { start } = create(fake);
     const handle = await start();
     await handle.send({ type: 'user', content: 'long task' });

@@ -65,11 +65,11 @@ describe('ACP stdio transport', () => {
     await closed;
     await f.transport.close();
   });
-  it('rejects an unconfirmed Windows supervisor exit', async () => {
+  it('releases the transport after an abnormal Windows job owner exit', async () => {
     const f = fixture({ platformOverride: 'win32' });
     f.child.exitCode = 1;
     f.child.emit('exit', 1);
-    await expect(f.transport.close()).rejects.toThrow('tree exit could not be confirmed');
+    await expect(f.transport.close()).resolves.toBeUndefined();
   });
   it('proves failed spawn has no child and propagates stdout EOF', async () => {
     const f = fixture(); Object.assign(f.child, { pid: undefined }); f.child.emit('error', new Error('private path'));

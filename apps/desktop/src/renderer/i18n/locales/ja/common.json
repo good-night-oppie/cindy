@@ -4342,6 +4342,8 @@
         "metaApiKey": "API key",
         "metaNoAuth": "ローカル / セルフホスト · 認証なし",
         "customAction": "見つかりませんか？カスタム追加",
+        "antigravityDesc": "このパソコンで Antigravity CLI にログインしている Google アカウントを使います。API キーは不要です。",
+        "antigravityNotSignedIn": "このパソコンの Antigravity CLI にはまだログインしていません。ターミナルで agy を実行し、Google アカウントでログインしてから、もう一度お試しください。",
         "oauthDesc": "ブラウザーでログインします。API キーは不要です。",
         "deviceOAuthDesc": "ワンタイムデバイスコードを使い、プロバイダーの認証ページで認証します",
         "authorizeInBrowser": "ブラウザで認証",
