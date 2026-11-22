@@ -15,6 +15,7 @@ import {
 } from '../sessionAgentSwitchHandler';
 import { agySwitchPermissionChange, permissionModeAfterSwitchToAgy } from '../../../shared/agentKindConversion';
 import { AgentSwitchPermissionUnconfirmedError, agySwitchPermissionIsUnconfirmed } from '../agentSwitchPermissionAgreement';
+import { runDeviceLinkInvokeContext } from '../../device-link/invoke-context.js';
 import { IpcHarness } from './helpers/ipcHarness';
 
 const ownership = vi.hoisted(() => ({ current: null as unknown }));
@@ -159,6 +160,13 @@ function fixture(initialMode: string) {
       agreedFor === null ? undefined : { agyPermissionAgreement: {
         change: agySwitchPermissionChange(agreedFor), mode: permissionModeAfterSwitchToAgy(agreedFor),
       } }),
+    /** The same pick arriving from another computer that controls this one, claiming an agreement. */
+    pickGeminiModelFromRemote: (agreedFor: string) => runDeviceLinkInvokeContext(
+      { controllerDeviceId: 'controller-1', channel: MAKER_INVOKE.SWITCH_SESSION_AGENT },
+      () => ipc.invoke(MAKER_INVOKE.SWITCH_SESSION_AGENT, id, 'agy', 'gemini-test', null, undefined, undefined,
+        { agyPermissionAgreement: {
+          change: agySwitchPermissionChange(agreedFor), mode: permissionModeAfterSwitchToAgy(agreedFor),
+        } })),
     pendingSwitch: () => ipc.invoke(MAKER_INVOKE.GET_SESSION_AGENT_SWITCH_INTENT, id),
     /** Picking a model of the engine the task runs on withdraws the pending switch. */
     withdrawSwitch: () => ipc.invoke(MAKER_INVOKE.SWITCH_SESSION_AGENT, id, 'claude-code', 'claude-test', null),
@@ -299,6 +307,25 @@ describe('switching a task into Antigravity from the model picker, with permissi
     await h.pickGeminiModel(null);
     await expect(h.send()).rejects.toBeInstanceOf(AgentSwitchPermissionUnconfirmedError);
     expect(h.row).toMatchObject({ agentKind: 'cc', permissionMode: 'bypassPermissions' });
+  });
+
+  // DD 7079095110: only this computer's composer shows the dialog an agreement comes from. A
+  // controller on another computer can register the switch, and the registration succeeds, but an
+  // agreement it sends along counts for nothing: the message is held until this computer confirms.
+  // It also cannot take away an agreement this computer has already given.
+  it('takes no agreement from a remote controller, and keeps this computer\'s own', async () => {
+    const h = fixture('bypassPermissions');
+    await expect(h.pickGeminiModelFromRemote('bypassPermissions')).resolves.toMatchObject({ deferred: true });
+    await expect(h.send()).rejects.toMatchObject({ code: 'AGENT_SWITCH_PERMISSION_UNCONFIRMED' });
+    await expect(h.pickGeminiModelFromRemote('bypassPermissions')).resolves.toMatchObject({ deferred: true });
+    await expect(h.send()).rejects.toMatchObject({ code: 'AGENT_SWITCH_PERMISSION_UNCONFIRMED' });
+    expect(h.row).toMatchObject({ agentKind: 'cc', permissionMode: 'bypassPermissions' });
+    expect(h.log).toEqual([]);
+
+    await h.pickGeminiModel();
+    await h.pickGeminiModelFromRemote('acceptEdits');
+    await h.send();
+    expect(h.log).toEqual(['switched agy auto', 'launch agy auto isolated']);
   });
 
   it('keeps what was agreed when another Gemini model is picked while the switch is pending', async () => {

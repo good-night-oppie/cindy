@@ -4793,6 +4793,7 @@ function CCAgentSessionContent({
     error: readOnly ? null : error,
     runningAgent: session ? dbToMakerAgentKind(session.agentKind) : null,
     permissionMode: session?.permissionMode,
+    remote: remoteDeviceId != null,
     confirm: confirmDialog,
     retry: handleRetry,
   });

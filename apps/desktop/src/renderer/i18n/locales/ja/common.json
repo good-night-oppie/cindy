@@ -14922,6 +14922,7 @@
       "viewBalance": "残高を見る",
       "viewBalanceTitle": "「使用量と請求」を開いて残高を確認・チャージ",
       "agentSwitchPermissionUnconfirmed": "このメッセージはまだ送信されていません。Antigravity に切り替えるとこのタスクの権限が変わり、その変更にはあなたの確認がまだ必要です。「内容を確認」を選んでください。あなたが確認した後にのみ、Cindy は切り替えてこのメッセージを送信します。",
+      "agentSwitchPermissionUnconfirmedRemote": "このメッセージはまだ送信されていません。Antigravity に切り替えるとこのタスクの権限が変わり、その変更はタスクを実行しているパソコンで確認する必要があります。そこで確認された後にのみ、Cindy は切り替えてこのメッセージを送信します。",
       "agentSwitchPermissionReview": "内容を確認",
       "credentialSwitchBusy": "他の Codex タスクが実行中のため、このセッションで選択したプロバイダーへまだ切り替えられません（共有 Codex プロセスの再起動が必要です）。他のタスクの終了後に「再試行」を押してください。",
       "accountBoundaryPending": "Cindy がアカウント状態を切り替え中のため、まだこのタスクを開始できません。少し待ってから「再試行」を押してください。繰り返し表示される場合は Cindy を再起動してください。",

@@ -14950,6 +14950,7 @@
       "viewBalance": "Guthaben anzeigen",
       "viewBalanceTitle": "Öffne „Nutzung und Abrechnung“, um dein Guthaben zu prüfen und aufzuladen",
       "agentSwitchPermissionUnconfirmed": "Diese Nachricht wurde noch nicht gesendet. Der Wechsel zu Antigravity ändert die Berechtigungen dieser Aufgabe, und diese Änderung musst du noch bestätigen. Wähle „Prüfen und bestätigen“; Cindy wechselt und sendet diese Nachricht erst, nachdem du bestätigt hast.",
+      "agentSwitchPermissionUnconfirmedRemote": "Diese Nachricht wurde noch nicht gesendet. Der Wechsel zu Antigravity ändert die Berechtigungen dieser Aufgabe, und diese Änderung muss auf dem Computer bestätigt werden, auf dem die Aufgabe läuft. Cindy wechselt und sendet diese Nachricht erst, nachdem sie dort bestätigt wurde.",
       "agentSwitchPermissionReview": "Prüfen und bestätigen",
       "credentialSwitchBusy": "Eine andere Codex-Aufgabe läuft noch. Daher kann der Anbieter für diese Sitzung noch nicht angewendet werden (der gemeinsam genutzte Codex-Prozess muss neu gestartet werden). Versuch es erneut, sobald diese Aufgaben abgeschlossen sind.",
       "accountBoundaryPending": "Cindy stellt den Kontostatus noch um. Daher kann diese Aufgabe noch nicht starten. Warte kurz und klicke dann auf „Erneut versuchen“. Falls das weiterhin passiert, starte Cindy neu.",

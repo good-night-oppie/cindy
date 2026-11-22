@@ -14987,6 +14987,7 @@
       "viewBalance": "View balance",
       "viewBalanceTitle": "Open Usage and billing to check your balance and add funds",
       "agentSwitchPermissionUnconfirmed": "This message hasn't been sent. Switching to Antigravity will change this task's permissions, and that change still needs your confirmation. Select Review and confirm; Cindy switches and sends this message only after you confirm.",
+      "agentSwitchPermissionUnconfirmedRemote": "This message hasn't been sent. Switching to Antigravity will change this task's permissions, and that change has to be confirmed on the computer the task runs on. Cindy switches and sends this message only after it is confirmed there.",
       "agentSwitchPermissionReview": "Review and confirm",
       "credentialSwitchBusy": "Another Codex task is still running, so the provider for this session can't be applied yet (the shared Codex process needs a restart). Retry after those tasks finish.",
       "accountBoundaryPending": "Cindy is still switching account state, so this task can't start yet. Wait a moment, then press Retry. If this keeps happening, restart Cindy.",

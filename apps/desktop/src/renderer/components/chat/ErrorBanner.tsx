@@ -547,7 +547,10 @@ export function ErrorBanner({
   } else if (isPiImageInputUnsupportedError(error)) {
     displayError = t('ipcError.PI_IMAGE_INPUT_UNSUPPORTED');
   } else if (isAgentSwitchPermissionUnconfirmedError(error)) {
-    displayError = t('chat.errorBanner.agentSwitchPermissionUnconfirmed');
+    // The host takes an agreement only from the computer the task runs on.
+    displayError = deviceLinkDeviceId
+      ? t('chat.errorBanner.agentSwitchPermissionUnconfirmedRemote')
+      : t('chat.errorBanner.agentSwitchPermissionUnconfirmed');
   } else if (isCredentialSwitchBusy) {
     displayError = t('chat.errorBanner.credentialSwitchBusy');
   } else if (isAccountBoundaryPending) {
@@ -816,7 +819,9 @@ export function ErrorBanner({
           ? () => onDiagnose({ message: displayError, details: error, reason: errorReason })
           : undefined
       }
-      onDismiss={onCancel}
+      // Dismissing would leave the held message at the head of a paused queue with no way back
+      // to the confirmation; the user ends this state by confirming or by cancelling the message.
+      onDismiss={heldForPermissionConfirmation ? undefined : onCancel}
       icon={
         openAiConnectionRecoveredSinceError ? (
           <Check size={16} className="text-[var(--text-secondary)]" />
@@ -979,7 +984,8 @@ export function ErrorBanner({
               title={t('chat.errorBanner.retryTitle')}
             >
               <RotateCcw size={12} />
-              {heldForPermissionConfirmation ? t('chat.errorBanner.agentSwitchPermissionReview') : t('chat.errorBanner.retry')}
+              {heldForPermissionConfirmation && !deviceLinkDeviceId
+                ? t('chat.errorBanner.agentSwitchPermissionReview') : t('chat.errorBanner.retry')}
             </Button>
           )}
           {(showHistoryRecovery || showInvalidEncryptedContentRecovery) && onForkStripEncrypted && (

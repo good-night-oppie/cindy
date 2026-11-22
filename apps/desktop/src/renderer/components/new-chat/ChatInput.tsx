@@ -7448,6 +7448,9 @@ export function ChatInput({
   const confirmAgySwitchPermissionWhilePending = async (
     sourceSessionId: string, permissionMode: PermissionMode, about: 'sendConfirmation' | 'permissionConfirmation',
   ) => {
+    // The host takes an agreement only from the computer the task runs on. A dialog here would ask
+    // for a confirmation it then discards; the host holds the switch and its banner says where to confirm.
+    if (deviceLinkDeviceId) return true;
     if (agySwitchPermissionPromptOpenRef.current) return false;
     agySwitchPermissionPromptOpenRef.current = true;
     try {

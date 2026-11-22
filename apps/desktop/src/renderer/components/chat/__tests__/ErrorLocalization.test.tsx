@@ -323,6 +323,27 @@ it.each([['en', en], ['zh-CN', zhCN]] as const)('presents a held permission conf
   expect(screen.queryByText(/AGENT_SWITCH_PERMISSION_UNCONFIRMED/)).toBeNull();
   fireEvent.keyDown(window, { key: 'Escape' });
   expect(onCancel).not.toHaveBeenCalled();
+  // DD 7079095110: closing the banner left the held message at the head of a paused queue with no
+  // way back to the confirmation, so a held message offers no close button either.
+  expect(screen.queryByRole('button', { name: strings.chat.errorBanner.cancelTitle })).toBeNull();
   fireEvent.click(screen.getByRole('button', { name: strings.chat.errorBanner.agentSwitchPermissionReview }));
+  expect(onRetry).toHaveBeenCalledExactlyOnceWith('the held message');
+});
+
+// DD 7079095110: the host takes the agreement only from the computer the task runs on. A window
+// that controls the task from another computer used to be told to "review and confirm" something
+// it cannot confirm. It says where to confirm, and offers the ordinary retry for afterwards.
+it.each([['en', en], ['zh-CN', zhCN]] as const)('tells a remote controller where the held permission change is confirmed (%s)', async (lng, strings) => {
+  const i18n = createInstance();
+  await i18n.init({ lng, resources: { [lng]: { translation: strings } } });
+  const onRetry = vi.fn();
+  render(<I18nextProvider i18n={i18n}><ErrorBanner
+    error="AGENT_SWITCH_PERMISSION_UNCONFIRMED: The pending switch to Antigravity would change this task's permissions"
+    retryText="the held message" onRetry={onRetry} onCancel={vi.fn()} deviceLinkDeviceId="device-1" /></I18nextProvider>);
+  expect(screen.getByText(strings.chat.errorBanner.agentSwitchPermissionUnconfirmedRemote)).toBeTruthy();
+  expect(screen.queryByText(strings.chat.errorBanner.agentSwitchPermissionUnconfirmed)).toBeNull();
+  expect(screen.queryByRole('button', { name: strings.chat.errorBanner.agentSwitchPermissionReview })).toBeNull();
+  expect(screen.queryByRole('button', { name: strings.chat.errorBanner.cancelTitle })).toBeNull();
+  fireEvent.click(screen.getByRole('button', { name: strings.chat.errorBanner.retry }));
   expect(onRetry).toHaveBeenCalledExactlyOnceWith('the held message');
 });
