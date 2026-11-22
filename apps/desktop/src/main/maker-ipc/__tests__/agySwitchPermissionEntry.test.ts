@@ -13,7 +13,7 @@ import {
   type PendingAgentSwitchIntent,
 } from '../sessionAgentSwitchHandler';
 import { agySwitchPermissionChange, permissionModeAfterSwitchToAgy } from '../../../shared/agentKindConversion';
-import { AgentSwitchPermissionUnconfirmedError } from '../agentSwitchPermissionAgreement';
+import { AgentSwitchPermissionUnconfirmedError, agySwitchPermissionIsUnconfirmed } from '../agentSwitchPermissionAgreement';
 import { IpcHarness } from './helpers/ipcHarness';
 
 const ownership = vi.hoisted(() => ({ current: null as unknown }));
@@ -46,8 +46,9 @@ function fixture(initialMode: string) {
   };
   const log: string[] = [];
   const broadcasts: Record<string, unknown>[] = [];
-  const state: { live: Live | null; closeFails: boolean; launchGate?: Promise<void>; saveGate?: Promise<void> } =
-    { live: null, closeFails: false };
+  const state: { live: Live | null; closeFails: boolean; launchGate?: Promise<void>; saveGate?: Promise<void>;
+    /** What the switch's early read reports instead of the stored mode: a change landing just after it. */
+    staleModeAtEarlyRead?: string } = { live: null, closeFails: false };
   const launch = async () => {
     await state.launchGate;
     const mode = row.permissionMode;
@@ -81,11 +82,16 @@ function fixture(initialMode: string) {
   const pending = new Map<string, PendingAgentSwitchIntent>();
   const switchDeps: MakerSessionAgentSwitchHandlerDeps = {
     confirmNativeHistoryFallback: vi.fn(async () => true),
-    getSessionRow: vi.fn(async () => ({ ...row })),
+    getSessionRow: vi.fn(async () => ({ ...row, ...(state.staleModeAtEarlyRead ? { permissionMode: state.staleModeAtEarlyRead } : {}) })),
     getLiveSession: () => state.live,
     closeSession: async () => { state.live = null; },
     listMessagesForHandoff: vi.fn(async () => [{ role: 'user', content: 'hello', createdAt: 1 }]),
     applyAgentSwitchToDb: vi.fn(async (_id, patch) => {
+      // As the row commit does inside its statement (pinned to the real SQL in sessionsUpdate.test.ts).
+      if (patch.agyPermissionGuard && row.agentKind !== 'agy'
+        && agySwitchPermissionIsUnconfirmed(row.permissionMode, patch.agyPermissionGuard.agreement)) {
+        throw new AgentSwitchPermissionUnconfirmedError();
+      }
       if (patch.agentKind === 'agy' && row.agentKind !== 'agy') row.permissionMode = permissionModeAfterSwitchToAgy(row.permissionMode);
       row.agentKind = patch.agentKind;
       row.model = patch.model;
@@ -147,6 +153,8 @@ function fixture(initialMode: string) {
         change: agySwitchPermissionChange(agreedFor), mode: permissionModeAfterSwitchToAgy(agreedFor),
       } }),
     pendingSwitch: () => ipc.invoke(MAKER_INVOKE.GET_SESSION_AGENT_SWITCH_INTENT, id),
+    /** Picking a model of the engine the task runs on withdraws the pending switch. */
+    withdrawSwitch: () => ipc.invoke(MAKER_INVOKE.SWITCH_SESSION_AGENT, id, 'claude-code', 'claude-test', null),
     /** The send transaction's step: under the send lock, apply the registered switch and start the engine. */
     send: () => withSendToSessionLock(id, () => applyPendingAgentSwitchIfIdle(switchDeps, id, { bootstrapAfterSwitch: true })),
     setPermission: (mode: string) => setMode({}, id, mode),
@@ -220,6 +228,29 @@ describe('switching a task into Antigravity from the model picker, with permissi
     await kept.pickGeminiModel(null);
     await kept.send();
     expect(kept.row).toMatchObject({ agentKind: 'agy', permissionMode: 'auto' });
+  });
+
+  it('does not let an agreement from a withdrawn switch vouch for a later one', async () => {
+    const h = fixture('bypassPermissions');
+    await h.pickGeminiModel();
+    await h.withdrawSwitch();
+    await expect(h.pendingSwitch()).resolves.toBeNull();
+    // Registered again from a window that asked nothing (another window, or a stale composer).
+    await h.pickGeminiModel(null);
+    await expect(h.send()).rejects.toBeInstanceOf(AgentSwitchPermissionUnconfirmedError);
+    expect(h.row).toMatchObject({ agentKind: 'cc', permissionMode: 'bypassPermissions' });
+    expect(h.state.live).toBeNull();
+  });
+
+  it('catches a mode stored after the early read, when the switch is committed', async () => {
+    const h = fixture('ask');
+    await h.pickGeminiModel();
+    h.row.permissionMode = 'bypassPermissions';
+    h.state.staleModeAtEarlyRead = 'ask';
+    await expect(h.send()).rejects.toBeInstanceOf(AgentSwitchPermissionUnconfirmedError);
+    expect(h.row).toMatchObject({ agentKind: 'cc', permissionMode: 'bypassPermissions' });
+    expect(h.log).toEqual([]);
+    await expect(h.pendingSwitch()).resolves.toMatchObject({ targetAgentKind: 'agy' });
   });
 
   it('keeps what was agreed when another Gemini model is picked while the switch is pending', async () => {

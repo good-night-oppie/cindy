@@ -14920,6 +14920,7 @@
       "gatewayQuotaExhausted": "Cindy AI 餘額不足，請儲值後繼續",
       "viewBalance": "檢視餘額",
       "viewBalanceTitle": "開啟「用量和計費」檢視餘額並儲值",
+      "agentSwitchPermissionUnconfirmed": "這則訊息還沒有傳送。切換到 Antigravity 時這個任務的權限會改變，而這次改變你還沒有確認。點「重試」查看並確認；確認前不會切換，也不會傳送。",
       "credentialSwitchBusy": "Codex 正在其他任務中執行，暫時無法按本任務選擇的模型來源切換（需要重啟共享的 Codex 背景處理程序）。等它結束後點「重試」即可。",
       "accountBoundaryPending": "Cindy 正在切換帳號狀態，暫時無法開始這個任務。稍等片刻後點「重試」；如果一直出現，請重新啟動 Cindy。",
       "codexThreadStale": "Codex 驗證模式已切換，目前任務無法繼續 —— 請新建任務以套用。",

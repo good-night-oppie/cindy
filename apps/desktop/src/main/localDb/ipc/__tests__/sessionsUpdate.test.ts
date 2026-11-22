@@ -1082,6 +1082,39 @@ describe('local-db:sessions:update handler wiring', () => {
     }));
   });
 
+  // cindy#19 (QQ's ruling after DD 7077886823): the host applies a user's pending switch only if the
+  // permission rewrite is the one they agreed to, and decides it in the statement that commits the
+  // switch, so a mode stored by another window a moment earlier cannot be rewritten unannounced.
+  it.each([
+    ['bypassPermissions', undefined],
+    ['bypassPermissions', { change: 'fromUnsupported', mode: 'ask' }],
+    ['bypassPermissions', { change: null, mode: 'auto' }],
+    ['acceptEdits', { change: 'fromFullAccess', mode: 'auto' }],
+    ['plan', undefined],
+  ] as const)('refuses to commit a guarded switch from %s under agreement %j, leaving the row as it was', async (stored, agreement) => {
+    h.sqlite!.prepare('UPDATE sessions SET permission_mode = ? WHERE id = ?').run(stored, 'cc-local');
+    const before = h.sqlite!.prepare('SELECT agent_kind, model, permission_mode FROM sessions WHERE id = ?').get('cc-local');
+    await expect(applyAgentSwitchToSessionRow('cc-local', {
+      agentKind: 'agy', model: 'gemini-test', providerId: null, agyPermissionGuard: { agreement },
+    })).rejects.toMatchObject({ code: 'AGENT_SWITCH_PERMISSION_UNCONFIRMED' });
+    expect(h.sqlite!.prepare('SELECT agent_kind, model, permission_mode FROM sessions WHERE id = ?').get('cc-local')).toEqual(before);
+  });
+
+  it.each([
+    ['bypassPermissions', { change: 'fromFullAccess', mode: 'auto' }, 'auto'],
+    ['acceptEdits', { change: 'fromUnsupported', mode: 'ask' }, 'ask'],
+    ['plan', { change: 'fromUnsupported', mode: 'ask' }, 'ask'],
+    ['ask', undefined, 'ask'],
+    ['auto', { change: 'fromFullAccess', mode: 'auto' }, 'auto'],
+  ] as const)('commits a guarded switch from %s under agreement %j as %s', async (stored, agreement, expected) => {
+    h.sqlite!.prepare('UPDATE sessions SET permission_mode = ? WHERE id = ?').run(stored, 'cc-local');
+    await applyAgentSwitchToSessionRow('cc-local', {
+      agentKind: 'agy', model: 'gemini-test', providerId: null, agyPermissionGuard: { agreement },
+    });
+    expect(h.sqlite!.prepare('SELECT agent_kind, permission_mode FROM sessions WHERE id = ?').get('cc-local'))
+      .toEqual({ agent_kind: 'agy', permission_mode: expected });
+  });
+
   it('keeps Full access chosen inside an Antigravity task, and leaves other engines alone', async () => {
     h.sqlite!.prepare("UPDATE sessions SET agent_kind = 'agy', permission_mode = 'bypassPermissions' WHERE id = 'cc-local'").run();
     await applyAgentSwitchToSessionRow('cc-local', { agentKind: 'agy', model: 'gemini-other', providerId: null });

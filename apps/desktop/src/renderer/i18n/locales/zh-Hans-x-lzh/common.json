@@ -14912,6 +14912,7 @@
       "gatewayQuotaExhausted": "Cindy AI 余资不足，请储值后续之",
       "viewBalance": "览余资",
       "viewBalanceTitle": "开「耗用与计费」，览余资并储值",
+      "agentSwitchPermissionUnconfirmed": "此讯尚未发出。易至 Antigravity，此任务之权柄将变，而君尚未确认此变。点「重试」以览而确认之；未确认前，不易亦不发。",
       "credentialSwitchBusy": "Codex 方行于他差事，暂不能依此差事所择之模型来源而易（须重启共用之 Codex 后台进程）。俟其毕，点「再试」即可。",
       "accountBoundaryPending": "Cindy 方易名籍之态，暂不能始此差事。稍候片刻，点「再试」；若屡见之，请重启 Cindy。",
       "codexThreadStale": "Codex 鉴权之式已易，此差事不能续 —— 请新开差事，方生效。",

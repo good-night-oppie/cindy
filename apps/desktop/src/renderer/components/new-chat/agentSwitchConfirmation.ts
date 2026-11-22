@@ -58,6 +58,13 @@ export function agySwitchPermissionNotice(
 
 type AgySwitchPermissionChange = NonNullable<ReturnType<typeof agySwitchPermissionChange>>;
 
+/** How the host reports a message it held because the pending switch's permission change is not agreed to. */
+export const AGENT_SWITCH_PERMISSION_UNCONFIRMED_PREFIX = 'AGENT_SWITCH_PERMISSION_UNCONFIRMED:';
+
+export function isAgentSwitchPermissionUnconfirmedError(error: string | null | undefined): boolean {
+  return !!error && error.startsWith(AGENT_SWITCH_PERMISSION_UNCONFIRMED_PREFIX);
+}
+
 /**
  * What the user last agreed a pending switch into Antigravity would do to the task's permissions,
  * per task: which change they were told about (none, when the mode is kept) and the mode it ends
@@ -131,6 +138,38 @@ export async function confirmPendingAgySwitchPermission(input: {
   });
   if (agreed) noteAgySwitchPermissionAgreed(input.sessionId, input.permissionMode);
   return agreed;
+}
+
+/**
+ * The gate above, plus the host's copy. The host applies a pending switch from any entry and
+ * refuses a rewrite it has not been told the user agreed to, so an agreement is registered with it
+ * (the same switch again, carrying the agreement) before the caller stores a mode or sends a
+ * message. Resolves true when the caller may go on; rejects when the host did not record it.
+ */
+export async function agreeToPendingAgySwitchPermission(input: {
+  sessionId: string;
+  intent: { target: string; model: string; providerId: string | null; effort?: string; fastMode?: boolean | 'ultrafast' } | null | undefined;
+  runningAgent: string | null | undefined;
+  permissionMode: string | null | undefined;
+  confirm: (options: ConfirmOptions) => Promise<boolean>;
+  copy: AgySwitchPermissionAgreementCopy;
+  t: Parameters<typeof agySwitchPermissionNotice>[3];
+  registerWithHost: (
+    intent: { model: string; providerId: string | null; effort?: string; fastMode?: boolean | 'ultrafast' },
+    agreement: { change: AgySwitchPermissionChange | null; mode: string },
+  ) => Promise<unknown>;
+}): Promise<boolean> {
+  const agreed = await confirmPendingAgySwitchPermission({
+    sessionId: input.sessionId, intentTarget: input.intent?.target, runningAgent: input.runningAgent,
+    permissionMode: input.permissionMode, confirm: input.confirm, copy: input.copy, t: input.t,
+  });
+  if (!agreed) return false;
+  const pending = input.intent?.target === 'agy' && input.runningAgent !== 'agy' ? input.intent : null;
+  const agreement = pending ? readAgySwitchPermissionAgreed(input.sessionId) : undefined;
+  // Nothing to tell the host when the mode is kept as it is: it lets that through on its own.
+  if (!pending || !agreement || agreement.change === null || !agySwitchPermissionChange(input.permissionMode)) return true;
+  await input.registerWithHost(pending, agreement);
+  return true;
 }
 
 /**

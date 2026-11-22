@@ -9,6 +9,9 @@ import {
 } from '../../shared/agentKindConversion.js';
 import { isProviderShareAgentDeviceId } from '../../shared/providerShare.js';
 import { throwIpcError } from '../utils/ipcValidate.js';
+import {
+  AgentSwitchPermissionUnconfirmedError, type AgySwitchPermissionAgreement,
+} from '../maker-ipc/agentSwitchPermissionAgreement.js';
 
 /** The agent-switch row patch (applyAgentSwitchToSessionRow). */
 export type AgentSwitchRowPatch = {
@@ -22,6 +25,12 @@ export type AgentSwitchRowPatch = {
     contextWindow?: number | null;
     /** 远程 Agent 换电脑:undefined = 不动,null = 改回任务所在电脑。 */
     agentDeviceId?: string | null;
+    /**
+     * A user's pending switch into Antigravity: commit only if the permission rewrite this
+     * statement makes is the one the user agreed to. Checked against the row inside the statement,
+     * so a mode stored a moment earlier by another window, a device or IM cannot slip through.
+     */
+    agyPermissionGuard?: { agreement: AgySwitchPermissionAgreement | undefined };
   };
 
 /** The owner fence and the session broadcast the caller writes through (the desktop: localDb/ipc/sessions.ts). */
@@ -89,14 +98,28 @@ export async function applyAgentSwitchToSessionRowWithPorts<OwnerScope>(
   if (typeof patch.contextWindow === 'number' && patch.contextWindow > 0) {
     setObj.contextWindow = Math.floor(patch.contextWindow);
   }
+  const guard = patch.agentKind === 'agy' ? patch.agyPermissionGuard : undefined;
+  const kept = sql.join(AGY_SWITCH_KEPT_PERMISSION_MODES.map(mode => sql`${mode}`), sql`, `);
+  const agreed = guard?.agreement;
+  // The row qualifies when nothing is rewritten, or when the rewrite is the agreed one.
+  const permissionAgreed = guard ? sql`(${sessions.agentKind} = 'agy' OR ${sessions.permissionMode} IN (${kept})${
+    agreed?.change === 'fromFullAccess' && agreed.mode === AGY_SWITCH_FROM_FULL_ACCESS_PERMISSION_MODE
+      ? sql` OR ${sessions.permissionMode} = 'bypassPermissions'` : sql``}${
+    agreed?.change === 'fromUnsupported' && agreed.mode === AGY_SWITCH_FROM_UNSUPPORTED_PERMISSION_MODE
+      ? sql` OR (${sessions.permissionMode} <> 'bypassPermissions' AND ${sessions.permissionMode} NOT IN (${kept}))` : sql``})` : undefined;
   // RETURNING keeps the projection tied to this committed write, including axes
   // omitted by the caller. A later SELECT could observe a newer selection.
-  const [committed] = await db.update(sessions).set(setObj).where(eq(sessions.id, sessionId))
+  const [committed] = await db.update(sessions).set(setObj)
+    .where(permissionAgreed ? and(eq(sessions.id, sessionId), permissionAgreed) : eq(sessions.id, sessionId))
     .returning({
       id: sessions.id, agentKind: sessions.agentKind, model: sessions.model,
       providerId: sessions.providerId, effort: sessions.effort, fastMode: sessions.fastMode,
       scheduledModelBaseline: sessions.scheduledModelBaseline, permissionMode: sessions.permissionMode,
     });
+  if (!committed && guard) {
+    const [exists] = await db.select({ id: sessions.id }).from(sessions).where(eq(sessions.id, sessionId)).limit(1);
+    if (exists) throw new AgentSwitchPermissionUnconfirmedError();
+  }
   if (!committed || !isOwnerScopeCurrent(ownerScope)) return;
   broadcastSessionPatched(
     sessionId,

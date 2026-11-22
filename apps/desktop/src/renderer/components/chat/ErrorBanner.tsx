@@ -71,6 +71,7 @@ import {
   CLAUDE_SUBSCRIPTION_OPUS_PLAN_MISMATCH_REASON,
 } from '../../../shared/claudeGatewayError';
 import { isPiImageInputUnsupportedError } from '../../../shared/inputError';
+import { isAgentSwitchPermissionUnconfirmedError } from '@/components/new-chat/agentSwitchConfirmation';
 import type { ToolLoopErrorDetails } from '@cindy/maker-core';
 import type { ErrorDiagnosisSource } from '@/lib/errorDiagnosisPrompt';
 
@@ -542,6 +543,8 @@ export function ErrorBanner({
     displayError = t('chat.errorBanner.codexResumeNotReady');
   } else if (isPiImageInputUnsupportedError(error)) {
     displayError = t('ipcError.PI_IMAGE_INPUT_UNSUPPORTED');
+  } else if (isAgentSwitchPermissionUnconfirmedError(error)) {
+    displayError = t('chat.errorBanner.agentSwitchPermissionUnconfirmed');
   } else if (isCredentialSwitchBusy) {
     displayError = t('chat.errorBanner.credentialSwitchBusy');
   } else if (isAccountBoundaryPending) {

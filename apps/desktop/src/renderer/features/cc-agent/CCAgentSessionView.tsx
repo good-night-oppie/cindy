@@ -179,6 +179,7 @@ import { ConnectProviderBanner } from '@/components/onboarding/ConnectProviderBa
 import { Tip } from '@/components/ui/tooltip';
 import { RunningTokenCount } from './RunningTokenCount';
 import { useConfirmDialog } from '@/components/ui/confirm-dialog-provider';
+import { useAgySwitchPermissionRecovery } from '@/components/new-chat/useAgySwitchPermissionRecovery';
 import { useSilentEncryptedRetry } from '@/hooks/useSilentEncryptedRetry';
 import { TodaySpendChip } from '@/components/status/TodaySpendChip';
 import { ContextCapacityRing, formatTokenCount, getModelContextWindow } from '@/components/status/ContextCapacityRing';
@@ -4785,6 +4786,17 @@ function CCAgentSessionContent({
       });
   }, [errorReason, invalidateHistoryRecoveryNavigation, isHistoryRecoveryPending, rebuildClaudeSubscriptionSessionBeforeRetry, retryLastError]);
 
+  // A message the host held until the pending switch's permission change is agreed to: ask here,
+  // and resend it once on agreement, instead of leaving the user with a generic error to decode.
+  const handleRetryAfterAgySwitchAgreement = useAgySwitchPermissionRecovery({
+    sessionId,
+    error: readOnly ? null : error,
+    runningAgent: session ? dbToMakerAgentKind(session.agentKind) : null,
+    permissionMode: session?.permissionMode,
+    confirm: confirmDialog,
+    retry: handleRetry,
+  });
+
   const handleSwitchToClaudeSubscription = useCallback(async (): Promise<void> => {
     if (!sessionId || !session || !canSwitchToClaudeSubscription) return;
     const model = session.model;
@@ -5602,7 +5614,7 @@ function CCAgentSessionContent({
                 outputLimit={outputLimit}
                 isRecoverable={errorIsRecoverable}
                 retryText={errorRetryText}
-                onRetry={handleRetry}
+                onRetry={handleRetryAfterAgySwitchAgreement}
                 onContinueAfterError={canContinueError ? handleContinueAfterError : undefined}
                 onSilentStopContinue={handleSilentStopContinue}
                 usageLimitWait={usageLimitWait}

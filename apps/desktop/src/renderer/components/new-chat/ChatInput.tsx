@@ -165,9 +165,9 @@ import { captureComposerSendSnapshot, isComposerSendSnapshotCurrent } from './co
 import { useRemoteSessionConnection } from '@/features/cc-agent/hooks/useRemoteSessionConnection';
 
 import {
+  agreeToPendingAgySwitchPermission,
   agySwitchPermissionNotice,
   confirmAgentSwitchRisk,
-  confirmPendingAgySwitchPermission,
   forgetAgySwitchPermissionAgreed,
   noteAgySwitchPermissionAgreed,
   readAgySwitchPermissionAgreed,
@@ -7450,10 +7450,9 @@ export function ChatInput({
     if (agySwitchPermissionPromptOpenRef.current) return false;
     agySwitchPermissionPromptOpenRef.current = true;
     try {
-      const pending = agentSwitchIntent?.target === 'agy' && runtimeAgentKind !== 'agy' ? agentSwitchIntent : null;
-      const agreed = await confirmPendingAgySwitchPermission({
+      return await agreeToPendingAgySwitchPermission({
         sessionId: sourceSessionId,
-        intentTarget: agentSwitchIntent?.target,
+        intent: agentSwitchIntent,
         runningAgent: runtimeAgentKind,
         permissionMode,
         confirm: confirmDialog,
@@ -7466,23 +7465,16 @@ export function ChatInput({
           cancelText: t(`newChat.chatInput.agentSwitch.${about}.cancel`),
         },
         t,
-      });
-      const agreement = agreed && pending ? readAgySwitchPermissionAgreed(sourceSessionId) : undefined;
-      if (!agreement || agreement.change === null) return agreed;
-      // The host holds its own copy of what was agreed and refuses to apply a rewrite it has not
-      // been told about. Register the same switch again with it before the mode is stored or the
-      // message is queued; if that fails, neither happens.
-      try {
-        await makerApiFor(sourceSessionId).switchSessionAgent(
-          sourceSessionId, 'agy', pending!.model, pending!.providerId, pending!.effort, pending!.fastMode,
+        registerWithHost: (intent, agreement) => makerApiFor(sourceSessionId).switchSessionAgent(
+          sourceSessionId, 'agy', intent.model, intent.providerId, intent.effort, intent.fastMode,
           { agyPermissionAgreement: agreement },
-        );
-        return true;
-      } catch (err) {
-        log.warn('agy switch permission agreement was not recorded by the host:', err);
-        toast.error(t('newChat.chatInput.agentSwitch.failed'));
-        return false;
-      }
+        ),
+      });
+    } catch (err) {
+      // If the host has no record of the agreement, the mode is not stored and the message not queued.
+      log.warn('agy switch permission agreement was not recorded by the host:', err);
+      toast.error(t('newChat.chatInput.agentSwitch.failed'));
+      return false;
     } finally {
       agySwitchPermissionPromptOpenRef.current = false;
     }
