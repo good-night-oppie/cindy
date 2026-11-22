@@ -6041,7 +6041,7 @@ describe('AgentInputCoordinator send transaction', () => {
     await h.coordinator.retryLastError(sid);
     await flush();
     expect(h.sendToAgent).toHaveBeenCalledTimes(2);
-    expect(h.sendToAgent.mock.calls[1]?.[1]).toMatchObject({ clientId: 'q-1' });
+    expect(h.sendToAgent.mock.calls[1]?.[1]).toMatchObject({ content: 'first' });
   });
 
   it.each(['WORKDIR_MISSING', 'LAZY_CREATE_FAILED'] as const)('keeps %s recoverable without leaving an active turn', async code => {
