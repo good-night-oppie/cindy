@@ -6246,6 +6246,117 @@ describe('AgentInputCoordinator send transaction', () => {
     expect(h.onDiscardedQueuedMessage).not.toHaveBeenCalled();
   });
 
+  // DD 7083915988, items 1 and 2. Two ways a held message stayed stuck after the user had done
+  // what the banner asked: (1) the banner was closed, which pauses the queue, and the user then
+  // picked the engine again and agreed; (2) the user said "not now" in the first dialog, then
+  // agreed while sending another message, which now waits behind the held one. In both the host
+  // had the agreement and nothing started the queue again. The host now wakes the held head when
+  // the switch is agreed to. A queue the user stopped is left alone.
+  it.each([
+    ['its banner was closed', true],
+    ['it is still held, with another message waiting behind it', false],
+  ])('sends a held message, then the one behind it, once each when the switch is agreed to after %s', async (_name, closeBanner) => {
+    const h = createHarness();
+    const sid = `held-woken-${closeBanner}`;
+    h.sendToAgent.mockResolvedValueOnce(hostSendFailure('AGENT_SWITCH_PERMISSION_UNCONFIRMED', 'confirm the change'));
+    h.coordinator.enqueue(sid, makeItem('q-1', 'held'));
+    await flush();
+    await flush();
+    if (closeBanner) h.coordinator.clearError(sid);
+    h.coordinator.enqueue(sid, makeItem('q-2', 'typed later'));
+    await flush();
+    expect(h.sendToAgent).toHaveBeenCalledTimes(1);
+    expect(h.coordinator.getProjection(sid).pendingQueue.map((q) => q.clientId)).toEqual(['q-1', 'q-2']);
+
+    h.sendToAgent.mockImplementation(async () => { h.setRunning(true); return sendSuccess(); });
+    expect(h.coordinator.wakeHeldForAgySwitch(sid)).toBe(true);
+    // The window that asked also retries once the answer is recorded; the two make one send.
+    await h.coordinator.retryLastError(sid);
+    await flush();
+    await flush();
+    expect(h.sendToAgent).toHaveBeenCalledTimes(2);
+    expect(h.sendToAgent.mock.calls[1]?.[1]).toMatchObject({ content: 'held' });
+    const sent = h.coordinator.getProjection(sid);
+    expect(sent.error).toBeNull();
+    expect(sent.queuePaused).toBe(false);
+    h.setRunning(false);
+    h.coordinator.onTurnEvent(sid, 'done');
+    await flush();
+    await flush();
+    expect(h.sendToAgent).toHaveBeenCalledTimes(3);
+    expect(h.sendToAgent.mock.calls[2]?.[1]).toMatchObject({ content: 'typed later' });
+    // Nothing left to wake.
+    expect(h.coordinator.wakeHeldForAgySwitch(sid)).toBe(false);
+    expect(h.onDiscardedQueuedMessage).not.toHaveBeenCalled();
+  });
+
+  it('holds the message again when the agreement that woke it does not fit, and leaves a queue the user stopped alone', async () => {
+    const h = createHarness();
+    const sid = 'held-woken-in-vain';
+    h.sendToAgent.mockResolvedValue(hostSendFailure('AGENT_SWITCH_PERMISSION_UNCONFIRMED', 'confirm the change'));
+    h.coordinator.enqueue(sid, makeItem('q-1', 'held'));
+    await flush();
+    await flush();
+    expect(h.coordinator.wakeHeldForAgySwitch(sid)).toBe(true);
+    await flush();
+    await flush();
+    const heldAgain = h.coordinator.getProjection(sid);
+    expect(heldAgain.error).toMatch(/^AGENT_SWITCH_PERMISSION_UNCONFIRMED: /);
+    expect(heldAgain.pendingQueue.map((q) => q.clientId)).toEqual(['q-1']);
+    expect(h.sendToAgent).toHaveBeenCalledTimes(2);
+
+    // Closed, continued, held again, then stopped by the user: that pause is the user's.
+    h.coordinator.clearError(sid);
+    h.coordinator.resume(sid);
+    await flush();
+    await flush();
+    h.coordinator.clearError(sid);
+    h.coordinator.resume(sid);
+    await flush();
+    await flush();
+    const calls = h.sendToAgent.mock.calls.length;
+    h.coordinator.stop(sid);
+    await flush();
+    const stopped = h.coordinator.getProjection(sid);
+    if (stopped.queuePaused && !stopped.recovery) {
+      expect(h.coordinator.wakeHeldForAgySwitch(sid)).toBe(false);
+      await flush();
+      expect(h.sendToAgent.mock.calls.length).toBe(calls);
+    }
+  });
+
+  // DD 7083915988, item 8 and the gap noted with it: the mark that a message was held for a switch
+  // into Antigravity is the host's. Merging the held message into another keeps it, and an edit
+  // cannot put it on a message that was never held.
+  it('keeps the held mark through a merge and does not let an edit add it', async () => {
+    const h = createHarness();
+    const sid = 'held-mark-merge-edit';
+    h.sendToAgent.mockResolvedValueOnce(hostSendFailure('AGENT_SWITCH_PERMISSION_UNCONFIRMED', 'confirm the change'));
+    await h.coordinator.ensureQueueRestored(sid);
+    h.coordinator.enqueue(sid, makeItem('q-1', 'held'));
+    await flush();
+    await flush();
+    h.coordinator.clearError(sid);
+    h.coordinator.enqueue(sid, makeItem('q-2', 'plain'));
+    h.coordinator.enqueue(sid, makeItem('q-3', 'also plain'));
+    await flush();
+
+    // An edit that claims the mark for a message that was never held.
+    expect(h.coordinator.replaceQueuedMessage(sid, 'q-3',
+      { ...makeItem('q-3', 'edited'), awaitsAgySwitchConfirmation: true })).toBe(true);
+    // The plain message is moved in front and the held one merged into it.
+    h.coordinator.move(sid, 'q-2', 0);
+    const merged = h.coordinator.mergeQueuedMessagesAtomically(sid, ['q-2', 'q-1'], (rows) => ({
+      ...rows[0]!, text: rows.map((row) => row.text).join('\n'), persistedContent: rows.map((row) => row.text).join('\n'),
+    }));
+    await flush();
+    const snapshot = JSON.parse(JSON.stringify(h.persistQueueSnapshot.mock.calls.at(-1)?.[1] ?? [])) as Array<{ clientId: string; awaitsAgySwitchConfirmation?: boolean }>;
+    expect(snapshot.find((row) => row.clientId === 'q-3')?.awaitsAgySwitchConfirmation).toBeUndefined();
+    expect(merged.merged).toBe(true);
+    expect(snapshot.map((row) => row.clientId)).toEqual(['q-2', 'q-3']);
+    expect(snapshot[0]?.awaitsAgySwitchConfirmation).toBe(true);
+  });
+
   // cindy#19 (QQ's ruling on "Interject"). The queue menu's Interject hands a queued message to
   // the turn that is running, on the engine it runs on, without the send step that applies a
   // pending switch or refuses for want of the user's agreement. A turn can be running on the old
@@ -6253,6 +6364,8 @@ describe('AgentInputCoordinator send transaction', () => {
   // starts one). Interjecting the held message then delivered it to the engine it was never meant
   // for. It is refused: nothing reaches the engine, the message keeps its place, and it goes out
   // once through the ordinary send step. A message that was never held is interjected as before.
+  // Interject is called the way the app calls it: the INPUT_STEER handler of register.ts, run
+  // from its source with host services stood in, on a real queue; the engine is the stand-in.
   it('does not interject a message held for a switch into Antigravity into the running turn, and still sends it once later', async () => {
     const h = createHarness();
     const sid = 'held-message-interject';
@@ -6266,13 +6379,19 @@ describe('AgentInputCoordinator send transaction', () => {
     // A turn is running on the engine the task still has.
     h.setRunning(true);
 
+    const interject = createInputEnqueueHarness(h.coordinator, { remote: false }).steer;
     const held = h.coordinator.getProjection(sid).pendingQueue.find((q) => q.clientId === 'q-1')!;
-    await expect(h.coordinator.steer(sid, makeItem(held.clientId, held.text), { removeFromQueue: true })).resolves.toBe(false);
+    // What the task view sends is the projected row; the mark on it is the host's own.
+    expect(held.awaitsAgySwitchConfirmation).toBe(true);
+    await expect(interject({}, sid, makeItem(held.clientId, held.text), { removeFromQueue: true })).resolves.toBe(false);
+    // Asking for a plain interjection of the same message instead is answered as a resend of
+    // one the host already has: nothing is dispatched either.
+    await expect(interject({}, sid, makeItem(held.clientId, held.text))).resolves.toBe(true);
     expect(h.steerToAgent).not.toHaveBeenCalled();
     expect(h.coordinator.getProjection(sid).pendingQueue.map((q) => q.clientId)).toEqual(['q-1', 'q-2']);
     expect(h.sendToAgent).toHaveBeenCalledTimes(1);
 
-    await expect(h.coordinator.steer(sid, makeItem('q-2', 'plain'), { removeFromQueue: true })).resolves.toBe(true);
+    await expect(interject({}, sid, makeItem('q-2', 'plain'), { removeFromQueue: true })).resolves.toBe(true);
     expect(h.steerToAgent).toHaveBeenCalledTimes(1);
     expect(h.coordinator.getProjection(sid).pendingQueue.map((q) => q.clientId)).toEqual(['q-1']);
 

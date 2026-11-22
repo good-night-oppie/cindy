@@ -11342,7 +11342,16 @@ export function registerMakerIpc(maker: Maker, options: RegisterMakerIpcOptions)
   });
 
   // turn 运行中登记的切换意图(下一条消息发送时刻由 send 事务 apply)。
-  const agentSwitchPending = createPendingAgentSwitchRegistry();
+  const agentSwitchPending = createPendingAgentSwitchRegistry({
+    // Not awaited, and its failure is not the failure of whatever replaced the switch.
+    onScheduledRestoreSettled: (sessionId) => {
+      void Promise.resolve().then(() => updateScheduledPreference(sessionId, null)).catch((error) => {
+        log.warn('failed to retire the saved model of a settled scheduled restore', {
+          sessionId, error: error instanceof Error ? error.message : String(error),
+        });
+      });
+    },
+  });
   // User send intent owns the next route boundary, including automatic requests
   // that read the runtime generation after the picker accepted that intent.
   const canApplyAutomaticRuntimeSelection = (sessionId: string, expectedGeneration?: number): boolean =>
@@ -11492,8 +11501,8 @@ export function registerMakerIpc(maker: Maker, options: RegisterMakerIpcOptions)
     onPendingSwitchAgreementChanged: (sessionId, intent) => {
       broadcastSessionPatched(sessionId, { agentSwitchIntent: intent });
     },
-    // Same effect as any other selection of the user's that lands: the saved model is retired.
-    onScheduledRestoreWithdrawn: async (sessionId) => { await updateScheduledPreference(sessionId, null); },
+    // The message held for this very agreement goes on (it is refused again if it does not fit).
+    onPendingSwitchAgreed: (sessionId) => { agentInputCoordinatorHolder?.wakeHeldForAgySwitch(sessionId); },
     // 用户选择落地 → 给 IM 任务打「脱离跟随」标记(同值重选也永久脱离, PR #5155)。
     onUserRouteSelectionLanded: async (sessionId) => {
       await updateScheduledPreference(sessionId, null);

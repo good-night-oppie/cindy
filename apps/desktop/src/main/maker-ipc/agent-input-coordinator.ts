@@ -793,6 +793,12 @@ interface SessionInputState {
    * 放行;而用户显式 Stop 出来的暂停必须保持,不许新输入静默释放旧队列。
    */
   queuePausedByRestore: boolean;
+  /**
+   * The queue head whose banner the user closed while it was held for a switch into Antigravity:
+   * the pause that followed is this message's, not a Stop of the user's. It is lifted when the
+   * switch is agreed to (wakeHeldForAgySwitch); a Stop, or Continue sending, forgets it.
+   */
+  heldSwitchPauseClientId?: string | null;
   /** Queue head whose steer delivery is unknown; its protective pause needs an explicit user decision. */
   uncertainDeliveryClientId: string | null;
   queueExpanded: boolean;
@@ -3443,6 +3449,7 @@ export class AgentInputCoordinator {
       state.pendingQueue[0]?.clientId === recovery.clientId
         ? recovery.clientId
         : null;
+    state.heldSwitchPauseClientId = null;
     state.queuePaused = false;
     state.queuePausedByRestore = false;
     state.uncertainDeliveryClientId = null;
@@ -3853,10 +3860,41 @@ export class AgentInputCoordinator {
       state.recovery = null;
       state.queuePaused = true;
       state.queuePausedByRestore = false;
+      state.heldSwitchPauseClientId = heldHeadClientId;
     }
     this.emit(sessionId);
     if (shouldDrainTail) this.scheduleDrain(sessionId, 'clear-active-turn-error');
     return this.getProjection(sessionId);
+  }
+
+  /**
+   * The user has agreed to the pending switch into Antigravity (or picked the engine again and
+   * agreed). If a message held for exactly that is at the head of the queue, it is what they were
+   * waiting to send: the hold is lifted and the queue goes on, wherever the agreement was given
+   * (the banner, the task's entry, the composer, the model picker) and whether or not the banner
+   * was closed in between. The send step still decides; if the agreement does not fit, the message
+   * is held again. A queue the user stopped stays stopped.
+   */
+  wakeHeldForAgySwitch(sessionId: string): boolean {
+    const state = this.states.get(sessionId);
+    const head = state?.pendingQueue[0];
+    if (!state || !head || head.awaitsAgySwitchConfirmation !== true) return false;
+    const heldByRecovery = state.recovery?.kind === 'queue-head' && state.recovery.clientId === head.clientId;
+    const pausedByClosedBanner = state.queuePaused && state.heldSwitchPauseClientId === head.clientId;
+    if (!heldByRecovery && !pausedByClosedBanner) return false;
+    if (heldByRecovery) {
+      state.error = null;
+      clearErrorProjectionSignals(state);
+      state.stickyError = null;
+      state.recovery = null;
+    }
+    if (pausedByClosedBanner) {
+      state.queuePaused = false;
+      state.heldSwitchPauseClientId = null;
+    }
+    this.emit(sessionId);
+    this.scheduleDrain(sessionId, 'agy-switch-agreed');
+    return true;
   }
 
   remove(sessionId: string, clientId: string): AgentInputProjection {
@@ -4129,6 +4167,11 @@ export class AgentInputCoordinator {
       automaticReports ? replacement : this.preserveRestoredQueueProvenance(survivor, replacement),
       ...state.pendingQueue.slice(firstIndex + presentTargets.length),
     ];
+    // Text that was held for a switch into Antigravity stays held whatever it is merged into.
+    const mergedRow = state.pendingQueue[firstIndex];
+    if (mergedRow && presentTargets.some(item => item.awaitsAgySwitchConfirmation === true)) {
+      mergedRow.awaitsAgySwitchConfirmation = true;
+    }
     const removedIds = new Set(removed.map((item) => item.clientId));
     state.recentEnqueuedClientIds = state.recentEnqueuedClientIds.filter(
       (id) => !removedIds.has(id),

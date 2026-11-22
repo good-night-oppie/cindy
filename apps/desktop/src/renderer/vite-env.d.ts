@@ -6806,11 +6806,18 @@ interface ElectronAPI {
      * 重开视图 / device-link 远程会话重连后恢复乐观显示用。
      */
     getSessionAgentSwitchIntent: (sessionId: string) => Promise<{
-      targetAgentKind: 'claude-code' | 'codex' | 'pi';
+      targetAgentKind: 'claude-code' | 'codex' | 'pi' | 'agy';
       model: string;
       providerId: string | null;
       effort?: string;
       fastMode?: boolean | 'ultrafast';
+      agentDeviceId?: string | null;
+      /** Antigravity only: what the host has recorded as agreed for this switch (null = nothing). */
+      agyPermissionAgreement?: { change: 'fromFullAccess' | 'fromUnsupported' | null; mode: string } | null;
+      /** Antigravity only: which registration this is; sent back with an agreement. */
+      agyPermissionRevision?: number;
+      /** Staged by configuration, not picked by the user in this task. */
+      configStaged?: true;
     } | null>;
     // effort/mode 透传 string —— 合法值由 maker capabilities 决定, vite-env 不重复枚举
     setEffort: (sessionId: string, effort: string) => Promise<void>;

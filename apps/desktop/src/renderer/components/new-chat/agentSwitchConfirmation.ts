@@ -238,6 +238,16 @@ export function isAgySwitchPermissionDialogOpen(
 }
 
 /**
+ * What a task view watches of the pending switch to run its automatic step again: the engine,
+ * which registration it is, and what the host has recorded as agreed. Null when none is pending.
+ */
+export function agySwitchPendingKey(intent: AgySwitchPermissionPendingIntent | null | undefined): string | null {
+  if (!intent) return null;
+  const agreed = intent.agyPermissionAgreement;
+  return `${intent.target}|${intent.agyPermissionRevision ?? ''}|${agreed ? `${agreed.change ?? ''}:${agreed.mode}` : ''}`;
+}
+
+/**
  * Whether the task view shows the task's own confirmation entry at all: not when it only reads
  * the task, not from another computer (the host takes no agreement from one), and not while a
  * held message's banner is up, which is the same question with a resend attached.
@@ -287,9 +297,10 @@ export async function agreeToPendingAgySwitchPermission(input: {
     const agreed = await confirmPendingAgySwitchPermission({
       sessionId: input.sessionId, intentTarget: intent?.target, runningAgent: input.runningAgent,
       permissionMode: input.permissionMode, confirm: input.confirm, copy: input.copy, t: input.t,
-      // Not for an answer the caller asks to hear afresh, and not after the host has just said
-      // that what this window knew of the switch was out of date.
-      hostAgreement: input.askAfresh || asked > 0 ? undefined : intent?.agyPermissionAgreement,
+      // Not for an answer the caller asks to hear afresh. After the host has said that the
+      // switch asked about was replaced, `intent` is the one read since, with what the host
+      // reports for it: if that already covers this change there is nothing to ask again.
+      hostAgreement: input.askAfresh ? undefined : intent?.agyPermissionAgreement,
     });
     if (!agreed) return false;
     const pending = intent?.target === 'agy' && input.runningAgent !== 'agy' ? intent : null;

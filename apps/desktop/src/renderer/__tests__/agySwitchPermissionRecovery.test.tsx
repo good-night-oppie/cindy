@@ -273,13 +273,18 @@ describe('a message the host held for an unconfirmed permission change', () => {
   // DD 7082445534, item 3: the host answering "that switch is no longer the pending one" is not
   // the user saying no, and used to look exactly like it: nothing happened. What is pending now
   // decides. Nothing pending for Antigravity: nothing is left to agree to, and the message goes.
-  it('resends the held message when the switch it was asked about was withdrawn in the meantime', async () => {
+  // DD 7083915988, item 5: with the switch withdrawn, resending the held message only earns one
+  // more refusal from the host (the message was written for an engine the task is not going to).
+  // Nothing is sent and nothing is reported as failed; the banner then reads "that switch is no
+  // longer pending" (ErrorLocalization.test.tsx).
+  it('does not resend the held message when the switch it was asked about was withdrawn in the meantime', async () => {
     h.registerWithHost.mockImplementationOnce(async () => { h.intent = null; return { agyPermissionAgreementRecorded: false }; });
     const onResend = vi.fn();
     render(view({ error: HELD, mode: 'bypassPermissions', onResend }));
     fireEvent.click(await screen.findByRole('button', { name: CONFIRM }));
-    await waitFor(() => expect(onResend).toHaveBeenCalledTimes(1));
-    expect(h.registerWithHost).toHaveBeenCalledTimes(1);
+    await waitFor(() => expect(h.registerWithHost).toHaveBeenCalledTimes(1));
+    await settle();
+    expect(onResend).not.toHaveBeenCalled();
     expect(h.toastError).not.toHaveBeenCalled();
     expect(readAgySwitchPermissionAgreed('task-1')).toBeUndefined();
   });

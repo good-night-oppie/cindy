@@ -180,7 +180,7 @@ import { Tip } from '@/components/ui/tooltip';
 import { RunningTokenCount } from './RunningTokenCount';
 import { useConfirmDialog } from '@/components/ui/confirm-dialog-provider';
 import { useAgySwitchPermissionRecovery } from '@/components/new-chat/useAgySwitchPermissionRecovery';
-import { agySwitchPermissionEntryIsOffered } from '@/components/new-chat/agentSwitchConfirmation';
+import { agySwitchPendingKey, agySwitchPermissionEntryIsOffered } from '@/components/new-chat/agentSwitchConfirmation';
 import { AgySwitchPermissionPendingNotice } from '@/components/chat/AgySwitchPermissionPendingNotice';
 import { useSilentEncryptedRetry } from '@/hooks/useSilentEncryptedRetry';
 import { TodaySpendChip } from '@/components/status/TodaySpendChip';
@@ -4796,9 +4796,7 @@ function CCAgentSessionContent({
     runningAgent: session ? dbToMakerAgentKind(session.agentKind) : null,
     permissionMode: session?.permissionMode,
     remote: remoteDeviceId != null,
-    pendingSwitchKey: agentSwitchIntent
-      ? `${agentSwitchIntent.target}|${agentSwitchIntent.agyPermissionRevision ?? ''}|${agentSwitchIntent.agyPermissionAgreement?.change ?? ''}:${agentSwitchIntent.agyPermissionAgreement?.mode ?? ''}`
-      : null,
+    pendingSwitchKey: agySwitchPendingKey(agentSwitchIntent),
     confirm: confirmDialog,
     retry: handleRetry,
   });
@@ -5631,7 +5629,7 @@ function CCAgentSessionContent({
                 agentKind={session?.agentKind}
                 remoteHostId={session?.remoteHostId ?? undefined}
                 deviceLinkDeviceId={remoteDeviceId}
-                deviceLinkDeviceName={session?.deviceLinkDeviceName}
+                deviceLinkDeviceName={controlledDeviceName}
                 agySwitchPending={agentSwitchIntent?.target === 'agy'}
                 agentDeviceId={session?.agentDeviceId}
                 modelId={session?.model}

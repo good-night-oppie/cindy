@@ -85,8 +85,10 @@ function fixture(initialMode: string) {
   } };
 
   // The registry the app uses: it stamps each registration with the session's revision.
-  const pendingSwitches = createPendingAgentSwitchRegistry();
-  const hooks = { landed: () => {}, restoreWithdrawn: () => {} };
+  const hooks = { landed: () => {}, restoreSettled: () => {} };
+  let agreed = 0;
+  const newRegistry = () => createPendingAgentSwitchRegistry({ onScheduledRestoreSettled: () => { hooks.restoreSettled(); } });
+  const pendingSwitches = newRegistry();
   const guards: Array<{ guarded: boolean; agreement?: unknown }> = [];
   const switchDeps: MakerSessionAgentSwitchHandlerDeps = {
     confirmNativeHistoryFallback: vi.fn(async () => true),
@@ -116,7 +118,7 @@ function fixture(initialMode: string) {
     withSessionLock: withSendToSessionLock,
     pendingSwitches,
     onUserRouteSelectionLanded: () => { hooks.landed(); },
-    onScheduledRestoreWithdrawn: () => { hooks.restoreWithdrawn(); },
+    onPendingSwitchAgreed: () => { agreed += 1; },
     log: { info: vi.fn(), warn: vi.fn() },
   };
   const ipc = new IpcHarness();
@@ -203,9 +205,23 @@ function fixture(initialMode: string) {
     hostRevision: () => switchDeps.pendingSwitches?.revision?.(id),
     pickGeminiModelOfProvider: (providerId: string) => ipc.invoke(MAKER_INVOKE.SWITCH_SESSION_AGENT, id, 'agy', 'gemini-test', providerId),
     onLanded: (fn: () => void) => { hooks.landed = fn; },
-    onRestoreWithdrawn: (fn: () => void) => { hooks.restoreWithdrawn = fn; },
+    onRestoreSettled: (fn: () => void) => { hooks.restoreSettled = fn; },
+    /** How often the host was told "the pending switch has just been agreed to". */
+    agreedSignals: () => agreed,
+    /**
+     * The model picker as register.ts wires it: a model of the engine the task runs on is not a
+     * no-op that clears the pending switch, it registers a same-engine selection in its place
+     * (applied by the next send). This is the path a real withdrawal takes.
+     */
+    wireModelPickerLikeTheApp: () => {
+      switchDeps.selectSameAgentModel = async (sessionId, intent, applyNow) => {
+        if (applyNow) { switchDeps.pendingSwitches?.clear(sessionId); return { deferred: false }; }
+        switchDeps.pendingSwitches?.set(sessionId, { ...intent, sameAgentSelection: true });
+        return { deferred: true, superseded: false };
+      };
+    },
     /** The app is quit and started again: pending switches are memory only; the store is not. */
-    restartHost: () => { switchDeps.pendingSwitches = createPendingAgentSwitchRegistry(); },
+    restartHost: () => { switchDeps.pendingSwitches = newRegistry(); },
     pendingSwitch: () => ipc.invoke(MAKER_INVOKE.GET_SESSION_AGENT_SWITCH_INTENT, id),
     /** Picking a model of the engine the task runs on withdraws the pending switch. */
     withdrawSwitch: () => ipc.invoke(MAKER_INVOKE.SWITCH_SESSION_AGENT, id, 'claude-code', 'claude-test', null),
@@ -470,8 +486,8 @@ describe('switching a task into Antigravity from the model picker, with permissi
     let profile: ScheduledModelSelection = usersModel;
     const saved = { baseline: null as string | null, retiredBy: [] as string[] };
     const restores: string[] = [];
-    h.onLanded(() => { saved.baseline = null; saved.retiredBy.push('landed'); });
-    h.onRestoreWithdrawn(() => { saved.baseline = null; saved.retiredBy.push('withdrawn'); });
+    h.onLanded(() => { saved.retiredBy.push('landed as the user\'s own pick'); });
+    h.onRestoreSettled(() => { saved.baseline = null; saved.retiredBy.push('settled'); });
     const scope = createScheduledModelScope({
       createId: () => 'scope-1',
       read: async () => ({ profile: { ...profile, effort: profile.effort ?? '' }, baseline: saved.baseline }),
@@ -527,26 +543,65 @@ describe('switching a task into Antigravity from the model picker, with permissi
     await s.send();
     await s.send();
     expect(h.log).toEqual(['switched agy auto', 'launch agy auto isolated']);
-    expect(s.saved).toMatchObject({ baseline: null, retiredBy: ['landed'] });
+    // Retired because its question was answered, not by being counted as a pick of the user's:
+    // putting the user's model back must not detach an IM task from the route it follows (item 4).
+    expect(s.saved).toMatchObject({ baseline: null, retiredBy: ['settled'] });
     expect(s.restores).toEqual(['gemini-test', 'gemini-test']);
   });
 
-  it('does not put the model back once the user withdraws the held restore, not even after a restart', async () => {
+  // DD 7083915988, item 3. In the app the model picker does not reach the handler's "clear the
+  // pending switch" branch: a model of the current engine is registered as a same-engine selection
+  // that the next send applies. The saved model used to be retired only then, so a restart between
+  // the withdrawal and the next send brought the refused restore, and its question, back. It is
+  // retired the moment the held switch is replaced, whichever way that happens.
+  it.each([
+    ['the model picker, as the app wires it', true],
+    ['the handler\'s own same-engine branch', false],
+  ])('does not put the model back once the user withdraws the held restore through %s, not even when the app restarts before the next send', async (_name, likeTheApp) => {
     const h = fixture('bypassPermissions');
+    if (likeTheApp) h.wireModelPickerLikeTheApp();
     const s = scheduleReplacedTheModel(h);
     await s.begin();
     await expect(s.send()).rejects.toMatchObject(HELD);
 
     // Picking a model of the engine the task runs on: it stays there, with its permissions.
     await h.withdrawSwitch();
-    expect(s.saved).toMatchObject({ baseline: null, retiredBy: ['withdrawn'] });
-    await s.send();
+    expect(s.saved).toMatchObject({ baseline: null, retiredBy: ['settled'] });
+    // Restarted before anything is sent: nothing is left to put back.
     h.restartHost();
+    await s.send();
     await s.send();
     expect(h.log).toEqual([]);
     expect(h.row).toMatchObject({ agentKind: 'cc', permissionMode: 'bypassPermissions' });
     await expect(h.pendingSwitch()).resolves.toBeNull();
     expect(s.restores).toEqual(['gemini-test']);
+  });
+
+  it('retires the saved model as well when the user picks another Gemini model instead of the held one', async () => {
+    const h = fixture('bypassPermissions');
+    const s = scheduleReplacedTheModel(h);
+    await s.begin();
+    await expect(s.send()).rejects.toMatchObject(HELD);
+    await h.pickOtherGeminiModel();
+    expect(s.saved).toMatchObject({ baseline: null, retiredBy: ['settled'] });
+    await expect(h.pendingSwitch()).resolves.toMatchObject({ model: 'gemini-other', agyPermissionAgreement: null });
+  });
+
+  // DD 7083915988, items 1 and 2. The host is told whenever the pending switch has just been
+  // agreed to, so that it can let the message held for it go on: when the agreement is recorded
+  // for a switch already pending, and when a switch is registered with its agreement (the model
+  // picker). A registration that carries no agreement is not such a moment.
+  it('tells the host when the pending switch has just been agreed to, and only then', async () => {
+    const h = fixture('bypassPermissions');
+    await h.pickGeminiModel(null);
+    expect(h.agreedSignals()).toBe(0);
+    await h.agreeOnly('bypassPermissions', 'gemini-test', 'remote', await h.shownRevision());
+    expect(h.agreedSignals()).toBe(0);
+    await h.agreeOnly('bypassPermissions');
+    expect(h.agreedSignals()).toBe(1);
+    await h.withdrawSwitch();
+    await h.pickGeminiModel();
+    expect(h.agreedSignals()).toBe(2);
   });
 
   // Where it goes back to. Antigravity runs only on the task's own computer, so a saved

@@ -385,10 +385,11 @@ export interface MakerSessionAgentSwitchHandlerDeps {
    */
   onUserRouteSelectionLanded?(sessionId: string): void | Promise<void>;
   /**
-   * The user withdrew the pending switch that stood for the model a schedule had replaced, by
-   * picking a model of the engine the task runs on. The host retires that saved model.
+   * The permission change of the task's pending switch into Antigravity has just been agreed to
+   * on this computer: with the registration (the model picker) or for a switch already pending.
+   * The host lets a message that was held for exactly that go on.
    */
-  onScheduledRestoreWithdrawn?(sessionId: string): void | Promise<void>;
+  onPendingSwitchAgreed?(sessionId: string): void;
   log: {
     info(message: string, fields?: Record<string, unknown>): void;
     warn(message: string, fields?: Record<string, unknown>): void;
@@ -564,7 +565,7 @@ export function projectPendingAgentSwitchIntent(
  * agreement was recorded.
  */
 export function recordAgySwitchPermissionAgreement(
-  deps: Pick<MakerSessionAgentSwitchHandlerDeps, 'pendingSwitches' | 'onPendingSwitchChanged' | 'onPendingSwitchAgreementChanged'>,
+  deps: Pick<MakerSessionAgentSwitchHandlerDeps, 'pendingSwitches' | 'onPendingSwitchChanged' | 'onPendingSwitchAgreementChanged' | 'onPendingSwitchAgreed'>,
   sessionId: string,
   askedAbout: { revision: unknown; model: unknown; providerId: unknown },
   agreement: unknown,
@@ -575,12 +576,9 @@ export function recordAgySwitchPermissionAgreement(
     || (pending.providerId ?? null) !== (typeof askedAbout.providerId === 'string' && askedAbout.providerId ? askedAbout.providerId : null)) {
     return false;
   }
-  // Checked where it is written. A registry that issues no revisions cannot tell registrations
-  // apart, so nothing is recorded through it.
-  if (typeof askedAbout.revision !== 'number' || pending.revision !== askedAbout.revision
-    || deps.pendingSwitches?.revision?.(sessionId) !== askedAbout.revision) {
-    return false;
-  }
+  // Checked where it is written, against the stamp on the pending switch itself. A registry
+  // that issues no revisions stamps nothing, so nothing is recorded through it.
+  if (typeof askedAbout.revision !== 'number' || pending.revision !== askedAbout.revision) return false;
   // Written on the pending switch itself, not on a copy stored in its place. It stays the same
   // registration: its revision does not move, so a withdrawal that read the revision before this
   // still clears it, and a switch being applied still recognises its own intent when it finishes.
@@ -590,10 +588,21 @@ export function recordAgySwitchPermissionAgreement(
   const report = projectPendingAgentSwitchIntent(pending)!;
   if (deps.onPendingSwitchAgreementChanged) deps.onPendingSwitchAgreementChanged(sessionId, report);
   else deps.onPendingSwitchChanged?.(sessionId, report);
+  deps.onPendingSwitchAgreed?.(sessionId);
   return true;
 }
 
-export function createPendingAgentSwitchRegistry(): PendingAgentSwitchRegistry {
+export function createPendingAgentSwitchRegistry(options?: {
+  /**
+   * The pending switch that stood for the model a schedule had replaced is no longer pending:
+   * the user picked something else (another engine, another model, or one of the engine the task
+   * runs on, which is how the model picker withdraws a switch), or it was applied. Either way the
+   * saved model has had its answer and the host retires it now. Waiting for the next send to do it
+   * left a window in which a restart brought the same question back (DD 7083915988, item 3).
+   * Decided here because every way of replacing or clearing a pending switch ends here.
+   */
+  onScheduledRestoreSettled?(sessionId: string): void;
+}): PendingAgentSwitchRegistry {
   const pending = new Map<string, PendingAgentSwitchIntent>();
   const revisions = new Map<string, number>();
   const bump = (sessionId: string): number => {
@@ -601,21 +610,33 @@ export function createPendingAgentSwitchRegistry(): PendingAgentSwitchRegistry {
     revisions.set(sessionId, next);
     return next;
   };
+  const settled = (sessionId: string, previous: PendingAgentSwitchIntent | undefined, next?: PendingAgentSwitchIntent) => {
+    if (previous?.restoresScheduledBaseline === true && next?.restoresScheduledBaseline !== true) {
+      options?.onScheduledRestoreSettled?.(sessionId);
+    }
+  };
   return {
     set: (sessionId, intent) => {
+      const previous = pending.get(sessionId);
       intent.revision = bump(sessionId);
       pending.set(sessionId, intent);
+      settled(sessionId, previous, intent);
     },
     get: (sessionId) => pending.get(sessionId),
     clear: (sessionId) => {
+      const previous = pending.get(sessionId);
       pending.delete(sessionId);
       bump(sessionId);
+      settled(sessionId, previous);
     },
     revision: (sessionId) => revisions.get(sessionId) ?? 0,
     clearIfRevision: (sessionId, expectedRevision) => {
       if ((revisions.get(sessionId) ?? 0) !== expectedRevision) return null;
+      const previous = pending.get(sessionId);
       pending.delete(sessionId);
-      return bump(sessionId);
+      const revision = bump(sessionId);
+      settled(sessionId, previous);
+      return revision;
     },
   };
 }
@@ -1045,8 +1066,6 @@ export async function performSessionAgentSwitch(
     // 同引擎 = 纯模型切换,调用方应走 SET_MODEL;这里按 no-op 成功返回。
     // 顺带清 pending:用户先登记了跨引擎切换、又选回当前引擎 = 改主意取消。
     let sameEngineRevision: number | undefined;
-    // Choosing to stay: the model the withdrawn switch stood for is not to be put back later.
-    const withdrawsScheduledRestore = deps.pendingSwitches?.get?.(sessionId)?.restoresScheduledBaseline === true;
     if (deps.pendingSwitches?.clearIfRevision && pendingRevisionAtStart !== undefined) {
       const clearedRevision = deps.pendingSwitches.clearIfRevision(
         sessionId,
@@ -1066,7 +1085,6 @@ export async function performSessionAgentSwitch(
       // 最小测试 harness / 旧内嵌调用方没有修订能力时维持原 no-op 清除语义。
       deps.pendingSwitches?.clear(sessionId);
     }
-    if (withdrawsScheduledRestore) await deps.onScheduledRestoreWithdrawn?.(sessionId);
     deps.onPendingSwitchChanged?.(sessionId, null);
     return {
       switched: false,
@@ -1118,6 +1136,7 @@ export async function performSessionAgentSwitch(
     if (targetAgentKind === 'agy' && agyPermissionAgreement) intent.agyPermissionAgreement = agyPermissionAgreement;
     deps.pendingSwitches.set(sessionId, intent);
     deps.onPendingSwitchChanged?.(sessionId, projectPendingAgentSwitchIntent(intent));
+    if (intent.agyPermissionAgreement) deps.onPendingSwitchAgreed?.(sessionId);
     deps.log.info('agent-switch: intent registered (applies on next send)', {
       sessionId,
       targetAgentKind,
@@ -1618,6 +1637,9 @@ async function noteLandedUserRouteSelection(
   intent: PendingAgentSwitchIntent,
 ): Promise<void> {
   if (!isUserPendingAgentSwitchIntent(intent)) return;
+  // Put back by the host on the user's agreement, not picked by the user in this task: it does
+  // not detach an IM task from the route it follows. Its saved model is retired by the registry.
+  if (intent.restoresScheduledBaseline === true) return;
   try {
     await deps.onUserRouteSelectionLanded?.(sessionId);
   } catch (err) {
@@ -1836,7 +1858,7 @@ export function applyPendingAgentSwitchIfIdle(
  * Resolves whether a pending switch now stands for the saved model.
  */
 export function holdAgySwitchForConfirmation(
-  deps: Pick<MakerSessionAgentSwitchHandlerDeps, 'pendingSwitches' | 'onPendingSwitchChanged'>,
+  deps: Pick<MakerSessionAgentSwitchHandlerDeps, 'pendingSwitches' | 'onPendingSwitchChanged' | 'onPendingSwitchAgreementChanged'>,
   sessionId: string,
   route: {
     model: string; providerId: string | null; effort?: string | null; fastMode?: boolean | 'ultrafast';
@@ -1858,7 +1880,10 @@ export function holdAgySwitchForConfirmation(
     ...(currentAgentDeviceId ? { targetAgentDeviceId: null } : {}),
   };
   deps.pendingSwitches.set(sessionId, intent);
-  deps.onPendingSwitchChanged?.(sessionId, projectPendingAgentSwitchIntent(intent));
+  // Told to the windows as a change of what is pending, not as a selection of the user's.
+  const report = projectPendingAgentSwitchIntent(intent)!;
+  if (deps.onPendingSwitchAgreementChanged) deps.onPendingSwitchAgreementChanged(sessionId, report);
+  else deps.onPendingSwitchChanged?.(sessionId, report);
   return true;
 }
 
