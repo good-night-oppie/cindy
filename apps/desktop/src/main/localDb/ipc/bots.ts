@@ -103,7 +103,7 @@ import {
   inferBotTemplatePresetId,
   isBotTemplatePresetId,
 } from '../../../shared/botTemplatePreset.js';
-import { withAgyPermissionTransition } from '../../maker-ipc/agyPermissionLifecycle.js';
+import { isAgyFullAccessDeferred, withAgyPermissionTransition } from '../../maker-ipc/agyPermissionLifecycle.js';
 import { botPermissionTargets, syncBotLanePermission, syncBotLinkedLanePermissions, syncBotPermissionsByBotId } from '../../maker-ipc/botPermissionSync.js';
 import { withSessionPermissionChange } from '../../maker-ipc/sessionPermissionChange.js';
 import { withBotPermissionChangeForBot } from '../../maker-ipc/botPermissionDispatch.js';
@@ -2316,7 +2316,11 @@ export async function updateBotProfile(raw: unknown, expectedVersion?: number,
       if (canonical) {
         const maker = getMakerIfReady();
         const live = maker?.getSession(canonical.sessionId);
-        try { await live?.setPermissionMode(canonical.mode as 'ask' | 'auto' | 'bypassPermissions'); }
+        try {
+          if (live && !isAgyFullAccessDeferred(live, canonical.mode)) {
+            await live.setPermissionMode(canonical.mode as 'ask' | 'auto' | 'bypassPermissions');
+          }
+        }
         catch (error) {
           // A failed hot switch cannot leave the old, more permissive runtime alive.
           owner.assertCurrent();

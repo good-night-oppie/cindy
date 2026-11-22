@@ -69,6 +69,28 @@ describe('permission change racing an engine switch into Antigravity', () => {
     }
   });
 
+  it('retires only the old handle after the turn and starts its replacement with the saved mode', async () => {
+    const id = 'deferred-widen';
+    const h = harness(id, { agentKind: 'agy', permissionMode: 'ask' });
+    h.launch();
+    const old = h.state.live!;
+    old.isTurnRunning = () => true;
+    const runtime = {
+      getSession: () => h.state.live as never,
+      closeSession: vi.fn(async () => { h.state.live = null; }),
+      closeSessionIfCurrent: vi.fn(async () => 'deferred' as const),
+    };
+    await h.change('bypassPermissions', runtime);
+    await h.change('bypassPermissions', runtime);
+    expect(runtime.closeSessionIfCurrent).toHaveBeenCalledTimes(1);
+    expect(old.stablePermissionModeState.mode).toBe('ask');
+    h.launch();
+    expect(h.state.live!.stablePermissionModeState.mode).toBe('bypassPermissions');
+    await h.change('ask', runtime);
+    expect(runtime.closeSession).toHaveBeenCalledOnce();
+    expect(h.state.live).toBeNull();
+  });
+
   it('permission change first: the send that switches the engine waits and launches with the saved mode', async () => {
     const id = 'change-first';
     const h = harness(id, { agentKind: 'cc', permissionMode: 'bypassPermissions' });

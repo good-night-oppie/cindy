@@ -13,6 +13,12 @@ type StoredSelection = { agentKind?: string | null; permissionMode?: string | nu
 /** The stored engine and mode of each task right now; `null` when the store cannot be read here. */
 export type ReadStoredSelections = (sessionIds: readonly string[]) => Promise<ReadonlyMap<string, StoredSelection> | null>;
 
+// A deferred close belongs to the exact runtime. Its replacement may use the newly saved mode.
+const finishingIsolatedTurn = new WeakSet<object>();
+export function isAgyFullAccessDeferred(live: object | null | undefined, mode: string): boolean {
+  return mode === 'bypassPermissions' && !!live && finishingIsolatedTurn.has(live);
+}
+
 const readStoredSelections: ReadStoredSelections = async (sessionIds) => {
   const client = getCurrentDbClientSnapshot()?.client;
   if (!sessionIds.length || typeof client?.query !== 'function') return null;
@@ -56,6 +62,7 @@ export async function withAgyPermissionTransition<T>(
       const row = stored?.get(target.sessionId);
       if ((live?.agentKind ?? (row ? row.agentKind : target.agentKind)) !== 'agy') continue;
       const savedMode = row ? row.permissionMode : target.previousMode;
+      if (isAgyFullAccessDeferred(live, nextMode)) continue;
       const savedCrosses = (savedMode === 'bypassPermissions') !== full;
       const liveMode = live?.stablePermissionModeState?.mode;
       if (savedCrosses || (live && (!liveMode || (liveMode === 'bypassPermissions') !== full))) {
@@ -91,7 +98,8 @@ export async function withAgyPermissionTransition<T>(
         const live = maker.getSession(id);
         if (live?.agentKind === 'agy') {
           if (live.isTurnRunning() && full && maker.closeSessionIfCurrent) {
-            await maker.closeSessionIfCurrent(live, 'runtime-refresh', { afterCurrentTurn: true });
+            const result = await maker.closeSessionIfCurrent(live, 'runtime-refresh', { afterCurrentTurn: true });
+            if (result === 'deferred') finishingIsolatedTurn.add(live);
           } else {
             if (live.isTurnRunning()) await live.abort();
             await maker.closeSession(id, 'runtime-refresh');
@@ -99,6 +107,10 @@ export async function withAgyPermissionTransition<T>(
         }
       }
       assertCurrent();
+      // Even a repeated save must not hot-switch a session already retiring after this turn.
+      for (const id of targetIds) {
+        if (isAgyFullAccessDeferred(maker.getSession(id), nextMode)) ids.add(id);
+      }
       return { value: await commit(ids, locked) };
     })(0);
     if ('value' in outcome) return outcome.value;

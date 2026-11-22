@@ -99,7 +99,7 @@ const h = await vi.hoisted(async () => {
   remove: vi.fn(async (_path: import('node:fs').PathLike, _options?: import('node:fs').RmOptions) => undefined),
   ensureGit: vi.fn(async () => undefined),
   closeSession: vi.fn(async () => undefined),
-  closeSessionIfCurrent: vi.fn(async (_live: unknown, _reason: string, _options: unknown) => undefined),
+  closeSessionIfCurrent: vi.fn(async (_live: unknown, _reason: string, _options: unknown): Promise<'deferred' | void> => undefined),
   getSession: vi.fn((_id?: string) => null as {
     capabilities?: { manualCompact?: { supported?: boolean } };
     isTurnRunning?: () => boolean;
@@ -1485,6 +1485,53 @@ describe('Bot canonical Session lifecycle', () => {
       expect((await invoke('local-db:bots:get', 'bot-1')).capabilities.permissions).toBe('trusted');
     } finally {
       Object.defineProperty(process, 'platform', platform);
+      h.closeSession.mockReset().mockResolvedValue(undefined);
+      h.closeSessionIfCurrent.mockReset().mockResolvedValue(undefined);
+    }
+  });
+
+  it.each(['first', 'last', 'canonical'] as const)('keeps the %s busy agy runtime isolated while publishing every widened lane', async position => {
+    const profile = await invoke('local-db:bots:update', { id: 'bot-1', capabilities: { permissions: 'ask' } });
+    const chat = await invoke('local-db:bots:create-canonical-session', {
+      botId: 'bot-1', expectedCanonicalSessionId: null, expectedProfileVersion: profile.currentVersion,
+    });
+    const ids: string[] = [chat.session.id];
+    // Put noncanonical lanes on both sides of session-1 in the actual lock order.
+    for (const counter of [-1, 7, 8]) {
+      h.nextSession = counter;
+      const lane = await ensureBotChannelLaneSession({ botId: 'bot-1', routeKey: 'im:fixture:' + counter, title: 'Fixture' });
+      if (!lane.ok) throw new Error(lane.message);
+      ids.push(lane.sessionId);
+    }
+    const ordered = [...ids].sort();
+    const busyId = position === 'canonical' ? ids[0]! : position === 'first' ? ordered[0]! : ordered[3]!;
+    if (position !== 'canonical') expect(busyId).not.toBe(chat.session.id);
+    const sqlIds = '(?, ?, ?, ?)';
+    h.sqlite!.prepare("UPDATE sessions SET agent_kind = 'agy' WHERE id IN " + sqlIds).run(...ids);
+    const live = new Map(ids.map(id => [id, {
+      agentKind: 'agy', stablePermissionModeState: { mode: 'ask' },
+      isTurnRunning: () => id === busyId, compactSession: vi.fn(), setPermissionMode: vi.fn(),
+    }]));
+    const busy = live.get(busyId)!;
+    h.getSession.mockImplementation(id => id ? live.get(id) ?? null : null);
+    h.closeSession.mockImplementation(async (...args: unknown[]) => { live.delete(args[0] as string); });
+    h.closeSessionIfCurrent.mockResolvedValue('deferred');
+    const patched = vi.spyOn(await import('../sessions'), 'broadcastSessionPatched');
+    const platform = Object.getOwnPropertyDescriptor(process, 'platform')!;
+    Object.defineProperty(process, 'platform', { ...platform, value: 'linux' });
+    try {
+      await invoke('local-db:bots:update', { id: 'bot-1', capabilities: { permissions: 'trusted' } });
+      expect(h.closeSessionIfCurrent).toHaveBeenCalledTimes(1);
+      expect(h.closeSessionIfCurrent).toHaveBeenCalledWith(busy, 'runtime-refresh', { afterCurrentTurn: true });
+      expect([...live.keys()]).toEqual([busyId]);
+      expect(busy.setPermissionMode).not.toHaveBeenCalled();
+      expect(h.sqlite!.prepare('SELECT permission_mode FROM sessions WHERE id IN ' + sqlIds).pluck().all(...ids))
+        .toEqual(ids.map(() => 'bypassPermissions'));
+      for (const id of ids) expect(patched).toHaveBeenCalledWith(id, { permissionMode: 'bypassPermissions' });
+      expect((await invoke('local-db:bots:get', 'bot-1')).capabilities.permissions).toBe('trusted');
+    } finally {
+      Object.defineProperty(process, 'platform', platform);
+      patched.mockRestore();
       h.closeSession.mockReset().mockResolvedValue(undefined);
       h.closeSessionIfCurrent.mockReset().mockResolvedValue(undefined);
     }

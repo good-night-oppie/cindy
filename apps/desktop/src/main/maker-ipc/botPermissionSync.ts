@@ -5,7 +5,7 @@ import { getMakerIfReady } from '../maker-host/index.js';
 import { forgetCredentialGrants } from '../remote-agent/executor/credentialGrants.js';
 import { withSessionPermissionChange } from './sessionPermissionChange.js';
 
-import { withAgyPermissionTransition, type PermissionTarget } from './agyPermissionLifecycle.js';
+import { isAgyFullAccessDeferred, withAgyPermissionTransition, type PermissionTarget } from './agyPermissionLifecycle.js';
 
 export async function botPermissionTargets(
   client: NonNullable<ReturnType<typeof getCurrentDbClientSnapshot>>['client'],
@@ -58,7 +58,7 @@ export async function syncBotLanePermission(sessionId: string): Promise<void> {
       const maker = getMakerIfReady();
       const live = maker?.getSession(sessionId);
       if (changed || (live && live.stablePermissionModeState?.mode !== mode)) forgetCredentialGrants(sessionId);
-      if (live && live.stablePermissionModeState?.mode !== mode) {
+      if (live && live.stablePermissionModeState?.mode !== mode && !isAgyFullAccessDeferred(live, mode)) {
         try {
           await live.setPermissionMode(mode as PermissionMode);
         } catch (error) {
