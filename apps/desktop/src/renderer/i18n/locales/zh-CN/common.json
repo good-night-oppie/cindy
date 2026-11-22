@@ -14307,6 +14307,7 @@
           "note": "确认后不会发送消息。"
         },
         "permissionConfirmation": {
+          "bodyFromUnsupported": "切换后，这个任务的权限会改为「默认权限」：Antigravity 发来的审批请求由你决定。你刚选的这个档位 Antigravity 没有，它自带的规则（比如计划模式的限制）不会带过去。切换后可以在任务的权限菜单里再改；各档的具体范围也写在那里。",
           "title": "改成「{{mode}}」？",
           "cancel": "暂不更改",
           "confirm": "确认更改"
@@ -14929,7 +14930,7 @@
       "viewBalanceTitle": "打开「用量和计费」查看余额并充值",
       "agentSwitchPermissionUnconfirmed": "这条消息还没有发出。切换到 Antigravity 会改变这个任务的权限，这次改变还需要你确认。点「查看并确认」；你确认后才会切换并发送这条消息。",
       "agentSwitchPermissionUnconfirmedRemote": "这条消息还没有发出。切换到 Antigravity 会改变这个任务的权限，这次改变要在任务所在的那台电脑上确认，确认后才会切换并发送。那边确认后，如果这条消息还没发出，点「重试」。",
-      "agentSwitchPermissionSwitchGone": "这条消息还没有发出。它在等任务切换到 Antigravity，但那次切换已经不在了。重新选一个 Antigravity 的模型并确认后，这条消息才会发出；不想切换的话，请删除这条消息再重新发送。",
+      "agentSwitchPermissionSwitchGone": "这条消息还没有发出。它在等任务切换到 Antigravity，但那次切换已经失效了。要切换的话，重新选一个 Antigravity 的模型并确认；不想切换的话，删掉这条消息，再重新发一次。",
       "agentSwitchPermissionReview": "查看并确认",
       "credentialSwitchBusy": "其他 Codex 任务仍在运行，暂时无法应用本任务选择的供应商（共享的 Codex 进程需要重启）。等这些任务结束后再点「重试」。",
       "accountBoundaryPending": "Cindy 正在切换账号状态，暂时无法开始这个任务。稍等片刻后点「重试」；如果一直出现，请重启 Cindy。",

@@ -66,8 +66,9 @@ const GATE_COPY = {
 };
 
 /** The composer while a switch is pending: the send, or the permission change, goes on only when the gate resolves true. */
-function SendHarness({ mode, intentTarget = 'agy', runningAgent = 'claude-code', onSent }: {
+function SendHarness({ mode, intentTarget = 'agy', runningAgent = 'claude-code', onSent, statement }: {
   mode: string; intentTarget?: string | null; runningAgent?: string; onSent: () => void;
+  statement?: { fromUnsupported?: string };
 }) {
   const { confirm } = useConfirmDialog();
   return (
@@ -75,7 +76,8 @@ function SendHarness({ mode, intentTarget = 'agy', runningAgent = 'claude-code',
       type="button"
       onClick={() => {
         void confirmPendingAgySwitchPermission({
-          sessionId: 'task-1', intentTarget, runningAgent, permissionMode: mode, confirm, copy: GATE_COPY, t: key => key,
+          sessionId: 'task-1', intentTarget, runningAgent, permissionMode: mode, confirm,
+          copy: statement ? { ...GATE_COPY, statement } : GATE_COPY, t: key => key,
         }).then((send) => {
           if (send) onSent();
         });
@@ -109,6 +111,21 @@ describe('Agent switch confirmation', () => {
 
   afterEach(() => {
     cleanup();
+  });
+
+  // JJ 7081611824, on QQ's ruling: the permission menu asks before the picked mode is stored, so
+  // the shared body's "the level you use now" named a level the user was leaving. That dialog has
+  // its own body for a mode Antigravity does not have; the body about leaving Full access, and
+  // every other place that asks, keep the shared one.
+  it.each([
+    ['a mode Antigravity does not have', 'acceptEdits', 'the level you just picked', 'antigravityFromUnsupported'],
+    ['Full access', 'bypassPermissions', 'antigravityFromFullAccess', 'the level you just picked'],
+  ])('the dialog of the permission menu states the change in its own words for %s only', async (_name, mode, shown, absent) => {
+    forgetAgySwitchPermissionAgreed('task-1');
+    renderSend({ mode, onSent: vi.fn(), statement: { fromUnsupported: 'the level you just picked' } });
+    fireEvent.click(screen.getByRole('button', { name: 'Send' }));
+    expect(await screen.findByText(new RegExp(shown))).toBeTruthy();
+    expect(screen.queryByText(new RegExp(absent))).toBeNull();
   });
 
   it('prompts before browsing another Agent and cancel leaves the tab untouched', async () => {

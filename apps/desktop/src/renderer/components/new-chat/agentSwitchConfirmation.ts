@@ -121,6 +121,12 @@ export function agyPermissionChangeTitle(
 /** Title per change, and the two buttons, of a dialog that asks again about a pending switch. */
 export interface AgySwitchPermissionAgreementCopy {
   title: Record<AgySwitchPermissionChange, string>;
+  /**
+   * The statement of the change, where the shared one does not fit what the user just did. The
+   * permission menu's dialog is shown before the picked mode is stored, so "the level you use
+   * now" would name a level they are leaving; it says "the level you just picked" instead.
+   */
+  statement?: Partial<Record<AgySwitchPermissionChange, string>>;
   /** A paragraph after the statement of the change, for what confirming does not do. */
   note?: string;
   confirmText: string;
@@ -184,7 +190,8 @@ export async function confirmPendingAgySwitchPermission(input: {
   if (input.intentTarget !== 'agy' || input.runningAgent === 'agy') return true;
   if (!agySwitchPermissionNeedsAgreement(input.sessionId, input.permissionMode)) return true;
   const change = agySwitchPermissionChange(input.permissionMode)!;
-  const statement = agySwitchPermissionNotice('agy', input.runningAgent, input.permissionMode, input.t).permissionNotice;
+  const statement = input.copy.statement?.[change]
+    ?? agySwitchPermissionNotice('agy', input.runningAgent, input.permissionMode, input.t).permissionNotice;
   const agreed = await input.confirm({
     title: input.copy.title[change],
     description: input.copy.note ? `${statement}

@@ -7470,6 +7470,9 @@ export function ChatInput({
             fromFullAccess: t('newChat.chatInput.agentSwitch.sendConfirmation.titleFromFullAccess'),
             fromUnsupported: t('newChat.chatInput.agentSwitch.sendConfirmation.titleFromUnsupported'),
           },
+          ...(about === 'permissionConfirmation' ? {
+            statement: { fromUnsupported: t('newChat.chatInput.agentSwitch.permissionConfirmation.bodyFromUnsupported') },
+          } : {}),
           confirmText: t(`newChat.chatInput.agentSwitch.${about}.confirm`),
           cancelText: t(`newChat.chatInput.agentSwitch.${about}.cancel`),
         },

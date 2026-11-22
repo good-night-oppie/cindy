@@ -14307,6 +14307,7 @@
           "note": "确认之后，不发讯也。"
         },
         "permissionConfirmation": {
+          "bodyFromUnsupported": "既易之后，此任务之权柄改为「预设权柄」：Antigravity 所请之审，由君决之。君方所择之档，Antigravity 无之，其自有之规（如计划模式之限）不随而入。易后可于任务之权柄菜单复改；各档所许，亦载于彼。",
           "title": "改为「{{mode}}」乎？",
           "cancel": "姑且不改",
           "confirm": "确认更改"
@@ -14920,7 +14921,7 @@
       "viewBalanceTitle": "开「耗用与计费」，览余资并储值",
       "agentSwitchPermissionUnconfirmed": "此讯尚未发出。易至 Antigravity，此任务之权柄将变，此变尚待君确认。点「览而确认」；君确认之后，方易而发此讯。",
       "agentSwitchPermissionUnconfirmedRemote": "此讯尚未发出。易至 Antigravity，此任务之权柄将变，此变须于任务所在之电脑确认，确认之后方易而发之。彼处确认之后，若此讯犹未发，点「再试」。",
-      "agentSwitchPermissionSwitchGone": "此讯尚未发出。其待任务易至 Antigravity，而彼易已不存。复择 Antigravity 之模型而确认，此讯方发；若不欲易，请删此讯而复发之。",
+      "agentSwitchPermissionSwitchGone": "此讯尚未发出。其待任务易至 Antigravity，而彼易已失其效。欲易，则复择 Antigravity 之模型而确认；不欲易，则删此讯而复发之。",
       "agentSwitchPermissionReview": "览而确认",
       "credentialSwitchBusy": "Codex 方行于他差事，暂不能依此差事所择之模型来源而易（须重启共用之 Codex 后台进程）。俟其毕，点「再试」即可。",
       "accountBoundaryPending": "Cindy 方易名籍之态，暂不能始此差事。稍候片刻，点「再试」；若屡见之，请重启 Cindy。",

@@ -14361,6 +14361,7 @@
           "note": "Confirming doesn't send any message."
         },
         "permissionConfirmation": {
+          "bodyFromUnsupported": "After the switch, this task's permissions change to Default permissions: you decide on the approval requests Antigravity sends. Antigravity doesn't have the level you just picked, so its own rules (such as Plan mode's limits) aren't carried over. You can change permissions in the task's permission menu afterwards; it also explains what each level allows.",
           "title": "Change to {{mode}}?",
           "cancel": "Don't change yet",
           "confirm": "Confirm change"
@@ -14994,7 +14995,7 @@
       "viewBalanceTitle": "Open Usage and billing to check your balance and add funds",
       "agentSwitchPermissionUnconfirmed": "This message hasn't been sent. Switching to Antigravity will change this task's permissions, and that change still needs your confirmation. Select Review and confirm; Cindy switches and sends this message only after you confirm.",
       "agentSwitchPermissionUnconfirmedRemote": "This message hasn't been sent. Switching to Antigravity will change this task's permissions, and that change has to be confirmed on the computer the task runs on before Cindy switches and sends it. Once it's confirmed there, select Retry if this message still hasn't been sent.",
-      "agentSwitchPermissionSwitchGone": "This message hasn't been sent. It was waiting for the task to switch to Antigravity, and that switch is no longer pending. Cindy sends it only after you pick an Antigravity model again and confirm; to stay on the current model, delete this message and send it again.",
+      "agentSwitchPermissionSwitchGone": "This message hasn't been sent. It was waiting for the task to switch to Antigravity, but that switch is no longer pending. To switch, pick an Antigravity model again and confirm. If you don't want to switch, delete this message and send it again.",
       "agentSwitchPermissionReview": "Review and confirm",
       "credentialSwitchBusy": "Another Codex task is still running, so the provider for this session can't be applied yet (the shared Codex process needs a restart). Retry after those tasks finish.",
       "accountBoundaryPending": "Cindy is still switching account state, so this task can't start yet. Wait a moment, then press Retry. If this keeps happening, restart Cindy.",
