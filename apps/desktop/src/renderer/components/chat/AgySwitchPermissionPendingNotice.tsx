@@ -70,7 +70,7 @@ export function AgySwitchPermissionPendingNotice({
         },
         t,
         registerWithHost: (pending, agreement) =>
-          recordAgySwitchPermissionAgreementWithHost(asked.sessionId, pending, agreement),
+          recordAgySwitchPermissionAgreementWithHost(asked.sessionId, pending, agreement, 'recordOnly'),
         // Rendered from the host's report, so it is what is pending now.
         currentIntent: () => latest.current.intent,
         askAfresh: true,

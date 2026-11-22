@@ -7890,6 +7890,7 @@ contextBridge.exposeInMainWorld('electronAPI', {
         agentDeviceId?: string | null; confirmedContextWindow?: number;
         agyPermissionAgreement?: { change: 'fromFullAccess' | 'fromUnsupported' | null; mode: string };
         agyPermissionAgreementOnly?: boolean;
+        agyPermissionAgreementForSend?: boolean;
         agyPermissionRevision?: number;
       },
       thinking?: boolean,

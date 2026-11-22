@@ -470,6 +470,14 @@ export interface PendingAgentSwitchIntent {
    */
   agyPermissionAgreement?: AgySwitchPermissionAgreement;
   /**
+   * The agreement above was given where the user was told a message would go out with it: in the
+   * dialog a send shows, on the banner of a held message, or with the engine pick itself. Only
+   * such an agreement lets a held message go by itself. The task's own entry says "this sends no
+   * message": an agreement from there is recorded without this, and a held message stays where
+   * it is until the user sends it. (JJ 7084937114, QQ's ruling on the entry.)
+   */
+  agyPermissionAgreementForSend?: true;
+  /**
    * Pi-only：目标模型的思考开关意图（renderer 记忆，缺省开）。发送时刻回放暂存
    * 选择时必须一并应用，否则上一模型的 off 会残留——Pi 的 set_model 不重置
    * thinking level。
@@ -517,6 +525,11 @@ export interface PublicAgentSwitchIntent {
    * user was shown and on no other.
    */
   agyPermissionRevision?: number;
+  /**
+   * Antigravity only: the recorded agreement was given where a message was to go out with it (see
+   * PendingAgentSwitchIntent). A window resends a held message by itself only on such a one.
+   */
+  agyPermissionAgreementForSend?: true;
   /** The switch was staged by configuration, not picked by the user in this task. */
   configStaged?: true;
 }
@@ -550,6 +563,8 @@ export function projectPendingAgentSwitchIntent(
     ...(intent.targetAgentDeviceId !== undefined ? { agentDeviceId: intent.targetAgentDeviceId } : {}),
     ...(intent.targetAgentKind === 'agy' ? { agyPermissionAgreement: intent.agyPermissionAgreement ?? null } : {}),
     ...(intent.targetAgentKind === 'agy' && typeof intent.revision === 'number' ? { agyPermissionRevision: intent.revision } : {}),
+    ...(intent.targetAgentKind === 'agy' && intent.agyPermissionAgreement && intent.agyPermissionAgreementForSend === true
+      ? { agyPermissionAgreementForSend: true as const } : {}),
     ...(intent.targetAgentKind === 'agy' && intent.configStaged === true ? { configStaged: true as const } : {}),
   };
 }
@@ -563,12 +578,17 @@ export function projectPendingAgentSwitchIntent(
  * switch: when the revision is not the pending one's, nothing is recorded. The model and
  * provider are compared too, as a second reading of the same thing. Resolves whether the
  * agreement was recorded.
+ *
+ * `forSend` says the user agreed where a message was to go out with it. Only then is the host
+ * told to let a held message go. Without it the agreement is recorded and nothing is sent:
+ * that is what the task's own entry promises on screen.
  */
 export function recordAgySwitchPermissionAgreement(
   deps: Pick<MakerSessionAgentSwitchHandlerDeps, 'pendingSwitches' | 'onPendingSwitchChanged' | 'onPendingSwitchAgreementChanged' | 'onPendingSwitchAgreed'>,
   sessionId: string,
   askedAbout: { revision: unknown; model: unknown; providerId: unknown },
   agreement: unknown,
+  forSend = false,
 ): boolean {
   const parsed = parseAgySwitchPermissionAgreement(agreement);
   const pending = deps.pendingSwitches?.get?.(sessionId);
@@ -585,10 +605,12 @@ export function recordAgySwitchPermissionAgreement(
   // Where the switch came from (configuration, an agent, the user) and everything else it carries
   // are untouched for the same reason.
   pending.agyPermissionAgreement = parsed;
+  // An agreement given for a send stays one when the entry records the same thing again later.
+  if (forSend) pending.agyPermissionAgreementForSend = true;
   const report = projectPendingAgentSwitchIntent(pending)!;
   if (deps.onPendingSwitchAgreementChanged) deps.onPendingSwitchAgreementChanged(sessionId, report);
   else deps.onPendingSwitchChanged?.(sessionId, report);
-  deps.onPendingSwitchAgreed?.(sessionId);
+  if (forSend) deps.onPendingSwitchAgreed?.(sessionId);
   return true;
 }
 
@@ -1131,12 +1153,20 @@ export async function performSessionAgentSwitch(
     };
     // What was agreed is about the permission rewrite, not the model: picking another Gemini model
     // while the switch is pending keeps it. A registration that says nothing does not erase it.
-    const agyPermissionAgreement = parseAgySwitchPermissionAgreement(params.agyPermissionAgreement)
-      ?? (existingIntent?.targetAgentKind === targetAgentKind ? existingIntent.agyPermissionAgreement : undefined);
-    if (targetAgentKind === 'agy' && agyPermissionAgreement) intent.agyPermissionAgreement = agyPermissionAgreement;
+    const agreedWithThisPick = parseAgySwitchPermissionAgreement(params.agyPermissionAgreement);
+    const keptAgreement = existingIntent?.targetAgentKind === targetAgentKind ? existingIntent : undefined;
+    const agyPermissionAgreement = agreedWithThisPick ?? keptAgreement?.agyPermissionAgreement;
+    if (targetAgentKind === 'agy' && agyPermissionAgreement) {
+      intent.agyPermissionAgreement = agyPermissionAgreement;
+      // Agreed in the dialog of this engine pick, which the user makes in order to send with it;
+      // an agreement carried over keeps what it was.
+      if (agreedWithThisPick || keptAgreement?.agyPermissionAgreementForSend === true) intent.agyPermissionAgreementForSend = true;
+    }
     deps.pendingSwitches.set(sessionId, intent);
     deps.onPendingSwitchChanged?.(sessionId, projectPendingAgentSwitchIntent(intent));
-    if (intent.agyPermissionAgreement) deps.onPendingSwitchAgreed?.(sessionId);
+    // Only an agreement given with this pick lets a held message go: one carried over was either
+    // acted on when it was given or was recorded by the task's entry, which sends nothing.
+    if (targetAgentKind === 'agy' && agreedWithThisPick) deps.onPendingSwitchAgreed?.(sessionId);
     deps.log.info('agent-switch: intent registered (applies on next send)', {
       sessionId,
       targetAgentKind,
@@ -1941,13 +1971,15 @@ export function registerMakerSessionAgentSwitchHandler(
       if (options && typeof options === 'object' && !Array.isArray(options)
         && (options as { agyPermissionAgreementOnly?: unknown }).agyPermissionAgreementOnly === true) {
         if (typeof sessionId !== 'string' || sessionId.length === 0) throwIpcError('INVALID_PARAMS', 'sessionId required');
-        const answer = options as { agyPermissionAgreement?: unknown; agyPermissionRevision?: unknown };
+        const answer = options as {
+          agyPermissionAgreement?: unknown; agyPermissionRevision?: unknown; agyPermissionAgreementForSend?: unknown;
+        };
         const fromThisComputer = !isDeviceLinkInvoke();
         const record = async () => {
           const recorded = fromThisComputer && targetAgentKind === 'agy'
             && recordAgySwitchPermissionAgreement(deps, sessionId, {
               revision: answer.agyPermissionRevision, model, providerId,
-            }, answer.agyPermissionAgreement);
+            }, answer.agyPermissionAgreement, answer.agyPermissionAgreementForSend === true);
           return {
             switched: false, agentKind: 'agy' as const, model: typeof model === 'string' ? model : '', engineReady: true,
             deferred: recorded, agyPermissionAgreementRecorded: recorded,

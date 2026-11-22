@@ -2606,6 +2606,8 @@ export interface AgentSwitchIntentRecord {
   agyPermissionAgreement?: { change: 'fromFullAccess' | 'fromUnsupported' | null; mode: string } | null;
   /** Antigravity only, from the host: which registration this is. Sent back with an agreement. */
   agyPermissionRevision?: number;
+  /** From the host: the agreement was given where a message was to go out with it. */
+  agyPermissionAgreementForSend?: true;
   /** From the host: staged by configuration, not picked by the user in this task. */
   configStaged?: true;
 }
@@ -18943,7 +18945,7 @@ function normalizeAgentSwitchIntent(value: unknown): AgentSwitchIntentRecord | n
 /** What the host says about the permission agreement of a pending switch into Antigravity. */
 function normalizeAgyPermissionState(
   item: Record<string, unknown>,
-): Pick<AgentSwitchIntentRecord, 'agyPermissionAgreement' | 'agyPermissionRevision' | 'configStaged'> {
+): Pick<AgentSwitchIntentRecord, 'agyPermissionAgreement' | 'agyPermissionRevision' | 'agyPermissionAgreementForSend' | 'configStaged'> {
   if (item.targetAgentKind !== 'agy' || !('agyPermissionAgreement' in item)) return {};
   const raw = item.agyPermissionAgreement;
   const agreed = raw && typeof raw === 'object' && !Array.isArray(raw)
@@ -18957,6 +18959,7 @@ function normalizeAgyPermissionState(
   return {
     agyPermissionAgreement: agreement,
     ...(typeof item.agyPermissionRevision === 'number' ? { agyPermissionRevision: item.agyPermissionRevision } : {}),
+    ...(agreement && item.agyPermissionAgreementForSend === true ? { agyPermissionAgreementForSend: true as const } : {}),
     ...(item.configStaged === true ? { configStaged: true as const } : {}),
   };
 }
@@ -18964,6 +18967,7 @@ function normalizeAgyPermissionState(
 function agyPermissionStateEquals(a: AgentSwitchIntentRecord, b: AgentSwitchIntentRecord): boolean {
   return a.configStaged === b.configStaged
     && a.agyPermissionRevision === b.agyPermissionRevision
+    && a.agyPermissionAgreementForSend === b.agyPermissionAgreementForSend
     && (a.agyPermissionAgreement === b.agyPermissionAgreement
       || (!!a.agyPermissionAgreement && !!b.agyPermissionAgreement
         && a.agyPermissionAgreement.change === b.agyPermissionAgreement.change

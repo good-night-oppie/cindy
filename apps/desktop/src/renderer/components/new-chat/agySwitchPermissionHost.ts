@@ -3,8 +3,13 @@ import { makerApiFor } from '@/lib/makerTransport';
 /**
  * Tells the task's host that the user agreed to the permission change of the switch into
  * Antigravity they were asked about. The host attaches it to that switch only if it is still the
- * pending one, and does nothing else: it registers no switch and sends no message. Its answer
- * says whether it was recorded (see agreeToPendingAgySwitchPermission).
+ * pending one and registers no switch. Its answer says whether it was recorded (see
+ * agreeToPendingAgySwitchPermission).
+ *
+ * `purpose` is what the user was told on screen. 'send': they agreed in order to send (the dialog
+ * of a send or of a permission change, the banner of a held message); the host then lets a
+ * message it held for this go. 'recordOnly': the task's own entry, which says that confirming
+ * sends no message; the host records the agreement and sends nothing.
  */
 export function recordAgySwitchPermissionAgreementWithHost(
   sessionId: string,
@@ -14,11 +19,13 @@ export function recordAgySwitchPermissionAgreementWithHost(
     agyPermissionRevision?: number;
   },
   agreement: { change: 'fromFullAccess' | 'fromUnsupported' | null; mode: string },
+  purpose: 'send' | 'recordOnly',
 ): Promise<unknown> {
   return makerApiFor(sessionId).switchSessionAgent(
     sessionId, 'agy', askedAbout.model, askedAbout.providerId, askedAbout.effort, askedAbout.fastMode,
     {
       agyPermissionAgreement: agreement, agyPermissionAgreementOnly: true,
+      ...(purpose === 'send' ? { agyPermissionAgreementForSend: true } : {}),
       ...(askedAbout.agyPermissionRevision !== undefined ? { agyPermissionRevision: askedAbout.agyPermissionRevision } : {}),
     },
   );

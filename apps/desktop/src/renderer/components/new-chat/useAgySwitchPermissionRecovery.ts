@@ -16,8 +16,8 @@ import { recordAgySwitchPermissionAgreementWithHost } from './agySwitchPermissio
  * switch is still pending.
  *
  * Automatically, at most once per pending switch and stored mode: ask with the dialog a send shows
- * (or, when the user has just agreed in the permission menu, use that), tell the host, and resend
- * the held message once. A retry clears the error before the host answers, so "the error went away
+ * (or, when the host already has an agreement given for a send, use that), tell the host, and
+ * resend the held message once. A retry clears the error before the host answers, so "the error went away
  * and came back" is not a new occasion: if the host holds the message again, nothing more happens
  * on its own. The banner stays, and its action asks the user afresh, never trusting an agreement
  * the host has just shown it does not have.
@@ -57,6 +57,13 @@ export function useAgySwitchPermissionRecovery(input: {
     if (!sessionId || asking.current) return;
     asking.current = true;
     try {
+      // Resent without a question only on an agreement the host has as one given for a send (in
+      // the model picker's dialog, or by a send in another window). The task's own entry and an
+      // ordinary change of the permission mode told the user nothing about sending: on what they
+      // recorded, or on what this window remembers of them, the question of a send is asked here
+      // and only its answer sends.
+      const recorded = makerChatStore.getAgentSwitchIntent(sessionId);
+      if (!(recorded?.agyPermissionAgreement && recorded.agyPermissionAgreementForSend === true)) askAfresh = true;
       if (askAfresh) forgetAgySwitchPermissionAgreed(sessionId);
       const agreed = await agreeToPendingAgySwitchPermission({
         sessionId,
@@ -73,7 +80,7 @@ export function useAgySwitchPermissionRecovery(input: {
           cancelText: t('newChat.chatInput.agentSwitch.sendConfirmation.cancel'),
         },
         t,
-        registerWithHost: (intent, agreement) => recordAgySwitchPermissionAgreementWithHost(sessionId, intent, agreement),
+        registerWithHost: (intent, agreement) => recordAgySwitchPermissionAgreementWithHost(sessionId, intent, agreement, 'send'),
         currentIntent: () => makerChatStore.getAgentSwitchIntent(sessionId),
         askAfresh,
       });

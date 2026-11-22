@@ -144,6 +144,8 @@ export interface AgySwitchPermissionPendingIntent {
   agyPermissionAgreement?: { change: AgySwitchPermissionChange | null; mode: string } | null;
   /** Which registration this is, as the host stamped it; an agreement is sent back with it. */
   agyPermissionRevision?: number;
+  /** The recorded agreement was given where a message was to go out with it (not at the task's entry). */
+  agyPermissionAgreementForSend?: true;
   configStaged?: true;
 }
 
@@ -244,7 +246,7 @@ export function isAgySwitchPermissionDialogOpen(
 export function agySwitchPendingKey(intent: AgySwitchPermissionPendingIntent | null | undefined): string | null {
   if (!intent) return null;
   const agreed = intent.agyPermissionAgreement;
-  return `${intent.target}|${intent.agyPermissionRevision ?? ''}|${agreed ? `${agreed.change ?? ''}:${agreed.mode}` : ''}`;
+  return `${intent.target}|${intent.agyPermissionRevision ?? ''}|${agreed ? `${agreed.change ?? ''}:${agreed.mode}` : ''}|${intent.agyPermissionAgreementForSend === true ? 'send' : ''}`;
 }
 
 /**
@@ -304,7 +306,15 @@ export async function agreeToPendingAgySwitchPermission(input: {
     });
     if (!agreed) return false;
     const pending = intent?.target === 'agy' && input.runningAgent !== 'agy' ? intent : null;
-    const agreement = pending ? readAgySwitchPermissionAgreed(input.sessionId) : undefined;
+    // Not asked because the host already has this very agreement: it is told again all the
+    // same, with what this caller is doing. The host's record may be one that sends nothing (the
+    // task's entry), and a caller that agrees in order to send has to say so for a held message
+    // to go.
+    const hostAgreement = !input.askAfresh && pending?.agyPermissionAgreement
+      && pending.agyPermissionAgreement.change === agySwitchPermissionChange(input.permissionMode)
+      && pending.agyPermissionAgreement.mode === permissionModeAfterSwitchToAgy(input.permissionMode)
+      ? pending.agyPermissionAgreement : undefined;
+    const agreement = pending ? (hostAgreement ?? readAgySwitchPermissionAgreed(input.sessionId)) : undefined;
     // Nothing to tell the host when the mode is kept as it is: it lets that through on its own.
     if (!pending || !agreement || agreement.change === null || !agySwitchPermissionChange(input.permissionMode)) return true;
     let answer: unknown;

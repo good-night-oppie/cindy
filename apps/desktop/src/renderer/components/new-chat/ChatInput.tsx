@@ -7481,7 +7481,10 @@ export function ChatInput({
         },
         t,
         registerWithHost: (intent, agreement) =>
-          recordAgySwitchPermissionAgreementWithHost(sourceSessionId, intent, agreement),
+          // Agreeing in order to send lets a message held for this go; an ordinary change of
+          // the permission mode only records the agreement.
+          recordAgySwitchPermissionAgreementWithHost(sourceSessionId, intent, agreement,
+            about === 'permissionConfirmation' ? 'recordOnly' : 'send'),
         currentIntent: () => makerChatStore.getAgentSwitchIntent(sourceSessionId),
       });
     } catch (err) {

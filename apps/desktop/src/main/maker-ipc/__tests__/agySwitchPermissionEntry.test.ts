@@ -180,12 +180,14 @@ function fixture(initialMode: string) {
      * The task's confirmation entry: an answer about the pending switch to `model`, and nothing else.
      * `from` is where the answer comes from.
      */
-    agreeOnly: async (agreedFor: string, model = 'gemini-test', from: 'here' | 'remote' = 'here', shownRevision?: number | null, providerId: string | null = null) => {
+    /** 'recordOnly' is the task's own entry; 'send' is a dialog or banner the user agrees in to send. */
+    agreeOnly: async (agreedFor: string, model = 'gemini-test', from: 'here' | 'remote' = 'here', shownRevision?: number | null, providerId: string | null = null, purpose: 'recordOnly' | 'send' = 'recordOnly') => {
       // By default the answer is about the registration the task's window shows right now.
       const revision = shownRevision !== undefined ? shownRevision
         : ((await ipc.invoke(MAKER_INVOKE.GET_SESSION_AGENT_SWITCH_INTENT, id)) as { agyPermissionRevision?: number } | null)?.agyPermissionRevision;
       const call = () => ipc.invoke(MAKER_INVOKE.SWITCH_SESSION_AGENT, id, 'agy', model, providerId, undefined, undefined, {
         agyPermissionAgreementOnly: true,
+        ...(purpose === 'send' ? { agyPermissionAgreementForSend: true } : {}),
         ...(typeof revision === 'number' ? { agyPermissionRevision: revision } : {}),
         agyPermissionAgreement: { change: agySwitchPermissionChange(agreedFor), mode: permissionModeAfterSwitchToAgy(agreedFor) },
       });
@@ -591,17 +593,44 @@ describe('switching a task into Antigravity from the model picker, with permissi
   // agreed to, so that it can let the message held for it go on: when the agreement is recorded
   // for a switch already pending, and when a switch is registered with its agreement (the model
   // picker). A registration that carries no agreement is not such a moment.
-  it('tells the host when the pending switch has just been agreed to, and only then', async () => {
+  //
+  // JJ 7084937114: the task's own entry tells the user that confirming sends no message, and it
+  // recorded its agreement through the same request, so the host let a held message go on it
+  // too. The request now says whether the user agreed in order to send. The entry does not: its
+  // agreement is recorded, reported to the windows as one that sends nothing, and gives no signal.
+  // Neither does a later pick that only carries that agreement over.
+  it('tells the host when the pending switch has just been agreed to for a send, and not when the task entry records an agreement', async () => {
     const h = fixture('bypassPermissions');
     await h.pickGeminiModel(null);
     expect(h.agreedSignals()).toBe(0);
-    await h.agreeOnly('bypassPermissions', 'gemini-test', 'remote', await h.shownRevision());
+    await h.agreeOnly('bypassPermissions', 'gemini-test', 'remote', await h.shownRevision(), null, 'send');
     expect(h.agreedSignals()).toBe(0);
-    await h.agreeOnly('bypassPermissions');
+
+    // The task's entry.
+    await expect(h.agreeOnly('bypassPermissions')).resolves.toMatchObject({ agyPermissionAgreementRecorded: true });
+    expect(h.agreedSignals()).toBe(0);
+    const recordedOnly = await h.pendingSwitch();
+    expect(recordedOnly).toMatchObject({ agyPermissionAgreement: { change: 'fromFullAccess', mode: 'auto' } });
+    expect(recordedOnly).not.toHaveProperty('agyPermissionAgreementForSend');
+    // Another Gemini model keeps the agreement, as what it was.
+    await h.pickOtherGeminiModel();
+    expect(h.agreedSignals()).toBe(0);
+    expect(await h.pendingSwitch()).not.toHaveProperty('agyPermissionAgreementForSend');
+
+    // The banner of a held message, or the dialog of a send.
+    await h.agreeOnly('bypassPermissions', 'gemini-other', 'here', undefined, null, 'send');
     expect(h.agreedSignals()).toBe(1);
+    await expect(h.pendingSwitch()).resolves.toMatchObject({ agyPermissionAgreementForSend: true });
+    // The entry recording the same thing afterwards takes nothing back and signals nothing.
+    await h.agreeOnly('bypassPermissions', 'gemini-other');
+    expect(h.agreedSignals()).toBe(1);
+    await expect(h.pendingSwitch()).resolves.toMatchObject({ agyPermissionAgreementForSend: true });
+
+    // The model picker, agreed in its own dialog.
     await h.withdrawSwitch();
     await h.pickGeminiModel();
     expect(h.agreedSignals()).toBe(2);
+    await expect(h.pendingSwitch()).resolves.toMatchObject({ agyPermissionAgreementForSend: true });
   });
 
   // Where it goes back to. Antigravity runs only on the task's own computer, so a saved

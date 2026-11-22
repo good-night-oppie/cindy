@@ -25,8 +25,13 @@ import { createInterruptedTurnAutoResumeHooks } from '../interruptedTurnAutoResu
 import { ProviderGroupUsageLimitError, providerGroupSwitchCause } from '../../provider-group/failurePolicy.js';
 import { SUPERSEDE_ASYNC_QUESTIONS, type Session } from '@cindy/maker-core';
 import { createSessionBindingLifecycle, createSessionCloseTeardown } from '../sessionBindingLifecycle.js';
-import { assertMessageHeldForAgySwitchMayGo } from '../sessionAgentSwitchHandler.js';
-import { AgentSwitchPermissionUnconfirmedError } from '../agentSwitchPermissionAgreement.js';
+import {
+  assertMessageHeldForAgySwitchMayGo, createPendingAgentSwitchRegistry, registerMakerSessionAgentSwitchHandler,
+} from '../sessionAgentSwitchHandler.js';
+import { MAKER_INVOKE } from '../channels.js';
+import { runDeviceLinkInvokeContext } from '../../device-link/invoke-context.js';
+import { IpcHarness } from './helpers/ipcHarness.js';
+import { AgentSwitchPermissionUnconfirmedError, agySwitchPermissionIsUnconfirmed } from '../agentSwitchPermissionAgreement.js';
 import { captureProductTurnFailureOwner, createDeferredProductTurnFailureGate } from '../productTurnFailureOwner.js';
 import { createProviderGroupHeldRecovery, createProviderGroupHeldTurnErrors } from '../../provider-group/heldTurnErrors.js';
 import { createProviderGroupHeldWorkerTerminals } from '../../provider-group/heldWorkerTerminals.js';
@@ -6288,6 +6293,159 @@ describe('AgentInputCoordinator send transaction', () => {
     // Nothing left to wake.
     expect(h.coordinator.wakeHeldForAgySwitch(sid)).toBe(false);
     expect(h.onDiscardedQueuedMessage).not.toHaveBeenCalled();
+  });
+
+  // JJ 7084937114, QQ's ruling "A". The task's own entry ("Confirm change") tells the user that
+  // confirming sends no message. In b0d6a060 it recorded its agreement through the request the
+  // banner of a held message uses, and the host let the held head go on any recorded agreement:
+  // close the banner, pick the engine again with "not now", confirm in the entry, and the message
+  // was sent. An agreement now says whether it was given for a send; one that does not say (the
+  // entry, an ordinary change of mode) is recorded and wakes nothing.
+  //
+  // Through the host's entry: the real maker:switch-session-agent handler with the app's registry,
+  // joined to a real queue the way register.ts joins them. The engine is the stand-in; its send
+  // step applies the real rule (refuse while the pending switch's permission change is not
+  // agreed to).
+  function hostWithQueue(sid: string) {
+    const h = createHarness();
+    const row = { id: sid, agentKind: 'cc', model: 'claude-test', providerId: null, status: 'active', remoteHostId: null,
+      orcaRole: null, sdkSessionId: null, workingDir: '/project', permissionMode: 'bypassPermissions' };
+    const pendingSwitches = createPendingAgentSwitchRegistry();
+    const ipc = new IpcHarness();
+    registerMakerSessionAgentSwitchHandler(ipc, {
+      getSessionRow: async () => ({ ...row }),
+      getLiveSession: () => null,
+      withSessionLock: (_id: string, fn: () => unknown) => fn(),
+      pendingSwitches,
+      onPendingSwitchAgreed: (id: string) => { h.coordinator.wakeHeldForAgySwitch(id); },
+      log: { info: () => undefined, warn: () => undefined },
+    } as never);
+    const dispatched: unknown[] = [];
+    h.sendToAgent.mockImplementation(async (id, message) => {
+      const pending = pendingSwitches.get(id);
+      if (pending?.targetAgentKind === 'agy' && agySwitchPermissionIsUnconfirmed(row.permissionMode, pending.agyPermissionAgreement)) {
+        const refusal = new AgentSwitchPermissionUnconfirmedError();
+        return hostSendFailure(refusal.code, refusal.message);
+      }
+      dispatched.push((message as { content?: unknown }).content);
+      h.setRunning(true);
+      return sendSuccess();
+    });
+    const agreement = { change: 'fromFullAccess', mode: 'auto' };
+    const answer = (extra: Record<string, unknown>, revision = pendingSwitches.get(sid)?.revision) => ipc.invoke(
+      MAKER_INVOKE.SWITCH_SESSION_AGENT, sid, 'agy', 'gemini-test', null, undefined, undefined,
+      { agyPermissionAgreementOnly: true, agyPermissionAgreement: agreement, agyPermissionRevision: revision, ...extra });
+    return {
+      h, dispatched, pendingSwitches,
+      /** The model picker; "not now" in its dialog registers the switch with no agreement. */
+      pick: (agreed: boolean) => ipc.invoke(MAKER_INVOKE.SWITCH_SESSION_AGENT, sid, 'agy', 'gemini-test', null, undefined, undefined,
+        agreed ? { agyPermissionAgreement: agreement } : undefined),
+      /** The task's own entry: says nothing about sending. */
+      confirmInTaskEntry: (revision?: number) => answer({}, revision),
+      /** The banner's "Review and confirm", or the dialog of a send. */
+      confirmToSend: (revision?: number) => answer({ agyPermissionAgreementForSend: true }, revision),
+      confirmToSendFromRemote: () => runDeviceLinkInvokeContext(
+        { controllerDeviceId: 'controller-1', channel: MAKER_INVOKE.SWITCH_SESSION_AGENT },
+        () => answer({ agyPermissionAgreementForSend: true })),
+      turnEnds: async () => { h.setRunning(false); h.coordinator.onTurnEvent(sid, 'done'); await flush(); await flush(); },
+      settle: async () => { await flush(); await flush(); await flush(); },
+    };
+  }
+
+  it('task entry: after the banner of a held message was closed, confirming records the agreement and sends nothing; Continue sending then sends it once', async () => {
+    const sid = 'held-then-task-entry';
+    const host = hostWithQueue(sid);
+    const { h } = host;
+    await host.pick(false);
+    h.coordinator.enqueue(sid, makeItem('q-1', 'held'));
+    await host.settle();
+    expect(h.coordinator.getProjection(sid).error).toMatch(/^AGENT_SWITCH_PERMISSION_UNCONFIRMED: /);
+    h.coordinator.clearError(sid);
+    expect(h.coordinator.getProjection(sid).queuePaused).toBe(true);
+
+    await expect(host.confirmInTaskEntry()).resolves.toMatchObject({ switched: false, agyPermissionAgreementRecorded: true });
+    await host.settle();
+    expect(host.pendingSwitches.get(sid)?.agyPermissionAgreement).toEqual({ change: 'fromFullAccess', mode: 'auto' });
+    expect(host.dispatched).toEqual([]);
+    const kept = h.coordinator.getProjection(sid);
+    expect(kept.pendingQueue.map((q) => [q.clientId, q.awaitsAgySwitchConfirmation])).toEqual([['q-1', true]]);
+    expect(kept.queuePaused).toBe(true);
+    // Picking another effort or model for the same engine carries the agreement over; still nothing.
+    await host.pick(false);
+    await host.settle();
+    expect(host.dispatched).toEqual([]);
+
+    h.coordinator.resume(sid);
+    await host.settle();
+    expect(host.dispatched).toEqual(['held']);
+    await host.turnEnds();
+    expect(host.dispatched).toEqual(['held']);
+    expect(h.onDiscardedQueuedMessage).not.toHaveBeenCalled();
+  });
+
+  it('task entry: confirming while another window still shows the message as held sends nothing; the banner\'s own confirmation sends it once', async () => {
+    const sid = 'held-in-another-window';
+    const host = hostWithQueue(sid);
+    const { h } = host;
+    await host.pick(false);
+    h.coordinator.enqueue(sid, makeItem('q-1', 'held'));
+    await host.settle();
+
+    await expect(host.confirmInTaskEntry()).resolves.toMatchObject({ agyPermissionAgreementRecorded: true });
+    await host.settle();
+    expect(host.dispatched).toEqual([]);
+    const kept = h.coordinator.getProjection(sid);
+    expect(kept.recovery).toEqual({ kind: 'queue-head', clientId: 'q-1' });
+    expect(kept.error).toMatch(/^AGENT_SWITCH_PERMISSION_UNCONFIRMED: /);
+
+    await expect(host.confirmToSend()).resolves.toMatchObject({ agyPermissionAgreementRecorded: true });
+    await host.settle();
+    expect(host.dispatched).toEqual(['held']);
+    await host.turnEnds();
+    expect(host.dispatched).toEqual(['held']);
+  });
+
+  // The paths that keep letting a held message go (DD 7083915988, items 1 and 2), through the
+  // same host entry, and what a request to wake cannot stand in for.
+  it('still sends a held message once when the user agrees in the model picker or in order to send, and never on an answer the host does not take', async () => {
+    // Banner closed, then the engine picked again and agreed to in the picker's dialog.
+    const picked = hostWithQueue('held-then-picker');
+    await picked.pick(false);
+    picked.h.coordinator.enqueue('held-then-picker', makeItem('q-1', 'held'));
+    await picked.settle();
+    picked.h.coordinator.clearError('held-then-picker');
+    await picked.pick(true);
+    await picked.settle();
+    expect(picked.dispatched).toEqual(['held']);
+    await picked.turnEnds();
+    expect(picked.dispatched).toEqual(['held']);
+
+    // "Not now", then agreed while sending another message: the held one first, then the new one.
+    const sid = 'held-then-composer';
+    const sent = hostWithQueue(sid);
+    await sent.pick(false);
+    sent.h.coordinator.enqueue(sid, makeItem('q-1', 'held'));
+    await sent.settle();
+    const shown = sent.pendingSwitches.get(sid)?.revision;
+
+    // An answer about a registration that is no longer the pending one, and one from another
+    // computer: neither is recorded, so neither wakes anything, whatever it asks for.
+    await sent.pick(false);
+    await expect(sent.confirmToSend(shown)).resolves.toMatchObject({ agyPermissionAgreementRecorded: false });
+    await expect(sent.confirmToSendFromRemote()).resolves.toMatchObject({ agyPermissionAgreementRecorded: false });
+    await sent.settle();
+    expect(sent.dispatched).toEqual([]);
+    expect(sent.pendingSwitches.get(sid)?.agyPermissionAgreement).toBeUndefined();
+    expect(sent.h.coordinator.getProjection(sid).pendingQueue.map((q) => q.clientId)).toEqual(['q-1']);
+
+    await expect(sent.confirmToSend()).resolves.toMatchObject({ agyPermissionAgreementRecorded: true });
+    sent.h.coordinator.enqueue(sid, makeItem('q-2', 'typed later'));
+    await sent.settle();
+    expect(sent.dispatched).toEqual(['held']);
+    await sent.turnEnds();
+    expect(sent.dispatched).toEqual(['held', 'typed later']);
+    await sent.turnEnds();
+    expect(sent.dispatched).toEqual(['held', 'typed later']);
   });
 
   it('holds the message again when the agreement that woke it does not fit, and leaves a queue the user stopped alone', async () => {

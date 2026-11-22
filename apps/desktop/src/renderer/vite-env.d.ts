@@ -6786,6 +6786,12 @@ interface ElectronAPI {
          * with this model and provider): nothing is registered, replaced, applied or sent.
          */
         agyPermissionAgreementOnly?: boolean;
+        /**
+         * With agyPermissionAgreementOnly: the user agreed where a message was to go out with it
+         * (a send, a held message's banner). The host then lets a message it held for this go.
+         * Left out by the task's own entry, which sends nothing.
+         */
+        agyPermissionAgreementForSend?: boolean;
         /** With agyPermissionAgreementOnly: the registration the user was asked about, as the host reported it. */
         agyPermissionRevision?: number;
       },
@@ -6814,6 +6820,8 @@ interface ElectronAPI {
       agentDeviceId?: string | null;
       /** Antigravity only: what the host has recorded as agreed for this switch (null = nothing). */
       agyPermissionAgreement?: { change: 'fromFullAccess' | 'fromUnsupported' | null; mode: string } | null;
+      /** Antigravity only: that agreement was given where a message was to go out with it. */
+      agyPermissionAgreementForSend?: true;
       /** Antigravity only: which registration this is; sent back with an agreement. */
       agyPermissionRevision?: number;
       /** Staged by configuration, not picked by the user in this task. */

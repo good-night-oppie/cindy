@@ -14,7 +14,7 @@ import { useAgySwitchPermissionRecovery } from '@/components/new-chat/useAgySwit
 const h = vi.hoisted(() => ({
   intent: null as null | {
     target: string; model: string; providerId: string | null; agyPermissionRevision?: number;
-    agyPermissionAgreement?: { change: 'fromFullAccess' | 'fromUnsupported' | null; mode: string } | null;
+    agyPermissionAgreement?: { change: 'fromFullAccess' | 'fromUnsupported' | null; mode: string } | null; agyPermissionAgreementForSend?: true;
   },
   registerWithHost: vi.fn(async (..._args: unknown[]) => ({})),
   /** Stands for what the host reports as agreed; part of what the view renders of the switch. */
@@ -110,7 +110,7 @@ describe('a message the host held for an unconfirmed permission change', () => {
     await waitFor(() => expect(onResend).toHaveBeenCalledTimes(1));
     expect(h.registerWithHost).toHaveBeenCalledExactlyOnceWith(
       'task-1', 'agy', 'gemini-test', null, undefined, undefined,
-      { agyPermissionAgreement: { change: 'fromFullAccess', mode: 'auto' }, agyPermissionAgreementOnly: true, agyPermissionRevision: 7 },
+      { agyPermissionAgreement: { change: 'fromFullAccess', mode: 'auto' }, agyPermissionAgreementOnly: true, agyPermissionAgreementForSend: true, agyPermissionRevision: 7 },
     );
     // The same held message reported again (the host refused once more) must not start a loop.
     shown.rerender(view({ error: HELD, mode: 'bypassPermissions', onResend }));
@@ -169,8 +169,10 @@ describe('a message the host held for an unconfirmed permission change', () => {
     expect(screen.queryByText(TITLE)).toBeNull();
     expect(onResend).not.toHaveBeenCalled();
 
-    // The model picker's own dialog was answered: the switch is registered and the answer noted.
-    h.intent = { target: 'agy', model: 'gemini-test', providerId: null, agyPermissionRevision: 9 };
+    // The model picker's own dialog was answered: the switch is registered with that agreement,
+    // which the host has as one given for a send, and the answer is noted here.
+    h.intent = { target: 'agy', model: 'gemini-test', providerId: null, agyPermissionRevision: 9,
+      agyPermissionAgreement: { change: 'fromFullAccess', mode: 'auto' }, agyPermissionAgreementForSend: true };
     noteAgySwitchPermissionAgreed('task-1', 'bypassPermissions');
     shown.rerender(view({ error: HELD, mode: 'bypassPermissions', onResend }));
     await waitFor(() => expect(onResend).toHaveBeenCalledTimes(1));
@@ -185,15 +187,40 @@ describe('a message the host held for an unconfirmed permission change', () => {
   // registration and this very change, another window does not ask again. The answer was given on
   // this computer; asking twice adds nothing, and the host checks its own record when it applies
   // the switch whatever a window believes. An agreement for another change is not that answer.
-  it('does not ask again in a window that did not ask, when the host already has the agreement for this change', async () => {
+  it('does not ask again in a window that did not ask, when the host already has the agreement for this change, given for a send', async () => {
     h.intent = { target: 'agy', model: 'gemini-test', providerId: null, agyPermissionRevision: 7,
-      agyPermissionAgreement: { change: 'fromFullAccess', mode: 'auto' } };
+      agyPermissionAgreement: { change: 'fromFullAccess', mode: 'auto' }, agyPermissionAgreementForSend: true };
     const onResend = vi.fn();
     render(view({ error: HELD, mode: 'bypassPermissions', onResend }));
     await waitFor(() => expect(onResend).toHaveBeenCalledTimes(1));
     expect(screen.queryByText(TITLE)).toBeNull();
-    // Nothing new to tell the host: it is the host's own record that was used.
+    // The host is told again what this window is doing with its record: sending.
+    expect(h.registerWithHost).toHaveBeenCalledExactlyOnceWith(
+      'task-1', 'agy', 'gemini-test', null, undefined, undefined,
+      { agyPermissionAgreement: { change: 'fromFullAccess', mode: 'auto' }, agyPermissionAgreementOnly: true, agyPermissionAgreementForSend: true, agyPermissionRevision: 7 },
+    );
+  });
+
+  // JJ 7084937114. The task's own entry says that confirming sends no message. An agreement the
+  // host has from there (the entry was open in another window, or was answered just as this
+  // message came to be held) covered the change, so this window resent the held message on its
+  // own: a send the user was told would not happen. Such a record is not acted on. The question
+  // of a send is asked instead, and its answer, told to the host as one, sends the message once.
+  it('does not resend on an agreement recorded by the task entry: asks the question of a send, and sends once on its answer', async () => {
+    h.intent = { target: 'agy', model: 'gemini-test', providerId: null, agyPermissionRevision: 7,
+      agyPermissionAgreement: { change: 'fromFullAccess', mode: 'auto' } };
+    const onResend = vi.fn();
+    render(view({ error: HELD, mode: 'bypassPermissions', onResend }));
+    expect(await screen.findByText(TITLE)).toBeTruthy();
+    await settle();
+    expect(onResend).not.toHaveBeenCalled();
     expect(h.registerWithHost).not.toHaveBeenCalled();
+    fireEvent.click(screen.getByRole('button', { name: CONFIRM }));
+    await waitFor(() => expect(onResend).toHaveBeenCalledTimes(1));
+    expect(h.registerWithHost).toHaveBeenCalledExactlyOnceWith(
+      'task-1', 'agy', 'gemini-test', null, undefined, undefined,
+      { agyPermissionAgreement: { change: 'fromFullAccess', mode: 'auto' }, agyPermissionAgreementOnly: true, agyPermissionAgreementForSend: true, agyPermissionRevision: 7 },
+    );
   });
 
   it('asks when what the host has is for another change than the one that would happen now', async () => {
@@ -207,7 +234,7 @@ describe('a message the host held for an unconfirmed permission change', () => {
 
   it('asks from the banner even when the host has an agreement: that action is the question', async () => {
     h.intent = { target: 'agy', model: 'gemini-test', providerId: null, agyPermissionRevision: 7,
-      agyPermissionAgreement: { change: 'fromFullAccess', mode: 'auto' } };
+      agyPermissionAgreement: { change: 'fromFullAccess', mode: 'auto' }, agyPermissionAgreementForSend: true };
     const onResend = vi.fn();
     const shown = render(view({ error: HELD, mode: 'bypassPermissions', onResend }));
     await waitFor(() => expect(onResend).toHaveBeenCalledTimes(1));
@@ -221,16 +248,28 @@ describe('a message the host held for an unconfirmed permission change', () => {
     expect(await screen.findByText(TITLE)).toBeTruthy();
   });
 
-  it('resends once without asking when the user has since agreed in the permission menu', async () => {
+  // QQ's ruling "A": an ordinary change of the permission mode records its agreement and sends
+  // nothing. Before, this window resent the held message on what the permission menu's dialog
+  // had just left behind. It asks the question of a send for the new mode instead.
+  it('does not resend when the user has since agreed in the permission menu: asks the question of a send, once', async () => {
     const onResend = vi.fn();
     const shown = render(view({ error: HELD, mode: 'bypassPermissions', onResend }));
     fireEvent.click(await screen.findByRole('button', { name: DECLINE }));
     await waitFor(() => expect(screen.queryByText(TITLE)).toBeNull());
     // The permission menu's own dialog recorded the agreement and stored another mode.
     noteAgySwitchPermissionAgreed('task-1', 'acceptEdits');
+    h.intent = { ...h.intent!, agyPermissionAgreement: { change: 'fromUnsupported', mode: 'ask' } };
+    h.hostAgreed = 'fromUnsupported:ask';
     shown.rerender(view({ error: HELD, mode: 'acceptEdits', onResend }));
+    const confirm = await screen.findByRole('button', { name: CONFIRM });
+    await settle();
+    expect(onResend).not.toHaveBeenCalled();
+    expect(h.registerWithHost).not.toHaveBeenCalled();
+    fireEvent.click(confirm);
     await waitFor(() => expect(onResend).toHaveBeenCalledTimes(1));
-    expect(screen.queryByRole('button', { name: CONFIRM })).toBeNull();
+    expect(h.registerWithHost.mock.calls.map((call) => call[6])).toEqual([
+      { agyPermissionAgreement: { change: 'fromUnsupported', mode: 'ask' }, agyPermissionAgreementOnly: true, agyPermissionAgreementForSend: true, agyPermissionRevision: 7 },
+    ]);
   });
 
   it('asks nothing on a computer that controls the task remotely, where the host takes no agreement', async () => {
@@ -424,9 +463,11 @@ describe('the task\'s entry to confirm a pending switch\'s permission change', (
   });
 
   // DD 7082445534, point d: the entry's dialog is open when a message of the same task gets
-  // held. The held-message step used to queue the same question behind it. It waits instead, and
-  // when the open dialog is answered the host's record changes and the message is resent once.
-  it('does not ask a second time behind its own dialog when a message is held meanwhile', async () => {
+  // held. The held-message step used to queue the same question behind it. It waits instead.
+  // QQ's ruling "A" (JJ 7084937114): the entry's answer sends nothing, here either. When its
+  // dialog is answered the held message is not resent on it; the question of a send follows,
+  // one dialog at a time, and its answer sends the message once.
+  it("does not ask behind the entry's dialog when a message is held meanwhile, and does not resend on the entry's answer", async () => {
     h.intent = { target: 'agy', model: 'gemini-test', providerId: null, agyPermissionRevision: 3 };
     const onResend = vi.fn();
     const both = (error: string | null) => (
@@ -445,11 +486,21 @@ describe('the task\'s entry to confirm a pending switch\'s permission change', (
 
     fireEvent.click(screen.getByRole('button', { name: AGREE }));
     await waitFor(() => expect(h.registerWithHost).toHaveBeenCalledTimes(1));
-    // The host's report of the agreement reaches the view.
+    // The host's report of the agreement reaches the view: recorded, not given for a send.
+    h.intent = { ...h.intent!, agyPermissionAgreement: { change: 'fromFullAccess', mode: 'auto' } };
     h.hostAgreed = 'fromFullAccess:auto';
     shown.rerender(both(HELD));
+    expect(await screen.findByText(TITLE)).toBeTruthy();
+    expect(screen.getAllByRole('alertdialog')).toHaveLength(1);
+    await settle();
+    expect(onResend).not.toHaveBeenCalled();
+    expect(h.registerWithHost.mock.calls.map((call) => (call[6] as { agyPermissionAgreementForSend?: true }).agyPermissionAgreementForSend))
+      .toEqual([undefined]);
+
+    fireEvent.click(screen.getByRole('button', { name: CONFIRM }));
     await waitFor(() => expect(onResend).toHaveBeenCalledTimes(1));
-    expect(screen.queryByText(TITLE)).toBeNull();
+    expect(h.registerWithHost.mock.calls.map((call) => (call[6] as { agyPermissionAgreementForSend?: true }).agyPermissionAgreementForSend))
+      .toEqual([undefined, true]);
   });
 
   it.each([
