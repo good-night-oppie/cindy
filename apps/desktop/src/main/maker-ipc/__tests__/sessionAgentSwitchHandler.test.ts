@@ -773,6 +773,52 @@ describe('performSessionAgentSwitch', () => {
     expect(pending.get('s1')).toBeUndefined();
   });
 
+  // DD 7085158660, item 7. A pending switch that puts back the model a schedule had replaced
+  // took the same recovery path, and the registration made again there dropped what it was. The
+  // registry then saw the restore "replaced" and retired the saved model while nothing had been
+  // restored, and when the retry landed it was counted as a pick of the user's, which detaches
+  // an IM task from the route it follows.
+  it('keeps a scheduled restore what it is through resume-fallback recovery re-entry, and retires its saved model once, when it lands', async () => {
+    let row = makeRow();
+    let failFallback = true;
+    const onUserRouteSelectionLanded = vi.fn();
+    const onScheduledRestoreLanded = vi.fn(async () => {});
+    const onScheduledRestoreSettled = vi.fn();
+    const pending = createPendingAgentSwitchRegistry({ onScheduledRestoreSettled });
+    const { deps } = makeDeps({
+      pendingSwitches: pending,
+      onUserRouteSelectionLanded,
+      onScheduledRestoreLanded,
+      getSessionRow: async () => ({ ...row }),
+      findParkedEngineSession: async (_id, kind) =>
+        kind === 'codex' ? { sdkSessionId: 'broken-codex', watermarkCreatedAt: 0, watermarkRowid: 0 } : null,
+      applyAgentSwitchToDb: async (_id, patch) => {
+        row = { ...row, ...patch, providerId: patch.providerId ?? null, sdkSessionId: patch.sdkSessionId ?? null };
+      },
+      insertBoundaryMessage: async () => 'boundary-1',
+      bootstrapSwitchedSession: async () => {
+        throw new Error('resume failed');
+      },
+      applyResumeFallbackAtomically: async () => {
+        if (failFallback) throw new Error('db locked');
+        row.sdkSessionId = null;
+      },
+    });
+    await performSessionAgentSwitch(deps, validParams);
+    pending.get('s1')!.restoresScheduledBaseline = true;
+    await applyPendingAgentSwitchIfIdle(deps, 's1');
+    expect(pending.get('s1')).toMatchObject({ restoresScheduledBaseline: true, resumeFallbackRecovery: expect.anything() });
+    expect(onScheduledRestoreSettled).not.toHaveBeenCalled();
+    expect(onScheduledRestoreLanded).not.toHaveBeenCalled();
+
+    failFallback = false;
+    await applyPendingAgentSwitchIfIdle(deps, 's1');
+    expect(pending.get('s1')).toBeUndefined();
+    expect(onScheduledRestoreLanded).toHaveBeenCalledExactlyOnceWith('s1');
+    expect(onScheduledRestoreSettled).not.toHaveBeenCalled();
+    expect(onUserRouteSelectionLanded).not.toHaveBeenCalled();
+  });
+
   it('cycles Claude → Codex → Pi → Claude → Codex and recovers a broken parked thread once', async () => {
     let row = makeRow();
     const parked = new Map<string, string>();

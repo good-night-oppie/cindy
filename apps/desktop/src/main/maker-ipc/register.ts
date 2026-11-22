@@ -11343,9 +11343,13 @@ export function registerMakerIpc(maker: Maker, options: RegisterMakerIpcOptions)
 
   // turn 运行中登记的切换意图(下一条消息发送时刻由 send 事务 apply)。
   const agentSwitchPending = createPendingAgentSwitchRegistry({
-    // Not awaited, and its failure is not the failure of whatever replaced the switch.
+    // A held restore was replaced or withdrawn (an applied one retires its saved model itself,
+    // awaited, in onScheduledRestoreLanded). Not awaited, and its failure is not the failure of
+    // whatever replaced the switch.
     onScheduledRestoreSettled: (sessionId) => {
-      void Promise.resolve().then(() => updateScheduledPreference(sessionId, null)).catch((error) => {
+      void Promise.resolve().then(() => updateScheduledPreference(sessionId, null)).then((retired) => {
+        if (!retired) log.warn('the saved model of a settled scheduled restore was not retired: it changed meanwhile', { sessionId });
+      }).catch((error) => {
         log.warn('failed to retire the saved model of a settled scheduled restore', {
           sessionId, error: error instanceof Error ? error.message : String(error),
         });
@@ -11503,6 +11507,12 @@ export function registerMakerIpc(maker: Maker, options: RegisterMakerIpcOptions)
     },
     // The message held for this very agreement goes on (it is refused again if it does not fit).
     onPendingSwitchAgreed: (sessionId) => { agentInputCoordinatorHolder?.wakeHeldForAgySwitch(sessionId); },
+    // Awaited by the apply step: a schedule about to run reads the saved model right after.
+    onScheduledRestoreLanded: async (sessionId) => {
+      if (!(await updateScheduledPreference(sessionId, null))) {
+        log.warn('the saved model of an applied scheduled restore was not retired: it changed meanwhile', { sessionId });
+      }
+    },
     // 用户选择落地 → 给 IM 任务打「脱离跟随」标记(同值重选也永久脱离, PR #5155)。
     onUserRouteSelectionLanded: async (sessionId) => {
       await updateScheduledPreference(sessionId, null);

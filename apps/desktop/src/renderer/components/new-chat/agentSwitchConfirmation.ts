@@ -314,7 +314,16 @@ export async function agreeToPendingAgySwitchPermission(input: {
       && pending.agyPermissionAgreement.change === agySwitchPermissionChange(input.permissionMode)
       && pending.agyPermissionAgreement.mode === permissionModeAfterSwitchToAgy(input.permissionMode)
       ? pending.agyPermissionAgreement : undefined;
-    const agreement = pending ? (hostAgreement ?? readAgySwitchPermissionAgreed(input.sessionId)) : undefined;
+    let agreement = pending ? (hostAgreement ?? readAgySwitchPermissionAgreed(input.sessionId)) : undefined;
+    // What this window remembers may be an answer about another mode (the mode was changed and
+    // agreed to in another window since). Sent as it is, it would replace the host's correct
+    // record with a stale one (DD 7085158660, item 5). Only an answer about the change that
+    // would happen now is told to the host; anything else is dropped here.
+    if (agreement && (agreement.change !== agySwitchPermissionChange(input.permissionMode)
+      || agreement.mode !== permissionModeAfterSwitchToAgy(input.permissionMode))) {
+      forgetAgySwitchPermissionAgreed(input.sessionId);
+      agreement = undefined;
+    }
     // Nothing to tell the host when the mode is kept as it is: it lets that through on its own.
     if (!pending || !agreement || agreement.change === null || !agySwitchPermissionChange(input.permissionMode)) return true;
     let answer: unknown;

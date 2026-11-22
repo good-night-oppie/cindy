@@ -4,7 +4,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { act, cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react';
 import { ConfirmDialogProvider, useConfirmDialog } from '@/components/ui/confirm-dialog-provider';
 import {
-  agySwitchPermissionEntryIsOffered,
+  agreeToPendingAgySwitchPermission, agySwitchPendingKey, agySwitchPermissionEntryIsOffered,
   forgetAgySwitchPermissionAgreed, noteAgySwitchPermissionAgreed, readAgySwitchPermissionAgreed,
   type AgySwitchPermissionPendingIntent,
 } from '@/components/new-chat/agentSwitchConfirmation';
@@ -49,6 +49,49 @@ function TaskView({ error, mode, onResend, remote = false }: ViewProps) {
 }
 const view = (props: ViewProps) => <ConfirmDialogProvider><TaskView {...props} /></ConfirmDialogProvider>;
 const settle = () => act(async () => { await Promise.resolve(); });
+
+// DD 7085158660, item 5. This window remembered an answer about another mode (the user had
+// since changed the mode and agreed to that in another window, which the host has on record).
+// Sending here asked nothing, rightly, and then told the host this window's old answer, which
+// replaced the correct record: the send was refused and the user asked again.
+describe('what a window tells the host when the host already has the right agreement', () => {
+  const copy = { title: { fromFullAccess: 'a', fromUnsupported: 'b' }, confirmText: 'c', cancelText: 'd' };
+  it('tells the host its own record for this change, never an older answer this window remembers', async () => {
+    forgetAgySwitchPermissionAgreed('task-1');
+    noteAgySwitchPermissionAgreed('task-1', 'plan');
+    expect(readAgySwitchPermissionAgreed('task-1')).toEqual({ change: 'fromUnsupported', mode: 'ask' });
+    const confirm = vi.fn(async () => true);
+    const registerWithHost = vi.fn(async () => ({ agyPermissionAgreementRecorded: true }));
+    const intent: AgySwitchPermissionPendingIntent = {
+      target: 'agy', model: 'gemini-test', providerId: null, agyPermissionRevision: 7,
+      agyPermissionAgreement: { change: 'fromFullAccess', mode: 'auto' },
+    };
+    await expect(agreeToPendingAgySwitchPermission({
+      sessionId: 'task-1', intent, runningAgent: 'claude-code', permissionMode: 'bypassPermissions',
+      confirm, copy, t: ((key: string) => key) as never, registerWithHost,
+    })).resolves.toBe(true);
+    expect(confirm).not.toHaveBeenCalled();
+    expect(registerWithHost.mock.calls.map((call) => (call as unknown[])[1])).toEqual([{ change: 'fromFullAccess', mode: 'auto' }]);
+  });
+
+  it('gives a task view one key per state of the pending switch it has to act on again', () => {
+    const base: AgySwitchPermissionPendingIntent = { target: 'agy', model: 'gemini-test', providerId: null, agyPermissionRevision: 7 };
+    const agreed = { ...base, agyPermissionAgreement: { change: 'fromFullAccess' as const, mode: 'auto' } };
+    expect(agySwitchPendingKey(null)).toBeNull();
+    expect(agySwitchPendingKey(undefined)).toBeNull();
+    const keys = [
+      agySwitchPendingKey(base),
+      agySwitchPendingKey({ ...base, agyPermissionRevision: 8 }),
+      agySwitchPendingKey(agreed),
+      agySwitchPendingKey({ ...agreed, agyPermissionAgreement: { change: 'fromUnsupported', mode: 'ask' } }),
+      agySwitchPendingKey({ ...agreed, agyPermissionAgreementForSend: true }),
+      agySwitchPendingKey({ ...base, target: 'codex' }),
+    ];
+    expect(new Set(keys).size).toBe(keys.length);
+    // Another model of the same registration state is not another occasion.
+    expect(agySwitchPendingKey({ ...agreed, model: 'gemini-other' })).toBe(agySwitchPendingKey(agreed));
+  });
+});
 
 describe('a message the host held for an unconfirmed permission change', () => {
   beforeEach(() => {
@@ -425,6 +468,28 @@ describe('the task\'s entry to confirm a pending switch\'s permission change', (
       { agyPermissionAgreement: { change: 'fromFullAccess', mode: 'auto' }, agyPermissionAgreementOnly: true, agyPermissionRevision: 3 },
     ));
     expect(h.toastError).not.toHaveBeenCalled();
+  });
+
+  // DD 7085158660, test gaps: the notice that a confirmation was not recorded was only checked on
+  // the banner of a held message. Here for the entry: it says so in the words agreed for it
+  // (JJ 7083819560), keeps nothing of the answer, and the same question opens again.
+  it.each([
+    ['will not take the answer', () => h.registerWithHost.mockResolvedValueOnce({ agyPermissionAgreementRecorded: false })],
+    ['cannot be reached', () => h.registerWithHost.mockRejectedValueOnce(new Error('no host'))],
+  ])('says that the confirmation was not recorded when the host %s, and asks the same question again on the next try', async (_name, hostFails) => {
+    hostFails();
+    render(entry({ intent: waiting, mode: 'bypassPermissions' }));
+    fireEvent.click(screen.getByRole('button', { name: REVIEW }));
+    fireEvent.click(await screen.findByRole('button', { name: AGREE }));
+    await waitFor(() => expect(h.toastError).toHaveBeenCalledExactlyOnceWith('newChat.chatInput.agentSwitch.permissionAgreementNotRecorded'));
+    await waitFor(() => expect(screen.queryByText(ENTRY_TITLE)).toBeNull());
+    expect(readAgySwitchPermissionAgreed('task-1')).toBeUndefined();
+    expect(screen.getByText(NOTICE)).toBeTruthy();
+
+    fireEvent.click(screen.getByRole('button', { name: REVIEW }));
+    fireEvent.click(await screen.findByRole('button', { name: AGREE }));
+    await waitFor(() => expect(h.registerWithHost).toHaveBeenCalledTimes(2));
+    expect(h.toastError).toHaveBeenCalledTimes(1);
   });
 
   // The answer is for the switch that was shown. When the host says another one is pending by

@@ -794,11 +794,13 @@ interface SessionInputState {
    */
   queuePausedByRestore: boolean;
   /**
-   * The queue head whose banner the user closed while it was held for a switch into Antigravity:
-   * the pause that followed is this message's, not a Stop of the user's. It is lifted when the
-   * switch is agreed to (wakeHeldForAgySwitch); a Stop, or Continue sending, forgets it.
+   * The queue is paused because the banner of a message held for a switch into Antigravity was
+   * closed (clearError), and for no other reason since. Only such a pause is lifted when the
+   * switch is agreed to for a send. It is about the queue, not one row: the held message may have
+   * been merged or moved meanwhile. Every other write of `queuePaused` drops it: a Stop, a
+   * rewind, Continue sending.
    */
-  heldSwitchPauseClientId?: string | null;
+  heldSwitchPause?: boolean;
   /** Queue head whose steer delivery is unknown; its protective pause needs an explicit user decision. */
   uncertainDeliveryClientId: string | null;
   queueExpanded: boolean;
@@ -1841,6 +1843,7 @@ export class AgentInputCoordinator {
         // A cold Stop reserved its pause until the unknown queue was read.
         // An actually empty queue keeps the warm empty-Stop input behavior.
         state.queuePaused = false;
+        state.heldSwitchPause = false;
         state.queuePausedByRestore = false;
         this.emit(sessionId);
         return;
@@ -1874,6 +1877,7 @@ export class AgentInputCoordinator {
     // paused even while the old vendor turn still reports itself as running.
     if (!state.queuePaused && (wasQuiet || state.orcaReportsStopped === true)) {
       state.queuePaused = true;
+      state.heldSwitchPause = false;
       state.queuePausedByRestore = true;
     }
     log.info('restored queued input from crash snapshot', {
@@ -2020,6 +2024,7 @@ export class AgentInputCoordinator {
     const state = this.getState(sessionId);
     this.blockAutomaticOrcaReports(state);
     state.queuePaused = state.pendingQueue.length > 0 || state.pendingCompacts.length > 0;
+    state.heldSwitchPause = false;
     state.queuePausedByRestore = false;
     this.emit(sessionId);
     return this.getProjection(sessionId);
@@ -2137,6 +2142,7 @@ export class AgentInputCoordinator {
         item.orcaReportDelivery.recoveryBlocked = true;
         if (!state.queuePaused) {
           state.queuePaused = true;
+          state.heldSwitchPause = false;
           state.queuePausedByRestore = true;
         }
       } else if (!item.orcaReportDelivery.recoveryBlocked) {
@@ -2207,6 +2213,7 @@ export class AgentInputCoordinator {
     // (queuePausedByRestore=false)不受影响;Orca 等 main 侧自动投递不带本 flag。
     if (opts?.resumeRestorePausedQueue && state.queuePaused && state.queuePausedByRestore) {
       state.queuePaused = false;
+      state.heldSwitchPause = false;
       state.queuePausedByRestore = false;
       log.info('crash-restored paused queue released by explicit user input', {
         sessionId,
@@ -2781,6 +2788,7 @@ export class AgentInputCoordinator {
     // UI steer doubles as "resume"; an agent-chosen steer only runs when the queue is
     // not paused and must never release a pause the user owns.
     if (!opts?.controlInput) state.queuePaused = false;
+    state.heldSwitchPause = false;
     if (!state.steeringQueueClientIds.includes(item.clientId)) {
       state.steeringQueueClientIds.push(item.clientId);
     }
@@ -2844,6 +2852,7 @@ export class AgentInputCoordinator {
           this.removePendingCompactWaitClientId(cur, item.clientId);
           cur.queueEditLocks = cur.queueEditLocks.filter((id) => id !== item.clientId);
           if (cur.pendingQueue.length === 0) cur.queuePaused = false;
+          cur.heldSwitchPause = false;
         }
         observation.policyBlocked = true;
         this.deps.onUserMessageBlocked?.(sessionId, item, verdict);
@@ -3076,6 +3085,7 @@ export class AgentInputCoordinator {
           this.movePendingCompactWaitClientIdToFront(latest, item.clientId);
           latest.recovery = { kind: 'queue-head', clientId: item.clientId };
           latest.queuePaused = false;
+          latest.heldSwitchPause = false;
           latest.queuePausedByRestore = false;
         }
         // 投递结果不确定(ack 超时 / post-send abort,见 isSteerDeliveryUncertainError):
@@ -3086,6 +3096,7 @@ export class AgentInputCoordinator {
         else if (isSteerDeliveryUncertainError(err)) {
           this.prependQueueHeadIfMissing(latest, item);
           latest.queuePaused = true;
+          latest.heldSwitchPause = false;
           // 不确定投递的保护性暂停必须由用户显式处置,不许新输入静默放行。
           latest.queuePausedByRestore = false;
           latest.uncertainDeliveryClientId = item.clientId;
@@ -3104,6 +3115,7 @@ export class AgentInputCoordinator {
         // generation 守卫:clearSession 是用户显式重置,不把消息塞回已清空的会话。
         this.prependQueueHeadIfMissing(latest, item);
         latest.queuePaused = true;
+        latest.heldSwitchPause = false;
         // 同上:不确定投递的保护性暂停,不许新输入静默放行。
         latest.queuePausedByRestore = false;
         latest.uncertainDeliveryClientId = item.clientId;
@@ -3156,6 +3168,7 @@ export class AgentInputCoordinator {
         this.removePendingCompactWaitClientId(accepted, item.clientId);
         accepted.queueEditLocks = accepted.queueEditLocks.filter((id) => id !== item.clientId);
         if (accepted.pendingQueue.length === 0) accepted.queuePaused = false;
+        accepted.heldSwitchPause = false;
       }
       const detachedAcceptedTurn: ActiveTurn = {
         item,
@@ -3194,6 +3207,7 @@ export class AgentInputCoordinator {
       this.removePendingCompactWaitClientId(accepted, item.clientId);
       accepted.queueEditLocks = accepted.queueEditLocks.filter((id) => id !== item.clientId);
       if (accepted.pendingQueue.length === 0) accepted.queuePaused = false;
+      accepted.heldSwitchPause = false;
     }
     // 乱序窗口快照:turn 在 ack 等待期间以 terminal error 终结时,onTurnEvent
     // 已建立的失败状态(error / recovery = 旧 turn 的 Retry 入口)会被下面的
@@ -3389,6 +3403,7 @@ export class AgentInputCoordinator {
       || (this.deps.loadQueueSnapshot && !this.restoredQueueSessions.has(sessionId))
     ));
     state.queuePaused = shouldPause;
+    state.heldSwitchPause = false;
     // Ordinary Stop remains explicit. Restart, like crash recovery, may be
     // released by the next deliberate user input, never by background enqueue.
     state.queuePausedByRestore = shouldPause && opts?.resumeOnUserInput === true;
@@ -3449,8 +3464,8 @@ export class AgentInputCoordinator {
       state.pendingQueue[0]?.clientId === recovery.clientId
         ? recovery.clientId
         : null;
-    state.heldSwitchPauseClientId = null;
     state.queuePaused = false;
+    state.heldSwitchPause = false;
     state.queuePausedByRestore = false;
     state.uncertainDeliveryClientId = null;
     if (pausedQueueHeadRecoveryClientId !== null) {
@@ -3860,7 +3875,7 @@ export class AgentInputCoordinator {
       state.recovery = null;
       state.queuePaused = true;
       state.queuePausedByRestore = false;
-      state.heldSwitchPauseClientId = heldHeadClientId;
+      state.heldSwitchPause = true;
     }
     this.emit(sessionId);
     if (shouldDrainTail) this.scheduleDrain(sessionId, 'clear-active-turn-error');
@@ -3878,9 +3893,12 @@ export class AgentInputCoordinator {
   wakeHeldForAgySwitch(sessionId: string): boolean {
     const state = this.states.get(sessionId);
     const head = state?.pendingQueue[0];
-    if (!state || !head || head.awaitsAgySwitchConfirmation !== true) return false;
-    const heldByRecovery = state.recovery?.kind === 'queue-head' && state.recovery.clientId === head.clientId;
-    const pausedByClosedBanner = state.queuePaused && state.heldSwitchPauseClientId === head.clientId;
+    if (!state || !head) return false;
+    const heldByRecovery = head.awaitsAgySwitchConfirmation === true
+      && state.recovery?.kind === 'queue-head' && state.recovery.clientId === head.clientId;
+    // Wherever the held message is in the queue now, and whatever it was merged into.
+    const pausedByClosedBanner = state.queuePaused && state.heldSwitchPause === true
+      && state.pendingQueue.some(item => item.awaitsAgySwitchConfirmation === true);
     if (!heldByRecovery && !pausedByClosedBanner) return false;
     if (heldByRecovery) {
       state.error = null;
@@ -3890,7 +3908,7 @@ export class AgentInputCoordinator {
     }
     if (pausedByClosedBanner) {
       state.queuePaused = false;
-      state.heldSwitchPauseClientId = null;
+      state.heldSwitchPause = false;
     }
     this.emit(sessionId);
     this.scheduleDrain(sessionId, 'agy-switch-agreed');
@@ -3926,6 +3944,7 @@ export class AgentInputCoordinator {
       state.recovery = null;
     }
     if (state.pendingQueue.length === 0) state.queuePaused = false;
+    state.heldSwitchPause = false;
     // 等待中的那条消息被用户删掉(不论其当前位置)→ 取消本轮凭证切换等待(等待态
     // 的"取消"入口);队列清空同理。其余删除不影响等待:等待态按 clientId 绑定消息,
     // 不绑定"队首"位置。后续 drain 会为新队首重新判定 —— 仍撞 busy 就重建等待。
@@ -6913,6 +6932,7 @@ export class AgentInputCoordinator {
     this.abandonActiveTurnRecoveryForUserAction(state);
     this.clearErrorUnlessQueueHeadBlocked(state, item.clientId);
     state.queuePaused = false;
+    state.heldSwitchPause = false;
     this.clearSteeringMarker(state, item.clientId);
     state.queueEditLocks = state.queueEditLocks.filter((id) => id !== item.clientId);
     this.movePreparedItemToQueueFront(state, item, removeFromQueue);

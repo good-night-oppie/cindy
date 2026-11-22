@@ -208,6 +208,8 @@ function fixture(initialMode: string) {
     pickGeminiModelOfProvider: (providerId: string) => ipc.invoke(MAKER_INVOKE.SWITCH_SESSION_AGENT, id, 'agy', 'gemini-test', providerId),
     onLanded: (fn: () => void) => { hooks.landed = fn; },
     onRestoreSettled: (fn: () => void) => { hooks.restoreSettled = fn; },
+    /** As register.ts wires it: the apply step waits for the saved model of an applied restore to be retired. */
+    onRestoreLanded: (fn: () => Promise<void>) => { switchDeps.onScheduledRestoreLanded = fn; },
     /** How often the host was told "the pending switch has just been agreed to". */
     agreedSignals: () => agreed,
     /**
@@ -489,7 +491,19 @@ describe('switching a task into Antigravity from the model picker, with permissi
     const saved = { baseline: null as string | null, retiredBy: [] as string[] };
     const restores: string[] = [];
     h.onLanded(() => { saved.retiredBy.push('landed as the user\'s own pick'); });
-    h.onRestoreSettled(() => { saved.baseline = null; saved.retiredBy.push('settled'); });
+    // Retiring is a read and a conditional write in the store, each a step later, as in the app:
+    // it clears the saved model it read, if that is still the one there.
+    const retire = async (by: string) => {
+      await Promise.resolve();
+      const read = saved.baseline;
+      await Promise.resolve();
+      if (saved.baseline === read) saved.baseline = null;
+      saved.retiredBy.push(by);
+    };
+    // Replaced or withdrawn: not waited for by whatever replaced it.
+    h.onRestoreSettled(() => { void retire('settled'); });
+    // Applied: the apply step waits.
+    h.onRestoreLanded(() => retire('applied'));
     const scope = createScheduledModelScope({
       createId: () => 'scope-1',
       read: async () => ({ profile: { ...profile, effort: profile.effort ?? '' }, baseline: saved.baseline }),
@@ -508,6 +522,8 @@ describe('switching a task into Antigravity from the model picker, with permissi
         await scope.begin(h.id);
         profile = { agentKind: 'claude-code', model: 'claude-test', providerId: null, effort: null, fastMode: false, agentDeviceId: currentAgentDeviceId };
       },
+      /** The task is back on the user's model (the restore was applied). */
+      backOnTheUsersModel: () => { profile = usersModel; },
       /** The send step, in the order register.ts runs it. */
       send: async () => { await scope.restore(h.id); await h.send(); },
     };
@@ -547,8 +563,33 @@ describe('switching a task into Antigravity from the model picker, with permissi
     expect(h.log).toEqual(['switched agy auto', 'launch agy auto isolated']);
     // Retired because its question was answered, not by being counted as a pick of the user's:
     // putting the user's model back must not detach an IM task from the route it follows (item 4).
-    expect(s.saved).toMatchObject({ baseline: null, retiredBy: ['settled'] });
+    await settle();
+    expect(s.saved).toMatchObject({ baseline: null, retiredBy: ['applied'] });
     expect(s.restores).toEqual(['gemini-test', 'gemini-test']);
+  });
+
+  // DD 7085158660, item 2. The saved model of an applied restore was retired by the registry's
+  // callback, which nothing waits for. A schedule firing next applies the pending restore and
+  // then reads the saved model to decide whether to save the task's model anew: it read the old
+  // one, kept it, and the late clear then deleted it. After that run nothing was on record to go
+  // back to, and the task stayed on the schedule's model. The apply step now waits for the clear.
+  it('retires the saved model of an applied restore before the schedule that fires next reads it, so that run can save the model again', async () => {
+    const h = fixture('bypassPermissions');
+    const s = scheduleReplacedTheModel(h);
+    await s.begin();
+    await expect(s.send()).rejects.toMatchObject(HELD);
+    await expect(h.agreeOnly('bypassPermissions')).resolves.toMatchObject({ agyPermissionAgreementRecorded: true });
+
+    // The next scheduled run, in the order register.ts runs it: apply what is pending, then begin.
+    await h.send();
+    expect(h.row).toMatchObject({ agentKind: 'agy', model: 'gemini-test' });
+    expect(s.saved).toMatchObject({ baseline: null, retiredBy: ['applied'] });
+    s.backOnTheUsersModel();
+    await s.begin();
+    await settle();
+    // What this run saved is still there to go back to, and nothing retired it a second time.
+    expect(JSON.parse(s.saved.baseline!)).toMatchObject({ agentKind: 'agy', model: 'gemini-test' });
+    expect(s.saved.retiredBy).toEqual(['applied']);
   });
 
   // DD 7083915988, item 3. In the app the model picker does not reach the handler's "clear the

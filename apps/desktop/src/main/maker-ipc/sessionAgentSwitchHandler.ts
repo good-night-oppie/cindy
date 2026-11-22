@@ -390,6 +390,13 @@ export interface MakerSessionAgentSwitchHandlerDeps {
    * The host lets a message that was held for exactly that go on.
    */
   onPendingSwitchAgreed?(sessionId: string): void;
+  /**
+   * A pending switch that puts back the model a schedule had replaced has been applied. The host
+   * retires the saved model before the apply step goes on: the caller may be a schedule about to
+   * run, which reads the saved model next, and a clear still on its way would then delete the one
+   * that run saves anew (DD 7085158660, item 2). Awaited; a failure leaves it to the registry.
+   */
+  onScheduledRestoreLanded?(sessionId: string): void | Promise<void>;
   log: {
     info(message: string, fields?: Record<string, unknown>): void;
     warn(message: string, fields?: Record<string, unknown>): void;
@@ -835,6 +842,12 @@ export async function performSessionAgentSwitch(
     confirmedContextWindow?: unknown;
     /** Local composer: what the user agreed this switch into Antigravity does to the permission mode. */
     agyPermissionAgreement?: unknown;
+    /**
+     * Re-entry of a pending switch being applied: what it carries that a registration made again
+     * on a failed recovery must keep (see PendingAgentSwitchIntent for both).
+     */
+    restoresScheduledBaseline?: true;
+    agyPermissionAgreementForSend?: true;
 
     /**
      * 选择的 Agent 位置(远程 Agent):undefined = 保持任务当前位置(内部调用与不认识该字段的
@@ -1508,6 +1521,18 @@ export async function performSessionAgentSwitch(
             resumed: false,
             ...(relocatedNativeId ? { nativeHistory: 'fallback' as const } : {}),
           };
+          // A registration made again below stands for the same pending switch. It keeps what that
+          // one was: a restore of a schedule's saved model (or its landing would be taken for a pick
+          // of the user's and detach an IM task from the route it follows, and the registry would
+          // retire the saved model as if the restore had been replaced), and the agreement to its
+          // permission change (DD 7085158660, item 7).
+          const carriedAgreement = parseAgySwitchPermissionAgreement(params.agyPermissionAgreement);
+          const carriedOverOnReRegistration = {
+            ...(params.restoresScheduledBaseline === true ? { restoresScheduledBaseline: true as const } : {}),
+            ...(targetAgentKind === 'agy' && carriedAgreement ? { agyPermissionAgreement: carriedAgreement } : {}),
+            ...(targetAgentKind === 'agy' && carriedAgreement && params.agyPermissionAgreementForSend === true
+              ? { agyPermissionAgreementForSend: true as const } : {}),
+          };
           let fallbackCommitted = false;
           if (boundaryClientId) {
             try {
@@ -1523,6 +1548,7 @@ export async function performSessionAgentSwitch(
               deps.pendingSwitches?.set(sessionId, {
                 ...(params.runtimeSource ? { runtimeSource: params.runtimeSource } : {}),
                 ...(params.configStaged === true ? { configStaged: true } : {}),
+                ...carriedOverOnReRegistration,
                 targetAgentKind,
                 model,
                 providerId: normalizedProviderId,
@@ -1548,6 +1574,7 @@ export async function performSessionAgentSwitch(
             deps.pendingSwitches?.set(sessionId, {
               ...(params.runtimeSource ? { runtimeSource: params.runtimeSource } : {}),
               ...(params.configStaged === true ? { configStaged: true } : {}),
+              ...carriedOverOnReRegistration,
               targetAgentKind,
               model,
               providerId: normalizedProviderId,
@@ -1668,8 +1695,22 @@ async function noteLandedUserRouteSelection(
 ): Promise<void> {
   if (!isUserPendingAgentSwitchIntent(intent)) return;
   // Put back by the host on the user's agreement, not picked by the user in this task: it does
-  // not detach an IM task from the route it follows. Its saved model is retired by the registry.
-  if (intent.restoresScheduledBaseline === true) return;
+  // not detach an IM task from the route it follows. Its saved model is retired here, before the
+  // caller goes on, and the mark is taken off so that the registry does not retire it a second
+  // time, later, when it might be another saved model by then.
+  if (intent.restoresScheduledBaseline === true) {
+    if (!deps.onScheduledRestoreLanded) return;
+    try {
+      await deps.onScheduledRestoreLanded(sessionId);
+      delete intent.restoresScheduledBaseline;
+    } catch (err) {
+      deps.log.warn('failed to retire the saved model of an applied scheduled restore; left to the registry', {
+        sessionId,
+        err: err instanceof Error ? err.message : String(err),
+      });
+    }
+    return;
+  }
   try {
     await deps.onUserRouteSelectionLanded?.(sessionId);
   } catch (err) {
@@ -1812,6 +1853,8 @@ export function applyPendingAgentSwitchIfIdle(
         thinking: intent.thinking,
         agentDeviceId: intent.targetAgentDeviceId,
         ...(intent.agyPermissionAgreement ? { agyPermissionAgreement: intent.agyPermissionAgreement } : {}),
+        ...(intent.agyPermissionAgreementForSend === true ? { agyPermissionAgreementForSend: true as const } : {}),
+        ...(intent.restoresScheduledBaseline === true ? { restoresScheduledBaseline: true as const } : {}),
         // 普通 maker send 随后会按 DB 真源 lazy-create,无需在 apply 内多 spawn 一次;
         // Goal / IM / scheduler 三条直发路径没有该 lazy-create 事务,必须先把新引擎
         // bootstrap 好再拿 live session 发送,否则会继续持有已关闭的旧 session。

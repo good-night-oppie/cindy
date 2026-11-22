@@ -6463,24 +6463,62 @@ describe('AgentInputCoordinator send transaction', () => {
     expect(heldAgain.pendingQueue.map((q) => q.clientId)).toEqual(['q-1']);
     expect(h.sendToAgent).toHaveBeenCalledTimes(2);
 
-    // Closed, continued, held again, then stopped by the user: that pause is the user's.
-    h.coordinator.clearError(sid);
-    h.coordinator.resume(sid);
+  });
+
+  // DD 7085158660, item 1. Closing the banner marked the pause as the held message's; a Stop or
+  // a rewind after that paused the queue again without dropping the mark, so an agreement let
+  // the queue go that the user had stopped themselves (after a rewind, behind a history that had
+  // changed). The test that was to show the opposite asserted inside an `if` that never ran.
+  // The mark is now the queue's and every other write of the pause drops it.
+  it.each([
+    ['Stop that keeps the queue', (h: ReturnType<typeof createHarness>, sid: string) => { h.coordinator.stop(sid, { keepQueue: true, pauseQueue: true }); }],
+    ['a rewind', (h: ReturnType<typeof createHarness>, sid: string) => { h.coordinator.pausePendingQueueForRewind(sid); }],
+  ])('leaves the queue paused when the user pauses it with %s after closing the banner of a held message', async (_name, pauseAsTheUser) => {
+    const h = createHarness();
+    const sid = `held-then-user-pause-${_name.length}`;
+    h.sendToAgent.mockResolvedValueOnce(hostSendFailure('AGENT_SWITCH_PERMISSION_UNCONFIRMED', 'confirm the change'));
+    h.coordinator.enqueue(sid, makeItem('q-1', 'held'));
     await flush();
     await flush();
     h.coordinator.clearError(sid);
+    pauseAsTheUser(h, sid);
+    await flush();
+    const paused = h.coordinator.getProjection(sid);
+    expect(paused.queuePaused).toBe(true);
+    expect(paused.pendingQueue.map((q) => q.clientId)).toEqual(['q-1']);
+
+    h.sendToAgent.mockImplementation(async () => { h.setRunning(true); return sendSuccess(); });
+    expect(h.coordinator.wakeHeldForAgySwitch(sid)).toBe(false);
+    await flush();
+    await flush();
+    expect(h.sendToAgent).toHaveBeenCalledTimes(1);
+    expect(h.coordinator.getProjection(sid).queuePaused).toBe(true);
+    // The user's own Continue sending.
     h.coordinator.resume(sid);
     await flush();
     await flush();
-    const calls = h.sendToAgent.mock.calls.length;
-    h.coordinator.stop(sid);
+    expect(h.sendToAgent).toHaveBeenCalledTimes(2);
+  });
+
+  // What the wake does not act on: a queue with nothing held in it, paused or not, and a held
+  // message whose banner is neither showing nor was closed.
+  it('wakes nothing when no message is held for a switch, or when the queue is paused for another reason', async () => {
+    const h = createHarness();
+    const sid = 'nothing-held';
+    expect(h.coordinator.wakeHeldForAgySwitch(sid)).toBe(false);
+    h.setRunning(true);
+    h.coordinator.enqueue(sid, makeItem('q-1', 'plain'));
     await flush();
-    const stopped = h.coordinator.getProjection(sid);
-    if (stopped.queuePaused && !stopped.recovery) {
-      expect(h.coordinator.wakeHeldForAgySwitch(sid)).toBe(false);
-      await flush();
-      expect(h.sendToAgent.mock.calls.length).toBe(calls);
-    }
+    expect(h.coordinator.wakeHeldForAgySwitch(sid)).toBe(false);
+    h.coordinator.stop(sid, { keepQueue: true, pauseQueue: true });
+    h.setRunning(false);
+    await flush();
+    expect(h.coordinator.getProjection(sid).queuePaused).toBe(true);
+    expect(h.coordinator.wakeHeldForAgySwitch(sid)).toBe(false);
+    await flush();
+    await flush();
+    expect(h.sendToAgent).not.toHaveBeenCalled();
+    expect(h.coordinator.getProjection(sid).pendingQueue.map((q) => q.clientId)).toEqual(['q-1']);
   });
 
   // DD 7083915988, item 8 and the gap noted with it: the mark that a message was held for a switch
@@ -6513,6 +6551,22 @@ describe('AgentInputCoordinator send transaction', () => {
     expect(merged.merged).toBe(true);
     expect(snapshot.map((row) => row.clientId)).toEqual(['q-2', 'q-3']);
     expect(snapshot[0]?.awaitsAgySwitchConfirmation).toBe(true);
+
+    // DD 7085158660, item 6: the pause that followed the closed banner was remembered by the held
+    // message's id, which the merge replaced, so agreeing woke nothing and the queue stayed
+    // stopped. The pause is the queue's: the merged message goes out, once, then the other.
+    h.sendToAgent.mockImplementation(async () => { h.setRunning(true); return sendSuccess(); });
+    expect(h.coordinator.wakeHeldForAgySwitch(sid)).toBe(true);
+    await flush();
+    await flush();
+    expect(h.sendToAgent).toHaveBeenCalledTimes(2);
+    expect(h.sendToAgent.mock.calls[1]?.[1]).toMatchObject({ content: 'plain\nheld' });
+    h.setRunning(false);
+    h.coordinator.onTurnEvent(sid, 'done');
+    await flush();
+    await flush();
+    expect(h.sendToAgent).toHaveBeenCalledTimes(3);
+    expect(h.coordinator.wakeHeldForAgySwitch(sid)).toBe(false);
   });
 
   // cindy#19 (QQ's ruling on "Interject"). The queue menu's Interject hands a queued message to
