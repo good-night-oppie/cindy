@@ -2303,32 +2303,32 @@ export async function updateBotProfile(raw: unknown, expectedVersion?: number,
         now,
       });
     }, alreadyLocked);
+  };
+  const refreshPermissions = async () => {
     owner.assertCurrent();
-    if (changesPermissions) {
-      // Read the committed canonical row: profile and chat permissions change together,
-      // and a concurrent newer settings save must not be rolled back by this continuation.
-      const [canonical] = await db.select({ sessionId: botSessionLinks.sessionId, mode: sessions.permissionMode })
-        .from(botSessionLinks).innerJoin(sessions, eq(sessions.id, botSessionLinks.sessionId))
-        .where(and(eq(botSessionLinks.botId, id), eq(botSessionLinks.role, 'canonical'), isNull(botSessionLinks.archivedAt))).limit(1);
-      owner.assertCurrent();
-      try {
-        if (canonical) {
-          const maker = getMakerIfReady();
-          const live = maker?.getSession(canonical.sessionId);
-          try { await live?.setPermissionMode(canonical.mode as 'ask' | 'auto' | 'bypassPermissions'); }
-          catch (error) {
-            // A failed hot switch cannot leave the old, more permissive runtime alive.
-            owner.assertCurrent();
-            if (maker?.getSession(canonical.sessionId) === live) await maker?.closeSession(canonical.sessionId);
-            throw error;
-          }
+    // Read the committed canonical row: profile and chat permissions change together,
+    // and a concurrent newer settings save must not be rolled back by this continuation.
+    const [canonical] = await db.select({ sessionId: botSessionLinks.sessionId, mode: sessions.permissionMode })
+      .from(botSessionLinks).innerJoin(sessions, eq(sessions.id, botSessionLinks.sessionId))
+      .where(and(eq(botSessionLinks.botId, id), eq(botSessionLinks.role, 'canonical'), isNull(botSessionLinks.archivedAt))).limit(1);
+    owner.assertCurrent();
+    try {
+      if (canonical) {
+        const maker = getMakerIfReady();
+        const live = maker?.getSession(canonical.sessionId);
+        try { await live?.setPermissionMode(canonical.mode as 'ask' | 'auto' | 'bypassPermissions'); }
+        catch (error) {
+          // A failed hot switch cannot leave the old, more permissive runtime alive.
           owner.assertCurrent();
-          broadcastSessionPatched(canonical.sessionId, { permissionMode: canonical.mode });
+          if (maker?.getSession(canonical.sessionId) === live) await maker?.closeSession(canonical.sessionId);
+          throw error;
         }
-      } finally {
         owner.assertCurrent();
-        await syncBotPermissionsByBotId(id, canonical?.sessionId);
+        broadcastSessionPatched(canonical.sessionId, { permissionMode: canonical.mode });
       }
+    } finally {
+      owner.assertCurrent();
+      await syncBotPermissionsByBotId(id, canonical?.sessionId);
     }
   };
   if (changesPermissions) {
@@ -2342,8 +2342,11 @@ export async function updateBotProfile(raw: unknown, expectedVersion?: number,
         owner.assertCurrent();
         const targets = await botPermissionTargets(client, { botId: id });
         owner.assertCurrent();
-        await withAgyPermissionTransition(targets, botSessionPermissionMode(normalizedNextConfig), getMakerIfReady(), commitProfile,
+        await withAgyPermissionTransition(targets, botSessionPermissionMode(normalizedNextConfig), getMakerIfReady(),
+          (_retired, locked) => commitProfile(locked),
           process.platform, modelFollowers.map(row => row.sessionId));
+        // Lane reconciliation acquires its own send locks after the profile transaction.
+        await refreshPermissions();
       };
       if (canonical) await withSessionPermissionChange(canonical.sessionId, prepare);
       else await prepare();

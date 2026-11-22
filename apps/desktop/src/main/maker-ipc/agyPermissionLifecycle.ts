@@ -35,7 +35,7 @@ const sameIds = (left: ReadonlySet<string>, right: ReadonlySet<string>) =>
  */
 export async function withAgyPermissionTransition<T>(
   targets: readonly PermissionTarget[], nextMode: string, maker: Runtime | null | undefined,
-  commit: (fencedIds: ReadonlySet<string>) => Promise<T>, platform = process.platform, modelFollowers: readonly string[] = [],
+  commit: (retiredIds: ReadonlySet<string>, lockedIds: ReadonlySet<string>) => Promise<T>, platform = process.platform, modelFollowers: readonly string[] = [],
   readStored: ReadStoredSelections = readStoredSelections,
 ): Promise<T> {
   const owner = getCurrentDbClientSnapshot();
@@ -44,7 +44,7 @@ export async function withAgyPermissionTransition<T>(
   };
   if (platform !== 'linux' || !maker) {
     assertCurrent();
-    return commit(new Set());
+    return commit(new Set(), new Set());
   }
   const full = nextMode === 'bypassPermissions';
   const targetIds = [...new Set(targets.map(target => target.sessionId))];
@@ -66,11 +66,12 @@ export async function withAgyPermissionTransition<T>(
   };
   // The guess decides only which kind of lock each lane gets (a restart fence rejects queued
   // sends, so it is kept to lanes that will be retired). The decision itself is made under the locks.
+  const locked = new Set([...targetIds, ...modelFollowers]);
+  const ordered = [...locked].sort();
   let expected = lanesToRetire(null);
   for (let attempt = 0; attempt < 3; attempt++) {
     // A combined model/profile edit must take its model send locks in the same global order.
     const fenced: ReadonlySet<string> = expected.size ? new Set([...expected, ...modelFollowers]) : expected;
-    const ordered = [...new Set([...targetIds, ...fenced])].sort();
     const outcome = await (async function transition(index: number): Promise<{ value: T } | { retry: Set<string> }> {
       assertCurrent();
       if (index < ordered.length) {
@@ -98,7 +99,7 @@ export async function withAgyPermissionTransition<T>(
         }
       }
       assertCurrent();
-      return { value: await commit(fenced) };
+      return { value: await commit(ids, locked) };
     })(0);
     if ('value' in outcome) return outcome.value;
     expected = outcome.retry;
