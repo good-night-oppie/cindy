@@ -15089,7 +15089,7 @@
       "viewBalance": "Ver saldo",
       "viewBalanceTitle": "Abrir Utilização e faturação para consultar o saldo e adicionar fundos",
       "agentSwitchPermissionUnconfirmed": "Esta mensagem ainda não foi enviada. A mudança para o Antigravity vai alterar as permissões desta tarefa, e essa alteração ainda precisa da sua confirmação. Selecione «Rever e confirmar»; a Cindy só muda e envia esta mensagem depois de confirmar.",
-      "agentSwitchPermissionUnconfirmedRemote": "Esta mensagem ainda não foi enviada. A mudança para o Antigravity vai alterar as permissões desta tarefa, e essa alteração tem de ser confirmada no computador onde a tarefa é executada. A Cindy só muda e envia esta mensagem depois de ser confirmada lá.",
+      "agentSwitchPermissionUnconfirmedRemote": "Esta mensagem ainda não foi enviada. A mudança para o Antigravity vai alterar as permissões desta tarefa, e essa alteração tem de ser confirmada no computador onde a tarefa é executada antes de a Cindy mudar e a enviar. Depois de confirmada lá, selecione «Tentar novamente» se esta mensagem ainda não tiver sido enviada.",
       "agentSwitchPermissionSwitchGone": "Esta mensagem ainda não foi enviada. Aguardava que a tarefa mudasse para o Antigravity, e essa mudança já não está pendente. A Cindy só a envia depois de voltar a escolher um modelo do Antigravity e confirmar; para continuar com o modelo atual, elimine esta mensagem e envie-a novamente.",
       "agentSwitchPermissionReview": "Rever e confirmar",
       "credentialSwitchBusy": "Ainda está outra tarefa Codex em execução, pelo que ainda não é possível aplicar o fornecedor desta sessão (o processo Codex partilhado precisa de ser reiniciado). Tente novamente quando essas tarefas terminarem.",
