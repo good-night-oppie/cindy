@@ -123,6 +123,33 @@ describe('makerChatStore.mirrorAgentSwitchIntent', () => {
     expect(makerChatStore.getAgentSwitchIntent(registeredHere)?.target).toBe('agy');
   });
 
+  // cindy#19 (QQ's ruling on the desktop entry): the task shows its confirmation entry from what
+  // the host has recorded as agreed for the pending switch. The host reports it with the switch;
+  // it changes when the user agrees, without the switch being another selection, so the revision
+  // that guards selections in flight must not move.
+  it('carries what the host has recorded as agreed, and updates it without counting a new selection', async () => {
+    const { makerChatStore } = await import('@/lib/makerChatStore');
+    const s = sid();
+    const pending = { targetAgentKind: 'agy', model: 'gemini-test', providerId: null };
+    makerChatStore.mirrorAgentSwitchIntent(s, { ...pending, agyPermissionAgreement: null });
+    expect(makerChatStore.getAgentSwitchIntent(s)).toMatchObject({ target: 'agy', agyPermissionAgreement: null });
+    const rev = makerChatStore.getAgentSwitchIntentRev(s);
+
+    makerChatStore.mirrorAgentSwitchIntent(s, { ...pending, agyPermissionAgreement: { change: 'fromFullAccess', mode: 'auto' } });
+    expect(makerChatStore.getAgentSwitchIntent(s)?.agyPermissionAgreement).toEqual({ change: 'fromFullAccess', mode: 'auto' });
+    expect(makerChatStore.getAgentSwitchIntentRev(s)).toBe(rev);
+
+    // A value this window cannot read is "nothing agreed", never an agreement.
+    makerChatStore.mirrorAgentSwitchIntent(s, { ...pending, agyPermissionAgreement: { change: 'anything', mode: 'auto' } });
+    expect(makerChatStore.getAgentSwitchIntent(s)?.agyPermissionAgreement).toBeNull();
+    // A host that does not say leaves what is known alone, and an unknown stays unknown.
+    makerChatStore.mirrorAgentSwitchIntent(s, pending);
+    expect(makerChatStore.getAgentSwitchIntent(s)?.agyPermissionAgreement).toBeNull();
+    const silentHost = sid();
+    makerChatStore.mirrorAgentSwitchIntent(silentHost, pending);
+    expect(makerChatStore.getAgentSwitchIntent(silentHost)).toEqual({ target: 'agy', model: 'gemini-test', providerId: null });
+  });
+
   it('幂等:同值回声不重建快照(不与本端乐观登记打架)', async () => {
     const { makerChatStore } = await import('@/lib/makerChatStore');
     const s = sid();

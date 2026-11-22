@@ -177,6 +177,7 @@ import {
   relocationDescriptionKey,
   resolveAgentSwitchAckAction,
 } from './agentSwitchConfirmation';
+import { recordAgySwitchPermissionAgreementWithHost } from './agySwitchPermissionHost';
 import {
   beginAgentSwitchOperation,
   getAgentSwitchWriteSeq,
@@ -7473,10 +7474,8 @@ export function ChatInput({
           cancelText: t(`newChat.chatInput.agentSwitch.${about}.cancel`),
         },
         t,
-        registerWithHost: (intent, agreement) => makerApiFor(sourceSessionId).switchSessionAgent(
-          sourceSessionId, 'agy', intent.model, intent.providerId, intent.effort, intent.fastMode,
-          { agyPermissionAgreement: agreement },
-        ),
+        registerWithHost: (intent, agreement) =>
+          recordAgySwitchPermissionAgreementWithHost(sourceSessionId, intent, agreement),
       });
     } catch (err) {
       // If the host has no record of the agreement, the mode is not stored and the message not queued.

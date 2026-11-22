@@ -2599,6 +2599,13 @@ export interface AgentSwitchIntentRecord {
    * 意图期内模型目录、选中态与 trigger 都按这台电脑显示。
    */
   agentDeviceId?: string | null;
+  /**
+   * Antigravity only, from the host: the permission rewrite it has recorded as agreed for this
+   * switch (null = none). Undefined until the host has said, and for hosts that do not say.
+   */
+  agyPermissionAgreement?: { change: 'fromFullAccess' | 'fromUnsupported' | null; mode: string } | null;
+  /** From the host: staged by configuration, not picked by the user in this task. */
+  configStaged?: true;
 }
 
 export type ContinuationInFlightProjectionCapability = 'unknown' | 'supported' | 'legacy';
@@ -18927,7 +18934,33 @@ function normalizeAgentSwitchIntent(value: unknown): AgentSwitchIntentRecord | n
     ...(typeof item.effort === 'string' && item.effort.length > 0 ? { effort: item.effort } : {}),
     ...((typeof item.fastMode === 'boolean' || item.fastMode === 'ultrafast') ? { fastMode: item.fastMode } : {}),
     ...(agentDeviceId !== undefined ? { agentDeviceId } : {}),
+    ...normalizeAgyPermissionState(item),
   };
+}
+
+/** What the host says about the permission agreement of a pending switch into Antigravity. */
+function normalizeAgyPermissionState(
+  item: Record<string, unknown>,
+): Pick<AgentSwitchIntentRecord, 'agyPermissionAgreement' | 'configStaged'> {
+  if (item.targetAgentKind !== 'agy' || !('agyPermissionAgreement' in item)) return {};
+  const raw = item.agyPermissionAgreement;
+  const agreed = raw && typeof raw === 'object' && !Array.isArray(raw)
+    ? raw as { change?: unknown; mode?: unknown } : null;
+  const change = agreed?.change;
+  let agreement: NonNullable<AgentSwitchIntentRecord['agyPermissionAgreement']> | null = null;
+  if (agreed && typeof agreed.mode === 'string' && agreed.mode
+    && (change === null || change === 'fromFullAccess' || change === 'fromUnsupported')) {
+    agreement = { change, mode: agreed.mode };
+  }
+  return { agyPermissionAgreement: agreement, ...(item.configStaged === true ? { configStaged: true as const } : {}) };
+}
+
+function agyPermissionStateEquals(a: AgentSwitchIntentRecord, b: AgentSwitchIntentRecord): boolean {
+  return a.configStaged === b.configStaged
+    && (a.agyPermissionAgreement === b.agyPermissionAgreement
+      || (!!a.agyPermissionAgreement && !!b.agyPermissionAgreement
+        && a.agyPermissionAgreement.change === b.agyPermissionAgreement.change
+        && a.agyPermissionAgreement.mode === b.agyPermissionAgreement.mode));
 }
 
 function agentSwitchIntentEquals(
@@ -18957,7 +18990,15 @@ function agentSwitchIntentEquals(
 function mirrorAgentSwitchIntent(sessionId: string, value: unknown): void {
   if (!sessionId) return;
   const next = normalizeAgentSwitchIntent(value);
-  if (agentSwitchIntentEquals(sessions.get(sessionId)?.agentSwitchIntent ?? null, next)) return;
+  const current = sessions.get(sessionId)?.agentSwitchIntent ?? null;
+  if (agentSwitchIntentEquals(current, next)) {
+    // The same switch, about which the host now says something else on its permission agreement.
+    // That is not another selection: the revision that guards selections in flight stays.
+    if (current && next && 'agyPermissionAgreement' in next && !agyPermissionStateEquals(current, next)) {
+      setState(sessionId, (s) => ({ ...s, agentSwitchIntent: next }));
+    }
+    return;
+  }
   if (!next) {
     clearAgentSwitchIntent(sessionId);
     return;

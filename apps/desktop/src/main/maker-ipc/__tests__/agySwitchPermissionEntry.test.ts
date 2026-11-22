@@ -167,6 +167,20 @@ function fixture(initialMode: string) {
         { agyPermissionAgreement: {
           change: agySwitchPermissionChange(agreedFor), mode: permissionModeAfterSwitchToAgy(agreedFor),
         } })),
+    /**
+     * The task's confirmation entry: an answer about the pending switch to `model`, and nothing else.
+     * `from` is where the answer comes from.
+     */
+    agreeOnly: (agreedFor: string, model = 'gemini-test', from: 'here' | 'remote' = 'here') => {
+      const call = () => ipc.invoke(MAKER_INVOKE.SWITCH_SESSION_AGENT, id, 'agy', model, null, undefined, undefined, {
+        agyPermissionAgreementOnly: true,
+        agyPermissionAgreement: { change: agySwitchPermissionChange(agreedFor), mode: permissionModeAfterSwitchToAgy(agreedFor) },
+      });
+      return from === 'remote'
+        ? runDeviceLinkInvokeContext({ controllerDeviceId: 'controller-1', channel: MAKER_INVOKE.SWITCH_SESSION_AGENT }, call)
+        : call();
+    },
+    pickOtherGeminiModel: () => ipc.invoke(MAKER_INVOKE.SWITCH_SESSION_AGENT, id, 'agy', 'gemini-other', null),
     pendingSwitch: () => ipc.invoke(MAKER_INVOKE.GET_SESSION_AGENT_SWITCH_INTENT, id),
     /** Picking a model of the engine the task runs on withdraws the pending switch. */
     withdrawSwitch: () => ipc.invoke(MAKER_INVOKE.SWITCH_SESSION_AGENT, id, 'claude-code', 'claude-test', null),
@@ -326,6 +340,75 @@ describe('switching a task into Antigravity from the model picker, with permissi
     await h.pickGeminiModelFromRemote('acceptEdits');
     await h.send();
     expect(h.log).toEqual(['switched agy auto', 'launch agy auto isolated']);
+  });
+
+  // QQ's ruling on the desktop entry: a message refused on its way in from IM is not kept by
+  // the host; its sender is told to confirm in the task and send again. The task therefore has to
+  // say that its pending switch still waits (the host reports no agreement with the switch), and
+  // confirming there must record the agreement and do nothing else: no switch, no launch, nothing
+  // sent. The message goes out when it is sent again, once. `send` here is the step every
+  // host-dispatched message takes; the IM runner's own reply is in turnRunnerCompanionRouting.test.ts.
+  it('refuses a host-dispatched message, records the agreement from the task without dispatching, and delivers the message sent again', async () => {
+    const h = fixture('bypassPermissions');
+    await h.pickGeminiModel(null);
+    await expect(h.send()).rejects.toMatchObject({ code: 'AGENT_SWITCH_PERMISSION_UNCONFIRMED' });
+    await expect(h.pendingSwitch()).resolves.toMatchObject({ targetAgentKind: 'agy', agyPermissionAgreement: null });
+
+    await expect(h.agreeOnly('bypassPermissions')).resolves.toMatchObject({ switched: false, agyPermissionAgreementRecorded: true });
+    expect(h.log).toEqual([]);
+    expect(h.row).toMatchObject({ agentKind: 'cc', permissionMode: 'bypassPermissions' });
+    expect(h.state.live).toBeNull();
+    await expect(h.pendingSwitch()).resolves.toMatchObject({
+      targetAgentKind: 'agy', model: 'gemini-test', agyPermissionAgreement: { change: 'fromFullAccess', mode: 'auto' },
+    });
+
+    await h.send();
+    await h.send();
+    expect(h.log).toEqual(['switched agy auto', 'launch agy auto isolated']);
+    await expect(h.pendingSwitch()).resolves.toBeNull();
+  });
+
+  it('leaves everything as it was when the task\'s entry is not confirmed', async () => {
+    const h = fixture('acceptEdits');
+    await h.pickGeminiModel(null);
+    await expect(h.send()).rejects.toMatchObject({ code: 'AGENT_SWITCH_PERMISSION_UNCONFIRMED' });
+    // Declining sends nothing to the host. The switch still waits, and so does the entry.
+    await expect(h.send()).rejects.toMatchObject({ code: 'AGENT_SWITCH_PERMISSION_UNCONFIRMED' });
+    await expect(h.pendingSwitch()).resolves.toMatchObject({ targetAgentKind: 'agy', agyPermissionAgreement: null });
+    expect(h.log).toEqual([]);
+  });
+
+  it.each([
+    ['withdrawn', (h: ReturnType<typeof fixture>) => h.withdrawSwitch(), null],
+    ['replaced by another model', (h: ReturnType<typeof fixture>) => h.pickOtherGeminiModel(), 'gemini-other'],
+  ] as const)('does not let an answer about a switch since %s authorize anything', async (_name, change, pendingModel) => {
+    const h = fixture('bypassPermissions');
+    await h.pickGeminiModel(null);
+    await change(h);
+    // The dialog was opened for the earlier switch and is answered now.
+    await expect(h.agreeOnly('bypassPermissions')).resolves.toMatchObject({ agyPermissionAgreementRecorded: false });
+    if (pendingModel) {
+      await expect(h.pendingSwitch()).resolves.toMatchObject({ model: pendingModel, agyPermissionAgreement: null });
+      await expect(h.send()).rejects.toMatchObject({ code: 'AGENT_SWITCH_PERMISSION_UNCONFIRMED' });
+    } else {
+      await expect(h.pendingSwitch()).resolves.toBeNull();
+      await h.send();
+    }
+    expect(h.row).toMatchObject({ agentKind: 'cc', permissionMode: 'bypassPermissions' });
+    expect(h.log).toEqual([]);
+  });
+
+  it('records an agreement only for the stored mode it was given for, and not from a remote controller', async () => {
+    const h = fixture('bypassPermissions');
+    await h.pickGeminiModel(null);
+    await expect(h.agreeOnly('bypassPermissions', 'gemini-test', 'remote')).resolves.toMatchObject({ agyPermissionAgreementRecorded: false });
+    await expect(h.send()).rejects.toMatchObject({ code: 'AGENT_SWITCH_PERMISSION_UNCONFIRMED' });
+
+    await expect(h.agreeOnly('bypassPermissions')).resolves.toMatchObject({ agyPermissionAgreementRecorded: true });
+    // The mode is changed again before the message is sent again: what was agreed no longer fits.
+    await h.setPermission('acceptEdits');
+    await expect(h.send()).rejects.toMatchObject({ code: 'AGENT_SWITCH_PERMISSION_UNCONFIRMED' });
+    expect(h.row).toMatchObject({ agentKind: 'cc', permissionMode: 'acceptEdits' });
   });
 
   it('keeps what was agreed when another Gemini model is picked while the switch is pending', async () => {

@@ -14300,6 +14300,12 @@
           "cancel": "暂不发送",
           "confirm": "确认并发送"
         },
+        "permissionEntry": {
+          "notice": "切换到 Antigravity 会改变这个任务的权限，这次改变还需要你确认。点「查看并确认」；确认只是同意这次改变，不会发送任何消息。",
+          "titleFromFullAccess": "同意改成「自动审批」？",
+          "titleFromUnsupported": "同意改成「默认权限」？",
+          "note": "确认后不会发送任何消息。之前没有处理的消息需要重新发送。"
+        },
         "permissionConfirmation": {
           "title": "改成「{{mode}}」？",
           "cancel": "暂不更改",

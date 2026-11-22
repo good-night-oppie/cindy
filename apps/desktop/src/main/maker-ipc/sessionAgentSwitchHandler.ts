@@ -439,8 +439,9 @@ export interface PendingAgentSwitchIntent {
   /** 选择同时换 Agent 所在电脑(null = 任务所在电脑)；缺省 = 位置不变。 */
   targetAgentDeviceId?: string | null;
   /**
-   * Antigravity only: the permission rewrite the user agreed to in the composer. Checked against
-   * the stored mode when the switch is applied; never sent to other windows.
+   * Antigravity only: the permission rewrite the user agreed to on this computer. Checked against
+   * the stored mode when the switch is applied. Windows are told of it so that a task whose pending
+   * switch still waits for an agreement can say so; no window's copy is taken back as an agreement.
    */
   agyPermissionAgreement?: AgySwitchPermissionAgreement;
   /**
@@ -479,6 +480,14 @@ export interface PublicAgentSwitchIntent {
   fastMode?: boolean | 'ultrafast';
   /** 只在换 Agent 所在电脑时出现(null = 任务所在电脑)；旧控制端忽略。 */
   agentDeviceId?: string | null;
+  /**
+   * Antigravity only: the permission rewrite agreed for this pending switch, or null when none
+   * was. A task's window shows its confirmation entry from this and the stored mode. Older
+   * windows ignore it.
+   */
+  agyPermissionAgreement?: AgySwitchPermissionAgreement | null;
+  /** The switch was staged by configuration, not picked by the user in this task. */
+  configStaged?: true;
 }
 
 /**
@@ -508,7 +517,34 @@ export function projectPendingAgentSwitchIntent(
     ...(intent.effort ? { effort: intent.effort } : {}),
     ...((typeof intent.fastMode === 'boolean' || intent.fastMode === 'ultrafast') ? { fastMode: intent.fastMode } : {}),
     ...(intent.targetAgentDeviceId !== undefined ? { agentDeviceId: intent.targetAgentDeviceId } : {}),
+    ...(intent.targetAgentKind === 'agy' ? { agyPermissionAgreement: intent.agyPermissionAgreement ?? null } : {}),
+    ...(intent.targetAgentKind === 'agy' && intent.configStaged === true ? { configStaged: true as const } : {}),
   };
+}
+
+/**
+ * Records the user's agreement to the permission rewrite of the switch into Antigravity that is
+ * pending right now, and nothing else: no switch is registered, replaced or applied, and no
+ * message is sent. The caller names the switch the user was asked about; when that switch has
+ * since been withdrawn or replaced, nothing is recorded, so an answer to an old question cannot
+ * authorize a newer switch. Resolves whether the agreement was recorded.
+ */
+export function recordAgySwitchPermissionAgreement(
+  deps: Pick<MakerSessionAgentSwitchHandlerDeps, 'pendingSwitches' | 'onPendingSwitchChanged'>,
+  sessionId: string,
+  askedAbout: { model: unknown; providerId: unknown },
+  agreement: unknown,
+): boolean {
+  const parsed = parseAgySwitchPermissionAgreement(agreement);
+  const pending = deps.pendingSwitches?.get?.(sessionId);
+  if (!parsed || !pending || pending.targetAgentKind !== 'agy' || pending.model !== askedAbout.model
+    || (pending.providerId ?? null) !== (typeof askedAbout.providerId === 'string' && askedAbout.providerId ? askedAbout.providerId : null)) {
+    return false;
+  }
+  const updated: PendingAgentSwitchIntent = { ...pending, agyPermissionAgreement: parsed };
+  deps.pendingSwitches!.set(sessionId, updated);
+  deps.onPendingSwitchChanged?.(sessionId, projectPendingAgentSwitchIntent(updated));
+  return true;
 }
 
 export function createPendingAgentSwitchRegistry(): PendingAgentSwitchRegistry {
@@ -1648,8 +1684,8 @@ export function applyPendingAgentSwitchIfIdle(
       }
       // The user's pick of a Gemini model: the mode stored now may not be the one they were told
       // about (changed from another window, a device, IM, or while this message waited in the
-      // queue). Nothing is applied and nothing is sent; the switch stays pending. A switch staged
-      // by configuration or requested by the agent has no dialog to agree in and is not checked.
+      // queue). Nothing is applied and nothing is sent; the switch stays pending. Every source of
+      // the switch is checked the same way; the one exception is in agySwitchPermissionIsGuarded.
       if (intent.targetAgentKind === 'agy') {
         // An early answer, before the running engine is closed. The row commit decides again
         // inside its own statement; this read alone could be overtaken by a concurrent change.
@@ -1761,6 +1797,19 @@ export function registerMakerSessionAgentSwitchHandler(
       // Only this computer's composer shows the dialog the agreement comes from.
       const agyPermissionAgreement = !isDeviceLinkInvoke() && options && typeof options === 'object' && !Array.isArray(options)
         ? (options as { agyPermissionAgreement?: unknown }).agyPermissionAgreement : undefined;
+      // An answer to "may this pending switch change the permissions": it is attached to that
+      // switch if it is still the pending one, and does nothing else (see the function). A remote
+      // controller's answer is not taken, as above.
+      if (options && typeof options === 'object' && !Array.isArray(options)
+        && (options as { agyPermissionAgreementOnly?: unknown }).agyPermissionAgreementOnly === true) {
+        if (typeof sessionId !== 'string' || sessionId.length === 0) throwIpcError('INVALID_PARAMS', 'sessionId required');
+        const recorded = !isDeviceLinkInvoke() && targetAgentKind === 'agy'
+          && recordAgySwitchPermissionAgreement(deps, sessionId, { model, providerId }, agyPermissionAgreement);
+        return {
+          switched: false, agentKind: 'agy' as const, model: typeof model === 'string' ? model : '', engineReady: true,
+          deferred: recorded, agyPermissionAgreementRecorded: recorded,
+        };
+      }
       const agentDeviceId =
         options && typeof options === 'object' && !Array.isArray(options) && 'agentDeviceId' in options
           ? (options as { agentDeviceId?: unknown }).agentDeviceId

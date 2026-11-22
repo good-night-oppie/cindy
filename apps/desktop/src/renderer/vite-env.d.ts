@@ -6781,6 +6781,11 @@ interface ElectronAPI {
         agentDeviceId?: string | null; confirmedContextWindow?: number;
         /** Antigravity: what the user agreed this switch does to the task's permission mode. */
         agyPermissionAgreement?: { change: 'fromFullAccess' | 'fromUnsupported' | null; mode: string };
+        /**
+         * Only record that agreement on the switch into Antigravity that is pending now (the one
+         * with this model and provider): nothing is registered, replaced, applied or sent.
+         */
+        agyPermissionAgreementOnly?: boolean;
       },
       thinking?: boolean,
     ) => Promise<{
@@ -6789,6 +6794,8 @@ interface ElectronAPI {
       model: string;
       engineReady: boolean;
       deferred?: boolean;
+      /** Answer to agyPermissionAgreementOnly: false when that switch is no longer the pending one. */
+      agyPermissionAgreementRecorded?: boolean;
       sameEngineRevision?: number;
       sameEngineSuperseded?: boolean;
     }>;

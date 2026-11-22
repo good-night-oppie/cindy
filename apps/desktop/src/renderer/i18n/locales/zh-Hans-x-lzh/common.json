@@ -14300,6 +14300,12 @@
           "cancel": "姑且不发",
           "confirm": "确认并发"
         },
+        "permissionEntry": {
+          "notice": "易至 Antigravity，此任务之权柄将变，此变尚待君确认。点「览而确认」；确认唯许此变，不发一讯。",
+          "titleFromFullAccess": "许改为「自审」乎？",
+          "titleFromUnsupported": "许改为「预设权柄」乎？",
+          "note": "确认之后，不发一讯。前未理之讯，须再发之。"
+        },
         "permissionConfirmation": {
           "title": "改为「{{mode}}」乎？",
           "cancel": "姑且不改",

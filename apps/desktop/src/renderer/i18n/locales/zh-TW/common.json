@@ -14300,6 +14300,12 @@
           "cancel": "暫不傳送",
           "confirm": "確認並傳送"
         },
+        "permissionEntry": {
+          "notice": "切換到 Antigravity 會改變這個任務的權限，這次改變還需要你確認。點「查看並確認」；確認只是同意這次改變，不會傳送任何訊息。",
+          "titleFromFullAccess": "同意改成「自動審核」？",
+          "titleFromUnsupported": "同意改成「預設權限」？",
+          "note": "確認後不會傳送任何訊息。之前沒有處理的訊息需要重新傳送。"
+        },
         "permissionConfirmation": {
           "title": "改成「{{mode}}」？",
           "cancel": "暫不更改",

@@ -14470,6 +14470,12 @@
           "cancel": "Não enviar ainda",
           "confirm": "Confirmar e enviar"
         },
+        "permissionEntry": {
+          "notice": "A troca para o Antigravity vai alterar as permissões desta tarefa, e essa alteração ainda precisa da sua confirmação. Selecione “Revisar e confirmar”; confirmar apenas aceita a alteração e não envia nenhuma mensagem.",
+          "titleFromFullAccess": "Aceitar a mudança para “Revisão automática”?",
+          "titleFromUnsupported": "Aceitar a mudança para “Permissões padrão”?",
+          "note": "Confirmar não envia nenhuma mensagem. Uma mensagem que não foi processada precisa ser enviada de novo."
+        },
         "permissionConfirmation": {
           "title": "Mudar para “{{mode}}”?",
           "cancel": "Não mudar ainda",

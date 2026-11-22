@@ -121,8 +121,46 @@ export function agyPermissionChangeTitle(
 /** Title per change, and the two buttons, of a dialog that asks again about a pending switch. */
 export interface AgySwitchPermissionAgreementCopy {
   title: Record<AgySwitchPermissionChange, string>;
+  /** A paragraph after the statement of the change, for what confirming does not do. */
+  note?: string;
   confirmText: string;
   cancelText: string;
+}
+
+/** The part of a pending switch, as the host reports it, that the agreement question is about. */
+export interface AgySwitchPermissionPendingIntent {
+  target: string;
+  model: string;
+  providerId: string | null;
+  effort?: string;
+  fastMode?: boolean | 'ultrafast';
+  /** What the host has recorded as agreed; null when nothing; undefined when the host did not say. */
+  agyPermissionAgreement?: { change: AgySwitchPermissionChange | null; mode: string } | null;
+  configStaged?: true;
+}
+
+/**
+ * Whether the task's pending switch into Antigravity would, applied to the stored mode now, be
+ * refused by the host for want of an agreement. Unlike agySwitchPermissionNeedsAgreement this
+ * goes by what the host has recorded, not by what this window remembers asking, so it is also
+ * true after a reload, in another window, and for a switch nobody was asked about. A host that
+ * did not report its record is not second-guessed. The partner exception is the host's own
+ * (agySwitchPermissionIsGuarded).
+ */
+export function agySwitchPermissionAwaitsAgreement(input: {
+  intent: AgySwitchPermissionPendingIntent | null | undefined;
+  runningAgent: string | null | undefined;
+  permissionMode: string | null | undefined;
+  partnerConversation: boolean;
+}): boolean {
+  const { intent } = input;
+  if (!intent || intent.target !== 'agy' || input.runningAgent === 'agy') return false;
+  if (intent.agyPermissionAgreement === undefined) return false;
+  if (intent.configStaged === true && input.partnerConversation) return false;
+  const change = agySwitchPermissionChange(input.permissionMode);
+  if (!change) return false;
+  const agreed = intent.agyPermissionAgreement;
+  return agreed?.change !== change || agreed.mode !== permissionModeAfterSwitchToAgy(input.permissionMode);
 }
 
 /**
@@ -144,10 +182,13 @@ export async function confirmPendingAgySwitchPermission(input: {
   if (input.intentTarget !== 'agy' || input.runningAgent === 'agy') return true;
   if (!agySwitchPermissionNeedsAgreement(input.sessionId, input.permissionMode)) return true;
   const change = agySwitchPermissionChange(input.permissionMode)!;
+  const statement = agySwitchPermissionNotice('agy', input.runningAgent, input.permissionMode, input.t).permissionNotice;
   const agreed = await input.confirm({
     title: input.copy.title[change],
-    description: agySwitchPermissionNotice('agy', input.runningAgent, input.permissionMode, input.t).permissionNotice,
-    textClassName: 'select-none',
+    description: input.copy.note ? `${statement}
+
+${input.copy.note}` : statement,
+    textClassName: input.copy.note ? 'select-none whitespace-pre-line' : 'select-none',
     confirmText: input.copy.confirmText,
     cancelText: input.copy.cancelText,
   });
@@ -158,8 +199,10 @@ export async function confirmPendingAgySwitchPermission(input: {
 /**
  * The gate above, plus the host's copy. The host applies a pending switch from any entry and
  * refuses a rewrite it has not been told the user agreed to, so an agreement is registered with it
- * (the same switch again, carrying the agreement) before the caller stores a mode or sends a
- * message. Resolves true when the caller may go on; rejects when the host did not record it.
+ * (attached to the switch the user was asked about) before the caller stores a mode or sends a
+ * message. Resolves true when the caller may go on; rejects when the host could not be told.
+ * Resolves false as well when the host answers that the switch asked about is no longer the
+ * pending one: the answer was to a question that no longer stands, and nothing was recorded.
  */
 export async function agreeToPendingAgySwitchPermission(input: {
   sessionId: string;
@@ -183,7 +226,12 @@ export async function agreeToPendingAgySwitchPermission(input: {
   const agreement = pending ? readAgySwitchPermissionAgreed(input.sessionId) : undefined;
   // Nothing to tell the host when the mode is kept as it is: it lets that through on its own.
   if (!pending || !agreement || agreement.change === null || !agySwitchPermissionChange(input.permissionMode)) return true;
-  await input.registerWithHost(pending, agreement);
+  const answer = await input.registerWithHost(pending, agreement);
+  if (answer && typeof answer === 'object'
+    && (answer as { agyPermissionAgreementRecorded?: unknown }).agyPermissionAgreementRecorded === false) {
+    forgetAgySwitchPermissionAgreed(input.sessionId);
+    return false;
+  }
   return true;
 }
 

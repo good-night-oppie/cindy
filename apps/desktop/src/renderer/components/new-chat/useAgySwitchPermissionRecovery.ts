@@ -2,11 +2,11 @@ import { useCallback, useEffect, useRef } from 'react';
 import { useTranslation } from 'react-i18next';
 import { toast } from '@/lib/toast';
 import type { ConfirmOptions } from '@/components/ui/confirm-dialog-provider';
-import { makerApiFor } from '@/lib/makerTransport';
 import { makerChatStore } from '@/lib/makerChatStore';
 import {
   agreeToPendingAgySwitchPermission, forgetAgySwitchPermissionAgreed, isAgentSwitchPermissionUnconfirmedError,
 } from './agentSwitchConfirmation';
+import { recordAgySwitchPermissionAgreementWithHost } from './agySwitchPermissionHost';
 
 /**
  * The host held a message (a queued one, usually) because applying the pending switch into
@@ -64,10 +64,7 @@ export function useAgySwitchPermissionRecovery(input: {
           cancelText: t('newChat.chatInput.agentSwitch.sendConfirmation.cancel'),
         },
         t,
-        registerWithHost: (intent, agreement) => makerApiFor(sessionId).switchSessionAgent(
-          sessionId, 'agy', intent.model, intent.providerId, intent.effort, intent.fastMode,
-          { agyPermissionAgreement: agreement },
-        ),
+        registerWithHost: (intent, agreement) => recordAgySwitchPermissionAgreementWithHost(sessionId, intent, agreement),
       });
       if (agreed) retry();
     } catch {

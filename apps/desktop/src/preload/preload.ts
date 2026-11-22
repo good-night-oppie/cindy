@@ -7889,6 +7889,7 @@ contextBridge.exposeInMainWorld('electronAPI', {
       options?: {
         agentDeviceId?: string | null; confirmedContextWindow?: number;
         agyPermissionAgreement?: { change: 'fromFullAccess' | 'fromUnsupported' | null; mode: string };
+        agyPermissionAgreementOnly?: boolean;
       },
       thinking?: boolean,
     ): Promise<{
@@ -7897,6 +7898,7 @@ contextBridge.exposeInMainWorld('electronAPI', {
       model: string;
       engineReady: boolean;
       deferred?: boolean;
+      agyPermissionAgreementRecorded?: boolean;
       sameEngineRevision?: number;
       sameEngineSuperseded?: boolean;
     }> =>

@@ -14470,6 +14470,12 @@
           "cancel": "Ne pas envoyer pour le moment",
           "confirm": "Confirmer et envoyer"
         },
+        "permissionEntry": {
+          "notice": "Le passage à Antigravity modifiera les autorisations de cette tâche, et cette modification attend encore votre confirmation. Sélectionnez « Vérifier et confirmer » ; confirmer accepte uniquement la modification et n'envoie aucun message.",
+          "titleFromFullAccess": "Accepter le passage à « Revue auto » ?",
+          "titleFromUnsupported": "Accepter le passage à « Autorisations par défaut » ?",
+          "note": "La confirmation n'envoie aucun message. Un message qui n'a pas été traité doit être envoyé de nouveau."
+        },
         "permissionConfirmation": {
           "title": "Passer à « {{mode}} » ?",
           "cancel": "Ne pas modifier pour le moment",

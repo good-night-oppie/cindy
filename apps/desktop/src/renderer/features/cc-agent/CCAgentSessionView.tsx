@@ -180,6 +180,8 @@ import { Tip } from '@/components/ui/tooltip';
 import { RunningTokenCount } from './RunningTokenCount';
 import { useConfirmDialog } from '@/components/ui/confirm-dialog-provider';
 import { useAgySwitchPermissionRecovery } from '@/components/new-chat/useAgySwitchPermissionRecovery';
+import { isAgentSwitchPermissionUnconfirmedError } from '@/components/new-chat/agentSwitchConfirmation';
+import { AgySwitchPermissionPendingNotice } from '@/components/chat/AgySwitchPermissionPendingNotice';
 import { useSilentEncryptedRetry } from '@/hooks/useSilentEncryptedRetry';
 import { TodaySpendChip } from '@/components/status/TodaySpendChip';
 import { ContextCapacityRing, formatTokenCount, getModelContextWindow } from '@/components/status/ContextCapacityRing';
@@ -5642,6 +5644,21 @@ function CCAgentSessionContent({
                 forkStripEncryptedRunning={forkStripEncryptedRunning}
                 onDiagnose={canDiagnoseError ? handleDiagnoseError : undefined}
                 style={{ width: '100%' }}
+              />
+            )}
+
+            {/* The task's own entry to confirm a pending switch's permission change; a held queued
+                message has the banner above instead. Only the task's computer can confirm. */}
+            {!readOnly && !remoteDeviceId && sessionId && !isAgentSwitchPermissionUnconfirmedError(error) && (
+              <AgySwitchPermissionPendingNotice
+                sessionId={sessionId}
+                intent={agentSwitchIntent}
+                runningAgent={session ? dbToMakerAgentKind(session.agentKind) : null}
+                permissionMode={session?.permissionMode}
+                partnerConversation={session?.source === 'bot'}
+                confirm={confirmDialog}
+                style={{ width: '100%' }}
+                className="py-1"
               />
             )}
 
