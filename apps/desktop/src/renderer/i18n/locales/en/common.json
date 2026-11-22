@@ -14343,7 +14343,8 @@
           "description": "The new Agent engine continues through a handoff summary, so reasoning and other content cannot be guaranteed to carry over perfectly; switching back still lets you continue the original engine’s session. Switching also interrupts the prompt cache once and may increase token usage.",
           "confirm": "Switch Agent",
           "cancel": "Keep Current Agent",
-          "dontShowAgain": "Don’t remind me again"
+          "dontShowAgain": "Don’t remind me again",
+          "antigravityPermission": "When the switch takes effect, this task's permissions change to Auto-review. A task does not enter Antigravity in Full access or in a mode Antigravity doesn't have. You can change permissions in the task afterwards."
         }
       },
       "agentRelocation": {

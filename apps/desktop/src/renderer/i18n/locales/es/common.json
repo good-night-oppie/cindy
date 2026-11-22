@@ -14459,7 +14459,8 @@
           "description": "El nuevo motor de Agent continúa mediante un resumen de transferencia, por lo que no se puede garantizar que el razonamiento y otros contenidos se transfieran perfectamente; si vuelves al motor anterior, podrás continuar su sesión original. El cambio también interrumpe una vez la caché de prompts y puede aumentar el uso de tokens.",
           "confirm": "Cambiar de Agent",
           "cancel": "Mantener el Agent actual",
-          "dontShowAgain": "No volver a recordármelo"
+          "dontShowAgain": "No volver a recordármelo",
+          "antigravityPermission": "Cuando el cambio surta efecto, los permisos de esta tarea pasarán a «Revisión automática». Una tarea no entra en Antigravity con Acceso completo ni con un modo que Antigravity no tiene. Después puedes cambiar los permisos en la tarea."
         }
       },
       "agentRelocation": {

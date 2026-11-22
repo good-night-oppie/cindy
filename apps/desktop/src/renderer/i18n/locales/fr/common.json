@@ -14459,7 +14459,8 @@
           "description": "Le nouveau moteur de l'Agent reprend à partir d'un résumé de transfert : il n'est donc pas garanti que le raisonnement et les autres contenus soient parfaitement conservés. Revenir en arrière vous permet toujours de poursuivre la session du moteur d'origine. Le changement interrompt aussi une fois le cache du prompt et peut augmenter la consommation de jetons.",
           "confirm": "Changer d'Agent",
           "cancel": "Conserver l'Agent actuel",
-          "dontShowAgain": "Ne plus me le rappeler"
+          "dontShowAgain": "Ne plus me le rappeler",
+          "antigravityPermission": "Lorsque le changement prendra effet, les autorisations de cette tâche passeront à « Revue auto ». Une tâche n'entre pas dans Antigravity en Accès complet ni dans un mode qu'Antigravity n'a pas. Vous pourrez modifier les autorisations dans la tâche ensuite."
         }
       },
       "agentRelocation": {

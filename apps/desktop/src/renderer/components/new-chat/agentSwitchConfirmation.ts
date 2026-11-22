@@ -28,6 +28,12 @@ export interface ConfirmAgentSwitchRiskParams {
   hasSwitchIntent: boolean;
   confirm: (options: ConfirmOptions) => Promise<boolean>;
   copy: AgentSwitchConfirmationCopy;
+  /**
+   * The switch will also change the task's permissions (entering Antigravity from Full access or
+   * from a mode it does not have). The user is told every time: "Don't remind me again" covers
+   * the handoff risk only, so the dialog is shown without that option and ignores a saved skip.
+   */
+  permissionNotice?: string;
 }
 
 /**
@@ -40,8 +46,21 @@ export async function confirmAgentSwitchRisk({
   hasSwitchIntent,
   confirm,
   copy,
+  permissionNotice,
 }: ConfirmAgentSwitchRiskParams): Promise<boolean> {
   if (hasSwitchIntent) return true;
+
+  if (permissionNotice) {
+    return confirm({
+      title: copy.title,
+      description: `${permissionNotice}
+
+${copy.description}`,
+      textClassName: 'select-none whitespace-pre-line',
+      confirmText: copy.confirmText,
+      cancelText: copy.cancelText,
+    });
+  }
 
   return confirm({
     title: copy.title,

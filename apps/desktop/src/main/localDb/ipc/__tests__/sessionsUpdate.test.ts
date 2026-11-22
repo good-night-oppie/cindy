@@ -223,6 +223,7 @@ import { assertTrustedAppRendererEvent } from '../../../security/trustedAppRende
 import { createRemoteSessionsStatusSetter } from '../../../mcp-integrations/sessionStatusRemote.js';
 import * as sessionQueries from '../../sessionQueries';
 import { setSessionRuntimeProjector } from '../../mapper';
+import { permissionModeAfterSwitchToAgy } from '../../../../shared/agentKindConversion';
 
 function createDb(): void {
   const sqlite = new Database(':memory:');
@@ -1060,6 +1061,33 @@ describe('local-db:sessions:update handler wiring', () => {
     h.ownerCurrent = false;
     await invokeUpdate('cc-local', { contextWindowBudget: 300_000 });
     expect(readSessionContextWindowBudget('cc-local')).toBeNull();
+  });
+
+  // cindy#19 (QQ 2026-11-22): a task used to enter Antigravity in whatever mode it had, so Full
+  // access launched it without isolation and a mode it lacks made every start fail while the
+  // selector showed Default. The row commit (SQL) and the switch dialog (shared rule) are two
+  // copies of one rule; this pins the stored value, the broadcast and the announced value together.
+  it.each([
+    ['ask', 'ask'], ['default', 'default'], ['auto', 'auto'],
+    ['acceptEdits', 'auto'], ['plan', 'auto'], ['bypassPermissions', 'auto'],
+  ])('enters Antigravity from %s as %s, in the same commit as the engine', async (from, expected) => {
+    h.sqlite!.prepare('UPDATE sessions SET permission_mode = ? WHERE id = ?').run(from, 'cc-local');
+    await applyAgentSwitchToSessionRow('cc-local', { agentKind: 'agy', model: 'gemini-test', providerId: null });
+    expect(h.sqlite!.prepare('SELECT agent_kind, permission_mode FROM sessions WHERE id = ?').get('cc-local'))
+      .toEqual({ agent_kind: 'agy', permission_mode: expected });
+    expect(permissionModeAfterSwitchToAgy(from)).toBe(expected);
+    expect(h.tapWindowBroadcast).toHaveBeenCalledWith('local-db:sessions:patched', expect.objectContaining({
+      sessionId: 'cc-local', patch: expect.objectContaining({ agentKind: 'agy', permissionMode: expected }),
+    }));
+  });
+
+  it('keeps Full access chosen inside an Antigravity task, and leaves other engines alone', async () => {
+    h.sqlite!.prepare("UPDATE sessions SET agent_kind = 'agy', permission_mode = 'bypassPermissions' WHERE id = 'cc-local'").run();
+    await applyAgentSwitchToSessionRow('cc-local', { agentKind: 'agy', model: 'gemini-other', providerId: null });
+    h.sqlite!.prepare("UPDATE sessions SET permission_mode = 'bypassPermissions' WHERE id = 'pi-local'").run();
+    await applyAgentSwitchToSessionRow('pi-local', { agentKind: 'codex', model: 'codex-test', providerId: null });
+    expect(h.sqlite!.prepare("SELECT id, permission_mode FROM sessions WHERE id IN ('cc-local', 'pi-local') ORDER BY id").all())
+      .toEqual([{ id: 'cc-local', permission_mode: 'bypassPermissions' }, { id: 'pi-local', permission_mode: 'bypassPermissions' }]);
   });
 
   it.each(['model', 'harness'])('projects the saved owner choice during an automatic %s switch', async (kind) => {

@@ -14289,7 +14289,8 @@
           "description": "새 Agent 엔진은 인계 요약을 통해 이어지므로 추론 내용 등이 완벽하게 이어진다고 보장할 수 없습니다. 기존 엔진으로 다시 전환하면 해당 엔진의 세션을 계속 이어갈 수 있습니다. 전환 시 프롬프트 캐시가 한 번 중단되어 토큰 사용량이 늘어날 수 있습니다.",
           "confirm": "Agent 전환",
           "cancel": "현재 Agent 유지",
-          "dontShowAgain": "다음부터 표시하지 않기"
+          "dontShowAgain": "다음부터 표시하지 않기",
+          "antigravityPermission": "전환이 적용되면 이 작업의 권한이 '자동 리뷰'로 바뀝니다. 작업은 전체 접근 상태나 Antigravity에 없는 모드로 Antigravity에 들어가지 않습니다. 전환 후 작업에서 권한을 다시 바꿀 수 있습니다."
         }
       },
       "agentRelocation": {

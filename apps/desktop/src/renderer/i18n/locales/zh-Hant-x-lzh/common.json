@@ -14289,7 +14289,8 @@
           "description": "新 Agent 引擎將經交接摘要續接，思考內容等不保其完美承續；切回時仍可續原引擎之會話。切換亦將令 prompt 快取中斷一次，或增 Token 之耗。",
           "confirm": "易 Agent",
           "cancel": "留今之 Agent",
-          "dontShowAgain": "後不復提醒"
+          "dontShowAgain": "後不復提醒",
+          "antigravityPermission": "既易之後，此任務之權限改為「自審」。任務入 Antigravity，不徑入完全存取，亦不沿 Antigravity 所無之檔。易後可於任務中復改。"
         }
       },
       "agentRelocation": {

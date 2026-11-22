@@ -14289,7 +14289,8 @@
           "description": "新 Agent 引擎會透過交接摘要續接，思考內容等不能保證完美繼承；切回時仍可繼續原引擎會話。切換還會讓 prompt 快取中斷一次，可能造成 Token 消耗的增加。",
           "confirm": "切換 Agent",
           "cancel": "保留當前 Agent",
-          "dontShowAgain": "下次不再提醒"
+          "dontShowAgain": "下次不再提醒",
+          "antigravityPermission": "切換生效後，這個任務的權限會改為「自動審核」。任務切到 Antigravity 時不會直接進入完全訪問，也不會沿用 Antigravity 沒有的權限檔位。切換後可以在任務裡再改。"
         }
       },
       "agentRelocation": {

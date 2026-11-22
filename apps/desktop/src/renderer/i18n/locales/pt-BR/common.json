@@ -14459,7 +14459,8 @@
           "description": "O novo mecanismo do Agent continua por meio de um resumo de transferência, portanto não é possível garantir que o raciocínio e outros conteúdos sejam transferidos perfeitamente; ao voltar, você ainda poderá continuar a sessão do mecanismo original. A troca também interrompe o cache de prompts uma vez e pode aumentar o uso de tokens.",
           "confirm": "Trocar Agent",
           "cancel": "Manter Agent atual",
-          "dontShowAgain": "Não me lembrar novamente"
+          "dontShowAgain": "Não me lembrar novamente",
+          "antigravityPermission": "Quando a troca entrar em vigor, as permissões desta tarefa mudam para “Revisão automática”. Uma tarefa não entra no Antigravity com Acesso total nem com um modo que o Antigravity não tem. Depois você pode alterar as permissões na tarefa."
         }
       },
       "agentRelocation": {

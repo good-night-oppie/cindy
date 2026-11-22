@@ -27,9 +27,11 @@ const COPY = {
 
 function Harness({
   hasSwitchIntent = false,
+  permissionNotice,
   onBrowse,
 }: {
   hasSwitchIntent?: boolean;
+  permissionNotice?: string;
   onBrowse: () => void;
 }) {
   const { confirm } = useConfirmDialog();
@@ -41,6 +43,7 @@ function Harness({
           hasSwitchIntent,
           confirm,
           copy: COPY,
+          permissionNotice,
         }).then((proceed) => {
           if (proceed) onBrowse();
         });
@@ -82,6 +85,21 @@ describe('Agent switch confirmation', () => {
     await waitFor(() => expect(screen.queryByText(COPY.title)).toBeNull());
     expect(onBrowse).not.toHaveBeenCalled();
     expect(localStorage.getItem(STORAGE_KEY)).toBeNull();
+  });
+
+  // cindy#19: the switch into Antigravity can change the task's permissions. "Don't remind me
+  // again" was saved for the handoff risk only, so it must not hide that change or offer to.
+  it('announces a permission change even after the handoff reminder was turned off', async () => {
+    localStorage.setItem(STORAGE_KEY, '1');
+    const onBrowse = vi.fn();
+    renderHarness({ onBrowse, permissionNotice: 'Permissions change to Auto-review.' });
+
+    fireEvent.click(screen.getByRole('button', { name: 'Browse Target Agent' }));
+    expect((await screen.findByText(/Permissions change to Auto-review/)).textContent).toContain(COPY.description);
+    expect(screen.queryByRole('checkbox', { name: COPY.dontShowAgainLabel })).toBeNull();
+    fireEvent.click(screen.getByRole('button', { name: COPY.cancelText }));
+    await waitFor(() => expect(screen.queryByText(COPY.title)).toBeNull());
+    expect(onBrowse).not.toHaveBeenCalled();
   });
 
   it('does not prompt again when an Agent switch intent already exists', async () => {

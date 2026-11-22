@@ -330,7 +330,9 @@ import type { Effort, PermissionMode } from '@/lib/userPreferences.types';
 import { getAppShortcutCombos } from '@/lib/appShortcutStore';
 import { getNextPermissionMode } from '@/lib/permissionModeCycle';
 import { matchesKeyboardEvent } from '../../../shared/appShortcuts';
-import { isLaunchableMakerAgentKind, isSessionSwitchTargetAgentKind, makerToDbAgentKind } from '../../../shared/agentKindConversion';
+import {
+  isLaunchableMakerAgentKind, isSessionSwitchTargetAgentKind, makerToDbAgentKind, permissionModeAfterSwitchToAgy,
+} from '../../../shared/agentKindConversion';
 import {
   getComposerSendShortcutPreference,
   getComposerSendShortcutLabel,
@@ -7445,8 +7447,12 @@ export function ChatInput({
           cancelText: t('newChat.chatInput.agentSwitch.confirmation.cancel'),
           dontShowAgainLabel: t('newChat.chatInput.agentSwitch.confirmation.dontShowAgain'),
         },
+        ...(targetAgent === 'agy' && runtimeAgentKind !== 'agy'
+          && permissionModeAfterSwitchToAgy(activePermissionMode) !== activePermissionMode
+          ? { permissionNotice: t('newChat.chatInput.agentSwitch.confirmation.antigravityPermission') }
+          : {}),
       }),
-    [sessionId, runtimeAgentKind, agentSwitchIntent?.target, confirmDialog, t],
+    [sessionId, runtimeAgentKind, agentSwitchIntent?.target, confirmDialog, t, activePermissionMode],
   );
   const performAgentSwitch = useCallback(
     async (

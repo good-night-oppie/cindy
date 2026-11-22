@@ -14343,7 +14343,8 @@
           "description": "Die neue Agent-Engine setzt die Arbeit anhand einer Übergabezusammenfassung fort. Daher ist nicht garantiert, dass Denkprozesse und andere Inhalte vollständig übernommen werden. Wenn du zurückwechselst, kannst du die Sitzung der ursprünglichen Engine fortsetzen. Der Wechsel unterbricht außerdem einmalig den Prompt-Cache und kann den Tokenverbrauch erhöhen.",
           "confirm": "Agent wechseln",
           "cancel": "Aktuellen Agent behalten",
-          "dontShowAgain": "Nicht erneut erinnern"
+          "dontShowAgain": "Nicht erneut erinnern",
+          "antigravityPermission": "Sobald der Wechsel wirksam wird, ändern sich die Berechtigungen dieser Aufgabe auf „Automatische Prüfung“. Eine Aufgabe wechselt nicht mit Vollzugriff oder mit einem Modus, den Antigravity nicht hat, zu Antigravity. Sie können die Berechtigungen danach in der Aufgabe ändern."
         }
       },
       "agentRelocation": {

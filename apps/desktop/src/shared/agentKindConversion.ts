@@ -57,6 +57,23 @@ export function isLaunchableMakerAgentKind(value: unknown): value is LaunchableM
  * An engine an existing task can be switched to from its model picker. Antigravity runs only on
  * the computer that hosts the task, so it is a target only when the task runs on this computer.
  */
+/** Permission modes a task keeps when it switches into Antigravity from another engine. */
+export const AGY_SWITCH_KEPT_PERMISSION_MODES = ['ask', 'default', 'auto'] as const;
+/** Where every other mode lands on that switch: Full access and modes Antigravity does not have. */
+export const AGY_SWITCH_FALLBACK_PERMISSION_MODE = 'auto';
+
+/**
+ * The permission mode a task has right after switching into Antigravity from another engine.
+ * Antigravity's Full access removes file and network isolation, so it is never a starting value
+ * (cindy#1, PG 2026-11-19); the user can still choose it in the task after the switch. The row
+ * commit applies the same rule in SQL (localDb/agentSwitchRows.ts); keep the two in step.
+ */
+export function permissionModeAfterSwitchToAgy(mode: string | null | undefined): string {
+  return (AGY_SWITCH_KEPT_PERMISSION_MODES as readonly string[]).includes(mode ?? '')
+    ? mode!
+    : AGY_SWITCH_FALLBACK_PERMISSION_MODE;
+}
+
 export function isSessionSwitchTargetAgentKind(
   value: unknown,
   sessionRunsOnThisComputer: boolean,
