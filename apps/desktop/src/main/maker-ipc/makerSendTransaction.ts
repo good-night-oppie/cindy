@@ -45,6 +45,7 @@ import {
 } from './agentHandoff.js';
 import type { MessageSourceDevice, MessageSourceHostDevice } from '@cindy/maker-shared/message-source';
 import { RuntimePluginControlError } from '../cindy-brain/runtimeControl.js';
+import { AgentSwitchPermissionUnconfirmedError } from './agentSwitchPermissionAgreement.js';
 import { appendRuntimePluginContext, runtimePluginInputText } from './runtimePlugins.js';
 import {
   buildClientEnvironmentNote,
@@ -1110,14 +1111,20 @@ export function createMakerSendTransaction(deps: MakerSendTransactionDeps): Make
         (sendOrigin as { kind?: unknown }).kind === 'scheduler';
       const rawClientId = requestedSendOpts.persistUserMessage?.clientId;
       const clientId = typeof rawClientId === 'string' ? rawClientId : undefined;
-      await deps.applyPendingAgentSwitch?.(
-        sessionId,
-        requestedSendOpts.signal || scheduled || clientId ? {
-          ...(requestedSendOpts.signal ? { signal: requestedSendOpts.signal } : {}),
-          ...(scheduled ? { scheduled: true } : {}),
-          ...(clientId ? { clientId } : {}),
-        } : undefined,
-      );
+      try {
+        await deps.applyPendingAgentSwitch?.(
+          sessionId,
+          requestedSendOpts.signal || scheduled || clientId ? {
+            ...(requestedSendOpts.signal ? { signal: requestedSendOpts.signal } : {}),
+            ...(scheduled ? { scheduled: true } : {}),
+            ...(clientId ? { clientId } : {}),
+          } : undefined,
+        );
+      } catch (error) {
+        // Not applied, not sent, nothing saved yet: the queue keeps the message at its head.
+        if (!(error instanceof AgentSwitchPermissionUnconfirmedError)) throw error;
+        return toCompatibleMakerSendResult(createHostSendFailure(error.code, error.message));
+      }
       try {
         const promptPreparation = deps.prepareRuntimePrompt?.(sessionId);
         if (promptPreparation) await promptPreparation;

@@ -12,7 +12,8 @@ import {
   type MakerSessionAgentSwitchHandlerDeps,
   type PendingAgentSwitchIntent,
 } from '../sessionAgentSwitchHandler';
-import { permissionModeAfterSwitchToAgy } from '../../../shared/agentKindConversion';
+import { agySwitchPermissionChange, permissionModeAfterSwitchToAgy } from '../../../shared/agentKindConversion';
+import { AgentSwitchPermissionUnconfirmedError } from '../agentSwitchPermissionAgreement';
 import { IpcHarness } from './helpers/ipcHarness';
 
 const ownership = vi.hoisted(() => ({ current: null as unknown }));
@@ -136,7 +137,16 @@ function fixture(initialMode: string) {
   return {
     id, row, log, broadcasts, state, maker,
     /** The picker's entry: registers the switch, which the next send applies. */
-    pickGeminiModel: () => ipc.invoke(MAKER_INVOKE.SWITCH_SESSION_AGENT, id, 'agy', 'gemini-test', null),
+    /**
+     * As the composer does: the switch carries what its dialog told the user about the mode the
+     * task is in when the model is picked (or re-confirmed later, for `agreedFor`).
+     */
+    pickGeminiModel: (agreedFor: string | null = row.permissionMode) => ipc.invoke(
+      MAKER_INVOKE.SWITCH_SESSION_AGENT, id, 'agy', 'gemini-test', null, undefined, undefined,
+      agreedFor === null ? undefined : { agyPermissionAgreement: {
+        change: agySwitchPermissionChange(agreedFor), mode: permissionModeAfterSwitchToAgy(agreedFor),
+      } }),
+    pendingSwitch: () => ipc.invoke(MAKER_INVOKE.GET_SESSION_AGENT_SWITCH_INTENT, id),
     /** The send transaction's step: under the send lock, apply the registered switch and start the engine. */
     send: () => withSendToSessionLock(id, () => applyPendingAgentSwitchIfIdle(switchDeps, id, { bootstrapAfterSwitch: true })),
     setPermission: (mode: string) => setMode({}, id, mode),
@@ -158,19 +168,66 @@ describe('switching a task into Antigravity from the model picker, with permissi
     expect(h.lastBroadcastMode()).toBe(expected);
   });
 
-  // DD review 7077886823, blocker 2: a queued, IM or scheduled message is dispatched by the host,
-  // not by the composer. The host has nobody to ask: it applies the pending switch to whatever mode
-  // is stored at that moment. This pins that contract, which is why a mode the switch would rewrite
-  // has to be agreed to before it is stored (the composer's permission menu does that).
+  // DD review 7077886823 (blocker 2) and QQ's ruling after it: a queued, IM or scheduled message is
+  // dispatched by the host, not by the composer, and the stored mode can have been changed from
+  // anywhere since the user agreed to the switch. The host used to apply the pending switch to
+  // whatever was stored, rewriting it with no notice. It now applies a rewrite only when it is the
+  // one the user agreed to; otherwise nothing is applied or launched and the switch stays pending.
   it.each([
-    ['bypassPermissions', 'auto'], ['acceptEdits', 'ask'],
-  ])('a host-dispatched message rewrites a mode stored after the switch was registered: %s lands on %s', async (stored, expected) => {
-    const h = fixture('ask');
+    ['Auto-review, then Full access is stored', 'auto', 'bypassPermissions', 'auto'],
+    ['Default permissions, then Accept edits is stored', 'ask', 'acceptEdits', 'ask'],
+    ['Full access, then Accept edits is stored', 'bypassPermissions', 'acceptEdits', 'ask'],
+  ])('holds a host-dispatched message until the rewrite is agreed, then switches once: agreed in %s', async (_name, agreedIn, stored, expected) => {
+    const h = fixture(agreedIn);
     await h.pickGeminiModel();
     await h.setPermission(stored);
+    const before = [...h.log];
+
+    await expect(h.send()).rejects.toBeInstanceOf(AgentSwitchPermissionUnconfirmedError);
+    await expect(h.send()).rejects.toMatchObject({ code: 'AGENT_SWITCH_PERMISSION_UNCONFIRMED' });
+    expect(h.log).toEqual(before);
+    expect(h.row).toMatchObject({ agentKind: 'cc', permissionMode: stored });
+    expect(h.state.live).toBeNull();
+    await expect(h.pendingSwitch()).resolves.toMatchObject({ targetAgentKind: 'agy', model: 'gemini-test' });
+
+    // The user confirms the actual change in the composer; the held message is retried.
+    await h.pickGeminiModel(stored);
     await h.send();
-    expect(h.log).toEqual([`saved ${stored}`, `switched agy ${expected}`, `launch agy ${expected} isolated`]);
-    expect([h.row.permissionMode, h.state.live?.stablePermissionModeState.mode, h.lastBroadcastMode()]).toEqual([expected, expected, expected]);
+    await h.send();
+    expect(h.log.slice(before.length)).toEqual([`switched agy ${expected}`, `launch agy ${expected} isolated`]);
+    await expect(h.pendingSwitch()).resolves.toBeNull();
+  });
+
+  it.each([
+    ['a mode Antigravity keeps was stored after agreeing to leave Full access', 'bypassPermissions', 'ask', 'ask'],
+    ['the stored mode is still the one agreed to', 'bypassPermissions', 'bypassPermissions', 'auto'],
+    ['another unsupported mode with the same agreed outcome was stored', 'acceptEdits', 'plan', 'ask'],
+  ])('applies a host-dispatched switch without asking when %s', async (_name, agreedIn, stored, expected) => {
+    const h = fixture(agreedIn);
+    await h.pickGeminiModel();
+    if (stored !== agreedIn) await h.setPermission(stored);
+    await h.send();
+    expect(h.log.slice(-2)).toEqual([`switched agy ${expected}`, `launch agy ${expected} isolated`]);
+  });
+
+  it('holds a switch that arrived with no agreement at all when it would rewrite the mode, and applies one that would not', async () => {
+    const rewritten = fixture('bypassPermissions');
+    await rewritten.pickGeminiModel(null);
+    await expect(rewritten.send()).rejects.toBeInstanceOf(AgentSwitchPermissionUnconfirmedError);
+    expect(rewritten.row).toMatchObject({ agentKind: 'cc', permissionMode: 'bypassPermissions' });
+
+    const kept = fixture('auto');
+    await kept.pickGeminiModel(null);
+    await kept.send();
+    expect(kept.row).toMatchObject({ agentKind: 'agy', permissionMode: 'auto' });
+  });
+
+  it('keeps what was agreed when another Gemini model is picked while the switch is pending', async () => {
+    const h = fixture('bypassPermissions');
+    await h.pickGeminiModel();
+    await h.pickGeminiModel(null);
+    await h.send();
+    expect(h.row).toMatchObject({ agentKind: 'agy', permissionMode: 'auto' });
   });
 
   it('send first: a tighter mode picked while Antigravity is starting waits, then reaches the running process', async () => {

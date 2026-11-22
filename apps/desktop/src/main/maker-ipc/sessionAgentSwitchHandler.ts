@@ -49,6 +49,10 @@ import {
 import { throwIpcError } from '../utils/ipcValidate.js';
 import { shouldApplyExclusiveProviderRerouteLive } from '../maker-host/model-route-guard-catalog.js';
 import { dbToMakerAgentKind, makerToDbAgentKind, normalizeDbAgentKind } from '../../shared/agentKindConversion.js';
+import {
+  AgentSwitchPermissionUnconfirmedError, agySwitchPermissionIsUnconfirmed, parseAgySwitchPermissionAgreement,
+  type AgySwitchPermissionAgreement,
+} from './agentSwitchPermissionAgreement.js';
 import { decideProviderGroupFailure, providerGroupFailureSignals } from '../provider-group/failurePolicy.js';
 
 function throwIfAgentSwitchAborted(signal: AbortSignal | undefined): void {
@@ -193,6 +197,8 @@ export interface AgentSwitchSessionRow {
   source?: string | null;
   /** Agent 在哪台电脑运行(null / 缺省 = 任务所在电脑)。 */
   agentDeviceId?: string | null;
+  /** The stored permission mode; read to check a pending switch into Antigravity before it applies. */
+  permissionMode?: string | null;
 }
 
 /** 与 create-session 的 agentDeviceId 校验同一口径。 */
@@ -430,6 +436,11 @@ export interface PendingAgentSwitchIntent {
   confirmedContextWindow?: number;
   /** 选择同时换 Agent 所在电脑(null = 任务所在电脑)；缺省 = 位置不变。 */
   targetAgentDeviceId?: string | null;
+  /**
+   * Antigravity only: the permission rewrite the user agreed to in the composer. Checked against
+   * the stored mode when the switch is applied; never sent to other windows.
+   */
+  agyPermissionAgreement?: AgySwitchPermissionAgreement;
   /**
    * Pi-only：目标模型的思考开关意图（renderer 记忆，缺省开）。发送时刻回放暂存
    * 选择时必须一并应用，否则上一模型的 off 会残留——Pi 的 set_model 不重置
@@ -695,6 +706,8 @@ export async function performSessionAgentSwitch(
     fastMode?: unknown;
     /** Local picker acknowledgement of this route's checked context window. */
     confirmedContextWindow?: unknown;
+    /** Local composer: what the user agreed this switch into Antigravity does to the permission mode. */
+    agyPermissionAgreement?: unknown;
     /**
      * 选择的 Agent 位置(远程 Agent):undefined = 保持任务当前位置(内部调用与不认识该字段的
      * 旧控制端都走这里，不做推断)，null = 任务所在电脑，字符串 = 同账号另一台电脑。
@@ -1010,6 +1023,11 @@ export async function performSessionAgentSwitch(
       ...(typeof thinking === 'boolean' ? { thinking } : {}),
       ...(agentDeviceChanges ? { targetAgentDeviceId } : {}),
     };
+    // What was agreed is about the permission rewrite, not the model: picking another Gemini model
+    // while the switch is pending keeps it. A registration that says nothing does not erase it.
+    const agyPermissionAgreement = parseAgySwitchPermissionAgreement(params.agyPermissionAgreement)
+      ?? (existingIntent?.targetAgentKind === targetAgentKind ? existingIntent.agyPermissionAgreement : undefined);
+    if (targetAgentKind === 'agy' && agyPermissionAgreement) intent.agyPermissionAgreement = agyPermissionAgreement;
     deps.pendingSwitches.set(sessionId, intent);
     deps.onPendingSwitchChanged?.(sessionId, projectPendingAgentSwitchIntent(intent));
     deps.log.info('agent-switch: intent registered (applies on next send)', {
@@ -1608,6 +1626,17 @@ export function applyPendingAgentSwitchIfIdle(
         }
         return;
       }
+      // The user's pick of a Gemini model: the mode stored now may not be the one they were told
+      // about (changed from another window, a device, IM, or while this message waited in the
+      // queue). Nothing is applied and nothing is sent; the switch stays pending. A switch staged
+      // by configuration or requested by the agent has no dialog to agree in and is not checked.
+      if (intent.targetAgentKind === 'agy' && !intent.configStaged && intent.runtimeSource !== 'agent') {
+        const row = await deps.getSessionRow(sessionId);
+        if (row && row.agentKind !== 'agy' && typeof row.permissionMode === 'string'
+          && agySwitchPermissionIsUnconfirmed(row.permissionMode, intent.agyPermissionAgreement)) {
+          throw new AgentSwitchPermissionUnconfirmedError();
+        }
+      }
       const result = await performSessionAgentSwitch(deps, {
         sessionId,
         targetAgentKind: intent.targetAgentKind,
@@ -1661,6 +1690,7 @@ export function applyPendingAgentSwitchIfIdle(
       // 换电脑同理:用户选的是另一台电脑(或改回本机)，不能悄悄留在原来那台继续发。
       if (
         err instanceof UserRouteSelectionMarkerError ||
+        err instanceof AgentSwitchPermissionUnconfirmedError ||
         intent.sameAgentSelection ||
         intent.runtimeSource === 'agent' ||
         intent.targetAgentDeviceId !== undefined
@@ -1704,6 +1734,9 @@ export function registerMakerSessionAgentSwitchHandler(
       if (isDeviceLinkInvoke() && confirmedContextWindow !== undefined) {
         throwIpcError('PRECONDITION_FAILED', 'remote model-window confirmation is unsupported');
       }
+      // Only this computer's composer shows the dialog the agreement comes from.
+      const agyPermissionAgreement = !isDeviceLinkInvoke() && options && typeof options === 'object' && !Array.isArray(options)
+        ? (options as { agyPermissionAgreement?: unknown }).agyPermissionAgreement : undefined;
       const agentDeviceId =
         options && typeof options === 'object' && !Array.isArray(options) && 'agentDeviceId' in options
           ? (options as { agentDeviceId?: unknown }).agentDeviceId
@@ -1721,6 +1754,7 @@ export function registerMakerSessionAgentSwitchHandler(
         effort,
         fastMode,
         ...(confirmedContextWindow !== undefined ? { confirmedContextWindow } : {}),
+        ...(agyPermissionAgreement !== undefined ? { agyPermissionAgreement } : {}),
         ...(agentDeviceId !== undefined ? { agentDeviceId } : {}),
         thinking,
         assertSelectionCurrent: guard.admit,

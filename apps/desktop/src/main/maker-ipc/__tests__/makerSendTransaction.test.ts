@@ -58,6 +58,7 @@ import {
   type AgentSwitchSessionRow,
   type MakerSessionAgentSwitchHandlerDeps,
 } from '../sessionAgentSwitchHandler';
+import { AgentSwitchPermissionUnconfirmedError } from '../agentSwitchPermissionAgreement';
 
 function ordinaryUserMessage(content: string): { type: 'user'; content: string } {
   return { type: 'user', content };
@@ -601,6 +602,23 @@ describe('MCP App message authorization', () => {
 });
 
 describe('maker SEND transaction', () => {
+  // cindy#19: the host refuses to apply a pending switch into Antigravity whose permission rewrite
+  // the user has not agreed to. The send must stop there with a result the queue understands
+  // (nothing saved, nothing sent on the old engine) instead of failing as an unknown error.
+  it('returns a host failure and sends nothing when the pending switch needs the user to confirm its permission change', async () => {
+    const { deps, session } = createDeps({
+      applyPendingAgentSwitch: vi.fn(async () => { throw new AgentSwitchPermissionUnconfirmedError(); }),
+    });
+    const result = await createMakerSendTransaction(deps).sendToAgentAccepted('session-1', 'continue', undefined, {
+      persistUserMessage: { clientId: 'held-input', content: 'continue' },
+    });
+    expect(result).toMatchObject({
+      accepted: false, reason: 'AGENT_SWITCH_PERMISSION_UNCONFIRMED',
+      outcome: { kind: 'host-send', accepted: false, code: 'AGENT_SWITCH_PERMISSION_UNCONFIRMED' },
+    });
+    expect(session.send).not.toHaveBeenCalled();
+  });
+
   it.each([false, true])('records the actual model only at dispatch (scheduled=%s)', async (scheduled) => {
     const applyPendingAgentSwitch = vi.fn(async () => {});
     const onModelDispatched = vi.fn();

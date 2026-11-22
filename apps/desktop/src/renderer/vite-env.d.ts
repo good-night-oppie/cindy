@@ -6777,7 +6777,11 @@ interface ElectronAPI {
       effort?: string,
       fastMode?: boolean | 'ultrafast',
       /** 远程 Agent:同时换 Agent 所在电脑(null = 任务所在电脑)。不传 = 位置不变。 */
-      options?: { agentDeviceId?: string | null; confirmedContextWindow?: number },
+      options?: {
+        agentDeviceId?: string | null; confirmedContextWindow?: number;
+        /** Antigravity: what the user agreed this switch does to the task's permission mode. */
+        agyPermissionAgreement?: { change: 'fromFullAccess' | 'fromUnsupported' | null; mode: string };
+      },
       thinking?: boolean,
     ) => Promise<{
       switched: boolean;

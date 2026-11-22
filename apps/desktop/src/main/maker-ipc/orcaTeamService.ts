@@ -1110,6 +1110,8 @@ export function createOrcaTeamService(deps: OrcaTeamServiceDeps): OrcaTeamServic
           case 'SEND_FAILED':
           case 'PLUGIN_TURN_SKIPPED':
           case 'PLUGIN_TURN_BLOCKED':
+          // The worker's pending switch waits for its user; the task was not delivered.
+          case 'AGENT_SWITCH_PERMISSION_UNCONFIRMED':
             return 'AGENT_NOT_READY';
         }
       })();

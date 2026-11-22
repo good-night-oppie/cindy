@@ -75,6 +75,11 @@ export function noteAgySwitchPermissionAgreed(sessionId: string, permissionMode:
   });
 }
 
+/** What was agreed for this task's pending switch, to send to the host with the switch. */
+export function readAgySwitchPermissionAgreed(sessionId: string): { change: AgySwitchPermissionChange | null; mode: string } | undefined {
+  return agreedAgySwitchPermissions.get(sessionId);
+}
+
 /** The pending switch is gone (applied, withdrawn, or retargeted to another engine). */
 export function forgetAgySwitchPermissionAgreed(sessionId: string): void {
   agreedAgySwitchPermissions.delete(sessionId);
