@@ -189,7 +189,11 @@ describe('pending target axis admission', () => {
     const result = stage('s1', intent, { effort: 'high', fastMode: true }, assertCurrent);
     if (mode === 'valid') {
       await expect(result).resolves.toMatchObject({ pendingUntilSend: true });
-      expect(pending.get('s1')).toEqual({ ...intent, effort: 'high', fastMode: true });
+      // The registry stamps every registration (cindy#19): the staged one is a new registration,
+      // so it carries the next stamp, not the one the replaced intent had.
+      const before = intent.revision;
+      expect(pending.get('s1')).toEqual({ ...intent, effort: 'high', fastMode: true, revision: expect.any(Number) });
+      expect(pending.get('s1')!.revision).toBeGreaterThan(before!);
     } else {
       await expect(result).rejects.toThrow(mode === 'owner-changed' ? 'owner changed' : 'device unavailable');
       expect(pending.get('s1')).toBe(intent);
