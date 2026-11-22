@@ -13040,6 +13040,7 @@
         },
         "turn": {
           "groupApprovalOwnerDm": "🔐 A task in a group chat needs your approval. The approval card isn't posted in the group — confirm it here.",
+          "agentSwitchPermissionUnconfirmed": "⏸ This message wasn't processed. The task is about to switch to Antigravity, which will change its permissions, and that change hasn't been confirmed. Open the task in Cindy on the computer to confirm it, then send the message again.",
           "agentStartFailed": "❌ Couldn't start the Agent: {{reason}}",
           "personalBotLabel": "{{channel}} personal bot",
           "error": "❌ Error: {{message}}"

@@ -13147,6 +13147,7 @@
         },
         "turn": {
           "groupApprovalOwnerDm": "🔐 Uma tarefa em um chat em grupo precisa da sua autorização. O cartão de autorização não é publicado no grupo: confirme aqui.",
+          "agentSwitchPermissionUnconfirmed": "⏸ Esta mensagem não foi processada. A tarefa está prestes a trocar para o Antigravity, o que vai alterar as permissões dela, e essa alteração ainda não foi confirmada. Abra a tarefa na Cindy no computador para confirmar e envie a mensagem novamente.",
           "agentStartFailed": "❌ Não foi possível iniciar o Agent: {{reason}}",
           "personalBotLabel": "bot pessoal do {{channel}}",
           "error": "❌ Erro: {{message}}"

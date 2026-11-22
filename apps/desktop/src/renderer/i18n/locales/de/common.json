@@ -13040,6 +13040,7 @@
         },
         "turn": {
           "groupApprovalOwnerDm": "🔐 Eine Aufgabe in einem Gruppenchat braucht deine Freigabe. Die Freigabekarte wird nicht in der Gruppe gepostet – bestätige sie hier.",
+          "agentSwitchPermissionUnconfirmed": "⏸ Diese Nachricht wurde nicht verarbeitet. Die Aufgabe steht kurz vor dem Wechsel zu Antigravity, der ihre Berechtigungen ändert, und diese Änderung wurde noch nicht bestätigt. Öffnen Sie die Aufgabe in Cindy auf dem Computer, um sie zu bestätigen, und senden Sie die Nachricht dann erneut.",
           "agentStartFailed": "❌ Agent konnte nicht gestartet werden: {{reason}}",
           "personalBotLabel": "persönlicher {{channel}}-Bot",
           "error": "❌ Fehler: {{message}}"

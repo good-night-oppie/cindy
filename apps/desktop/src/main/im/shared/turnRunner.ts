@@ -49,6 +49,7 @@ import { isExpiredPermissionDecision, type SharedPermission } from '../../maker-
 import { permissionExpiredText, presentSharedPermissionCard } from './permissionPresentation';
 import { describeInteractionSource } from './interactionSource';
 import { withAgyPermissionTransition } from '../../maker-ipc/agyPermissionLifecycle.js';
+import { AGENT_SWITCH_PERMISSION_UNCONFIRMED, AgentSwitchPermissionUnconfirmedError } from '../../maker-ipc/agentSwitchPermissionAgreement.js';
 import { withBotPermissionChange } from '../../maker-ipc/botPermissionDispatch.js';
 import { botPermissionTargets, syncBotLinkedLanePermissions } from '../../maker-ipc/botPermissionSync.js';
 import { forgetCredentialGrants } from '../../remote-agent/executor/credentialGrants.js';
@@ -1108,7 +1109,9 @@ export function createTurnRunner(
         await waitForAckCleanupBounded(discardHandedOverAck(userMessageId, args.ackReactionIdPromise));
         if (args.queueMode === 'internal') {
           try {
-            const text = ui.agent.sendInternalError(normalized.reason);
+            const text = normalized.reason === AGENT_SWITCH_PERMISSION_UNCONFIRMED
+              ? imText('imBot.text.shared.turn.agentSwitchPermissionUnconfirmed')
+              : ui.agent.sendInternalError(normalized.reason);
             const consumed = (await args.onEarlyReject?.(normalized.reason, text)) ?? false;
             if (!consumed) await sendTextClaimingOpener(userId, text, target.scopeKey);
           } catch {
@@ -1155,7 +1158,9 @@ export function createTurnRunner(
           await waitForAckCleanupBounded(discardHandedOverAck(userMessageId, args.ackReactionIdPromise));
           if (args.queueMode === 'internal') {
             try {
-              const text = ui.agent.sendInternalError(normalized.reason);
+              const text = normalized.reason === AGENT_SWITCH_PERMISSION_UNCONFIRMED
+              ? imText('imBot.text.shared.turn.agentSwitchPermissionUnconfirmed')
+              : ui.agent.sendInternalError(normalized.reason);
               const consumed = (await args.onEarlyReject?.(normalized.reason, text)) ?? false;
               if (!consumed) await sendTextClaimingOpener(userId, text, target.scopeKey);
             } catch { /* Keep the definite pre-dispatch rejection if its notice fails. */ }
@@ -3744,7 +3749,11 @@ export function createTurnRunner(
             ? typeof unsupportedCopy === 'function'
               ? unsupportedCopy(rejectedMode)
               : unsupportedCopy
-            : imText('imBot.text.shared.turn.agentStartFailed', { reason: failure.reason });
+            // The task's pending switch waits for its user's confirmation on the computer. The
+            // sender still has the message in the chat: say what to do, not a failure code.
+            : failure.reason === AGENT_SWITCH_PERMISSION_UNCONFIRMED
+              ? imText('imBot.text.shared.turn.agentSwitchPermissionUnconfirmed')
+              : imText('imBot.text.shared.turn.agentStartFailed', { reason: failure.reason });
         // 早期拒绝终态交调用方消费(群主流 @ 开话题时 patch 开场白卡),
         // 消费了就不再另发。
         const consumed =
@@ -3826,6 +3835,11 @@ export function createTurnRunner(
     error: SanitizedSendOutcomeError;
   } {
     const error = sanitizeSendOutcomeError(err);
+    // The task's pending switch waits for its user's confirmation: a state the sender is told
+    // about in words, wherever in the turn the host reported it, not an internal error.
+    if (err instanceof AgentSwitchPermissionUnconfirmedError) {
+      return { source: 'session.send', reason: AGENT_SWITCH_PERMISSION_UNCONFIRMED, error };
+    }
     if (isSessionRunningError(err, error)) {
       return {
         source: 'session-state',

@@ -12987,6 +12987,7 @@
         },
         "turn": {
           "groupApprovalOwnerDm": "🔐 그룹 채팅의 작업에 승인이 필요합니다. 승인 카드는 그룹에 올라가지 않으니 여기서 확인하세요.",
+          "agentSwitchPermissionUnconfirmed": "⏸ 이 메시지는 처리되지 않았습니다. 이 작업은 곧 Antigravity로 전환되며, 전환하면 권한이 바뀌는데 그 변경이 아직 확인되지 않았습니다. 컴퓨터의 Cindy에서 이 작업을 열어 확인한 뒤 메시지를 다시 보내 주세요.",
           "agentStartFailed": "❌ Agent를 시작하지 못했습니다: {{reason}}",
           "personalBotLabel": "{{channel}} 개인 bot",
           "error": "❌ 오류: {{message}}"

@@ -12987,6 +12987,7 @@
         },
         "turn": {
           "groupApprovalOwnerDm": "🔐 グループチャットのタスクがあなたの承認を待っています。承認カードはグループには送られないので、ここで確認してください。",
+          "agentSwitchPermissionUnconfirmed": "⏸ このメッセージは処理されませんでした。このタスクは Antigravity に切り替わろうとしており、切り替えると権限が変わりますが、その変更はまだ確認されていません。パソコンの Cindy でこのタスクを開いて確認してから、もう一度メッセージを送信してください。",
           "agentStartFailed": "❌ Agent を起動できませんでした: {{reason}}",
           "personalBotLabel": "{{channel}} 個人 bot",
           "error": "❌ エラー: {{message}}"

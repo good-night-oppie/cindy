@@ -12987,6 +12987,7 @@
         },
         "turn": {
           "groupApprovalOwnerDm": "🔐 群議中之差事待君授權。授權之卡不發於群，於此確認即可。",
+          "agentSwitchPermissionUnconfirmed": "⏸ 此訊未理。此任務將易至 Antigravity，易則權柄有變，而此變尚未確認。請先於電腦之 Cindy 開此任務而確認之，然後復發此訊。",
           "agentStartFailed": "❌ 啟 Agent 未成：{{reason}}",
           "personalBotLabel": "{{channel}} 個人 bot",
           "error": "❌ 謬誤：{{message}}"
