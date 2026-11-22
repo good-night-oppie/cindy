@@ -11,6 +11,18 @@ import { makerApiFor } from '@/lib/makerTransport';
  * message it held for this go. 'recordOnly': the task's own entry, which says that confirming
  * sends no message; the host records the agreement and sends nothing.
  */
+/**
+ * What the composer's two dialogs tell the host an agreement is for. The dialog of a send: the
+ * message goes out with it, and so may one the host held for this. The dialog of the permission
+ * menu ("Confirm change"): the user is changing a setting, and nothing is sent on it (QQ's
+ * ruling "A", 2026-11-22), whatever is held and whichever window shows it.
+ */
+export function agySwitchAgreementPurposeOfComposerDialog(
+  about: 'sendConfirmation' | 'permissionConfirmation',
+): 'send' | 'recordOnly' {
+  return about === 'sendConfirmation' ? 'send' : 'recordOnly';
+}
+
 export function recordAgySwitchPermissionAgreementWithHost(
   sessionId: string,
   askedAbout: {

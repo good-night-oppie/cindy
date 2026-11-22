@@ -177,7 +177,7 @@ import {
   relocationDescriptionKey,
   resolveAgentSwitchAckAction,
 } from './agentSwitchConfirmation';
-import { recordAgySwitchPermissionAgreementWithHost } from './agySwitchPermissionHost';
+import { agySwitchAgreementPurposeOfComposerDialog, recordAgySwitchPermissionAgreementWithHost } from './agySwitchPermissionHost';
 import {
   beginAgentSwitchOperation,
   getAgentSwitchWriteSeq,
@@ -7484,7 +7484,7 @@ export function ChatInput({
           // Agreeing in order to send lets a message held for this go; an ordinary change of
           // the permission mode only records the agreement.
           recordAgySwitchPermissionAgreementWithHost(sourceSessionId, intent, agreement,
-            about === 'permissionConfirmation' ? 'recordOnly' : 'send'),
+            agySwitchAgreementPurposeOfComposerDialog(about)),
         currentIntent: () => makerChatStore.getAgentSwitchIntent(sourceSessionId),
       });
     } catch (err) {

@@ -6340,8 +6340,11 @@ describe('AgentInputCoordinator send transaction', () => {
       /** The model picker; "not now" in its dialog registers the switch with no agreement. */
       pick: (agreed: boolean) => ipc.invoke(MAKER_INVOKE.SWITCH_SESSION_AGENT, sid, 'agy', 'gemini-test', null, undefined, undefined,
         agreed ? { agyPermissionAgreement: agreement } : undefined),
-      /** The task's own entry: says nothing about sending. */
-      confirmInTaskEntry: (revision?: number) => answer({}, revision),
+      /**
+       * The task's own entry, and the permission menu's "Confirm change": the same request, which
+       * says nothing about sending.
+       */
+      confirmWithoutSending: (revision?: number) => answer({}, revision),
       /** The banner's "Review and confirm", or the dialog of a send. */
       confirmToSend: (revision?: number) => answer({ agyPermissionAgreementForSend: true }, revision),
       confirmToSendFromRemote: () => runDeviceLinkInvokeContext(
@@ -6352,7 +6355,7 @@ describe('AgentInputCoordinator send transaction', () => {
     };
   }
 
-  it('task entry: after the banner of a held message was closed, confirming records the agreement and sends nothing; Continue sending then sends it once', async () => {
+  it('task entry or permission menu: after the banner of a held message was closed, confirming records the agreement and sends nothing; Continue sending then sends it once', async () => {
     const sid = 'held-then-task-entry';
     const host = hostWithQueue(sid);
     const { h } = host;
@@ -6363,7 +6366,7 @@ describe('AgentInputCoordinator send transaction', () => {
     h.coordinator.clearError(sid);
     expect(h.coordinator.getProjection(sid).queuePaused).toBe(true);
 
-    await expect(host.confirmInTaskEntry()).resolves.toMatchObject({ switched: false, agyPermissionAgreementRecorded: true });
+    await expect(host.confirmWithoutSending()).resolves.toMatchObject({ switched: false, agyPermissionAgreementRecorded: true });
     await host.settle();
     expect(host.pendingSwitches.get(sid)?.agyPermissionAgreement).toEqual({ change: 'fromFullAccess', mode: 'auto' });
     expect(host.dispatched).toEqual([]);
@@ -6383,7 +6386,7 @@ describe('AgentInputCoordinator send transaction', () => {
     expect(h.onDiscardedQueuedMessage).not.toHaveBeenCalled();
   });
 
-  it('task entry: confirming while another window still shows the message as held sends nothing; the banner\'s own confirmation sends it once', async () => {
+  it('task entry or permission menu: confirming while another window still shows the message as held sends nothing; the banner\'s own confirmation sends it once', async () => {
     const sid = 'held-in-another-window';
     const host = hostWithQueue(sid);
     const { h } = host;
@@ -6391,7 +6394,7 @@ describe('AgentInputCoordinator send transaction', () => {
     h.coordinator.enqueue(sid, makeItem('q-1', 'held'));
     await host.settle();
 
-    await expect(host.confirmInTaskEntry()).resolves.toMatchObject({ agyPermissionAgreementRecorded: true });
+    await expect(host.confirmWithoutSending()).resolves.toMatchObject({ agyPermissionAgreementRecorded: true });
     await host.settle();
     expect(host.dispatched).toEqual([]);
     const kept = h.coordinator.getProjection(sid);

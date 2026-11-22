@@ -10,6 +10,7 @@ import {
 } from '@/components/new-chat/agentSwitchConfirmation';
 import { AgySwitchPermissionPendingNotice } from '@/components/chat/AgySwitchPermissionPendingNotice';
 import { useAgySwitchPermissionRecovery } from '@/components/new-chat/useAgySwitchPermissionRecovery';
+import { agySwitchAgreementPurposeOfComposerDialog, recordAgySwitchPermissionAgreementWithHost } from '@/components/new-chat/agySwitchPermissionHost';
 
 const h = vi.hoisted(() => ({
   intent: null as null | {
@@ -72,6 +73,23 @@ describe('what a window tells the host when the host already has the right agree
     })).resolves.toBe(true);
     expect(confirm).not.toHaveBeenCalled();
     expect(registerWithHost.mock.calls.map((call) => (call as unknown[])[1])).toEqual([{ change: 'fromFullAccess', mode: 'auto' }]);
+  });
+
+  // QQ's ruling "A": of everything that records an agreement, only a real send, the banner of a
+  // held message and the model picker may ask the host to let a held message go. The permission
+  // menu's "Confirm change" is none of them. What each composer dialog asks for, and what then
+  // reaches the host, through the function every caller uses.
+  it.each([
+    ['sendConfirmation', true],
+    ['permissionConfirmation', false],
+  ] as const)('the composer dialog %s asks the host to let a held message go: %s', async (about, wakes) => {
+    h.registerWithHost.mockClear();
+    await recordAgySwitchPermissionAgreementWithHost('task-1',
+      { model: 'gemini-test', providerId: null, agyPermissionRevision: 7 },
+      { change: 'fromFullAccess', mode: 'auto' }, agySwitchAgreementPurposeOfComposerDialog(about));
+    const sent = h.registerWithHost.mock.calls[0]![6] as Record<string, unknown>;
+    expect(sent).toMatchObject({ agyPermissionAgreementOnly: true, agyPermissionRevision: 7 });
+    expect('agyPermissionAgreementForSend' in sent).toBe(wakes);
   });
 
   it('gives a task view one key per state of the pending switch it has to act on again', () => {
