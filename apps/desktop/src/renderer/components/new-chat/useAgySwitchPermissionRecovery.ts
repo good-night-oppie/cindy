@@ -33,6 +33,12 @@ export function useAgySwitchPermissionRecovery(input: {
   permissionMode: string | null | undefined;
   /** The task runs on another computer that this window controls. */
   remote: boolean;
+  /**
+   * The engine of the task's pending switch, as the view renders it (null when none). Only so
+   * that the automatic step runs again when a switch appears: a message held with no switch
+   * pending (after a restart, say) is resent once when the user picks the engine again and agrees.
+   */
+  pendingSwitchTarget?: string | null;
   confirm: (options: ConfirmOptions) => Promise<boolean>;
   retry: () => void;
 }): () => void {
@@ -91,7 +97,7 @@ export function useAgySwitchPermissionRecovery(input: {
     if (automaticallyTried.current.modes.has(mode)) return;
     automaticallyTried.current.modes.add(mode);
     void recover(false);
-  }, [held, sessionId, input.error, permissionMode, recover]);
+  }, [held, sessionId, input.error, permissionMode, input.pendingSwitchTarget, recover]);
 
   return useCallback(() => {
     const now = latest.current;

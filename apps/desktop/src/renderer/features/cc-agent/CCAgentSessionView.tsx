@@ -4796,6 +4796,7 @@ function CCAgentSessionContent({
     runningAgent: session ? dbToMakerAgentKind(session.agentKind) : null,
     permissionMode: session?.permissionMode,
     remote: remoteDeviceId != null,
+    pendingSwitchTarget: agentSwitchIntent?.target ?? null,
     confirm: confirmDialog,
     retry: handleRetry,
   });

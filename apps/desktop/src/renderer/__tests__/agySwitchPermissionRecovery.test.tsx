@@ -37,6 +37,7 @@ function TaskView({ error, mode, onResend, remote = false }: ViewProps) {
   const { confirm } = useConfirmDialog();
   const retry = useAgySwitchPermissionRecovery({
     sessionId: 'task-1', error, runningAgent: 'claude-code', permissionMode: mode, remote, confirm, retry: onResend,
+    pendingSwitchTarget: h.intent?.target ?? null,
   });
   return <button type="button" onClick={retry}>Retry</button>;
 }
@@ -146,6 +147,31 @@ describe('a message the host held for an unconfirmed permission change', () => {
     shown.rerender(view({ error: HELD, mode: 'bypassPermissions', onResend }));
     expect(await screen.findByText(TITLE)).toBeTruthy();
     expect(onResend).not.toHaveBeenCalled();
+  });
+
+  // Seen on Win11 while answering JJ (7081611824): a message held across a restart, with no
+  // switch pending. The user picked a Gemini model again and agreed in the switch dialog; the
+  // message stayed held and the banner asked them to confirm once more, because nothing told the
+  // automatic step that a switch had appeared. It now runs then, and what was just agreed is used.
+  it('resends a message held with no switch pending once the user picks the engine again and agrees', async () => {
+    h.intent = null;
+    h.registerWithHost.mockResolvedValue({ agyPermissionAgreementRecorded: true });
+    const onResend = vi.fn();
+    const shown = render(view({ error: HELD, mode: 'bypassPermissions', onResend }));
+    await settle();
+    expect(screen.queryByText(TITLE)).toBeNull();
+    expect(onResend).not.toHaveBeenCalled();
+
+    // The model picker's own dialog was answered: the switch is registered and the answer noted.
+    h.intent = { target: 'agy', model: 'gemini-test', providerId: null, agyPermissionRevision: 9 };
+    noteAgySwitchPermissionAgreed('task-1', 'bypassPermissions');
+    shown.rerender(view({ error: HELD, mode: 'bypassPermissions', onResend }));
+    await waitFor(() => expect(onResend).toHaveBeenCalledTimes(1));
+    expect(screen.queryByText(TITLE)).toBeNull();
+    expect(h.registerWithHost).toHaveBeenCalledTimes(1);
+    shown.rerender(view({ error: null, mode: 'bypassPermissions', onResend }));
+    await settle();
+    expect(onResend).toHaveBeenCalledTimes(1);
   });
 
   it('resends once without asking when the user has since agreed in the permission menu', async () => {
