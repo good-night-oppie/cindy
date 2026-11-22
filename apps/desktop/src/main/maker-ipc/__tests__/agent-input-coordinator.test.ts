@@ -6246,6 +6246,49 @@ describe('AgentInputCoordinator send transaction', () => {
     expect(h.onDiscardedQueuedMessage).not.toHaveBeenCalled();
   });
 
+  // cindy#19 (QQ's ruling on heartbeats), the task's side of the hand-over tested in
+  // runnerQueuedDispatch.test.ts: while a heartbeat is held for the confirmation, the task shows
+  // the held state; when the scheduler withdraws it after its wait, the item and its banner go,
+  // the scheduler is told, and nothing was dispatched beyond the one refused attempt. So between
+  // the withdrawal and the next fire the task itself shows nothing: a gap in what is visible, with
+  // the work owned by the schedule's next fire, which is held again as below.
+  it('shows a held heartbeat in the task until the scheduler withdraws it, then again on the next fire', async () => {
+    const h = createHarness();
+    const sid = 'held-heartbeat-withdrawn';
+    const heartbeat = (clientId: string) => makeItem(clientId, 'scheduled check', {
+      origin: { kind: 'scheduler', scheduleId: 'schedule-1', scheduleName: 'Check', runId: `run-${clientId}` },
+    } as Parameters<typeof makeItem>[2]);
+    h.sendToAgent.mockResolvedValue(hostSendFailure('AGENT_SWITCH_PERMISSION_UNCONFIRMED', 'confirm the change'));
+
+    h.coordinator.enqueue(sid, heartbeat('beat-1'));
+    await flush();
+    await flush();
+    const held = latestProjection(h.projections);
+    expect(held.pendingQueue.map((q) => q.clientId)).toEqual(['beat-1']);
+    expect(held.recovery).toEqual({ kind: 'queue-head', clientId: 'beat-1' });
+    expect(held.error).toMatch(/^AGENT_SWITCH_PERMISSION_UNCONFIRMED: /);
+    expect(h.sendToAgent).toHaveBeenCalledTimes(1);
+
+    // The scheduler's wait ran out (removeQueuedPrompt).
+    h.coordinator.remove(sid, 'beat-1');
+    await flush();
+    const withdrawn = latestProjection(h.projections);
+    expect(withdrawn.pendingQueue).toEqual([]);
+    expect(withdrawn.recovery).toBeNull();
+    expect(withdrawn.error).toBeNull();
+    expect(h.sendToAgent).toHaveBeenCalledTimes(1);
+
+    // The next fire arrives the same way and is held the same way.
+    h.coordinator.enqueue(sid, heartbeat('beat-2'));
+    await flush();
+    await flush();
+    const heldAgain = latestProjection(h.projections);
+    expect(heldAgain.pendingQueue.map((q) => q.clientId)).toEqual(['beat-2']);
+    expect(heldAgain.error).toMatch(/^AGENT_SWITCH_PERMISSION_UNCONFIRMED: /);
+    expect(h.sendToAgent).toHaveBeenCalledTimes(2);
+    expect(mocks.createMessage).not.toHaveBeenCalled();
+  });
+
   it('abandons a failed queue head on explicit user enqueue and dispatches the new message', async () => {
     const h = createHarness();
     const sid = 'send-rollback-user-input-unlocks';
