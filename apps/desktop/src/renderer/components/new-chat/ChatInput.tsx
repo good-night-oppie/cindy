@@ -166,6 +166,7 @@ import { useRemoteSessionConnection } from '@/features/cc-agent/hooks/useRemoteS
 
 import {
   agreeToPendingAgySwitchPermission,
+  agyPermissionChangeTitle,
   agySwitchPermissionNotice,
   confirmAgentSwitchRisk,
   forgetAgySwitchPermissionAgreed,
@@ -7457,9 +7458,13 @@ export function ChatInput({
         permissionMode,
         confirm: confirmDialog,
         copy: {
-          title: {
-            fromFullAccess: t(`newChat.chatInput.agentSwitch.${about}.titleFromFullAccess`),
-            fromUnsupported: t(`newChat.chatInput.agentSwitch.${about}.titleFromUnsupported`),
+          title: about === 'permissionConfirmation' ? (() => {
+            const title = agyPermissionChangeTitle(t, runtimeAgentKind, permissionMode,
+              activeAgentCapabilities?.permissionModes.find(option => option.id === permissionMode)?.displayName);
+            return { fromFullAccess: title, fromUnsupported: title };
+          })() : {
+            fromFullAccess: t('newChat.chatInput.agentSwitch.sendConfirmation.titleFromFullAccess'),
+            fromUnsupported: t('newChat.chatInput.agentSwitch.sendConfirmation.titleFromUnsupported'),
           },
           confirmText: t(`newChat.chatInput.agentSwitch.${about}.confirm`),
           cancelText: t(`newChat.chatInput.agentSwitch.${about}.cancel`),

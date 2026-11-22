@@ -14300,8 +14300,7 @@
           "confirm": "確認して送信"
         },
         "permissionConfirmation": {
-          "titleFromFullAccess": "「フルアクセス」に変更しますか？",
-          "titleFromUnsupported": "この権限レベルに変更しますか？",
+          "title": "「{{mode}}」に変更しますか？",
           "cancel": "まだ変更しない",
           "confirm": "変更を確認"
         }

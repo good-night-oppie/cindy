@@ -14470,8 +14470,7 @@
           "confirm": "Confirmar e enviar"
         },
         "permissionConfirmation": {
-          "titleFromFullAccess": "Mudar para “Acesso total”?",
-          "titleFromUnsupported": "Mudar para este nível de permissão?",
+          "title": "Mudar para “{{mode}}”?",
           "cancel": "Não mudar ainda",
           "confirm": "Confirmar mudança"
         }

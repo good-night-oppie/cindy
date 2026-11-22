@@ -8,6 +8,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { ConfirmDialogProvider, useConfirmDialog } from '@/components/ui/confirm-dialog-provider';
 import {
   AGENT_SWITCH_CONFIRMATION_OVERRIDE_KEY,
+  agyPermissionChangeTitle,
   agySwitchPermissionNotice,
   confirmAgentSwitchRisk,
   confirmPendingAgySwitchPermission,
@@ -234,6 +235,27 @@ describe('Agent switch confirmation', () => {
     fireEvent.click(screen.getByRole('button', { name: 'Send' }));
     expect(await screen.findByText(GATE_COPY.title.fromFullAccess)).toBeTruthy();
     expect(onSent).not.toHaveBeenCalled();
+  });
+
+  // JJ 7078293935 §3: the dialog shown when a mode is picked in the menu names that mode, as the
+  // menu labelled it. The earlier fixed title for a mode Antigravity lacks ("this permission level")
+  // did not say which one, and the mode after the switch (Default permissions) is not what was picked.
+  it.each(['zh-CN', 'en', 'zh-TW'] as const)('titles the permission-change dialog with the mode just picked (%s)', (language) => {
+    const strings = JSON.parse(readFileSync(resolve(__dirname, `../i18n/locales/${language}/common.json`), 'utf8'))
+      .newChat as { permissionSelector: { modes: Record<string, Record<string, { label: string }>> };
+      chatInput: { agentSwitch: { permissionConfirmation: { title: string } } } };
+    const t = (key: string, options?: Record<string, unknown>) => {
+      const value = key.replace(/^newChat\./, '').split('.').reduce<unknown>((node, part) => (node as Record<string, unknown> | undefined)?.[part], strings);
+      const text = typeof value === 'string' ? value : String(options?.defaultValue ?? key);
+      return text.replace('{{mode}}', String(options?.mode ?? ''));
+    };
+    const labels = strings.permissionSelector.modes['claude-code'];
+    const title = strings.chatInput.agentSwitch.permissionConfirmation.title;
+    expect(agyPermissionChangeTitle(t, 'claude-code', 'acceptEdits')).toBe(title.replace('{{mode}}', labels.acceptEdits.label));
+    expect(agyPermissionChangeTitle(t, 'claude-code', 'bypassPermissions')).toBe(title.replace('{{mode}}', labels.bypassPermissions.label));
+    expect(agyPermissionChangeTitle(t, 'claude-code', 'acceptEdits')).not.toContain(labels.ask.label);
+    // A mode with no label of its own in this build still names itself rather than a wrong one.
+    expect(agyPermissionChangeTitle(t, 'codex', 'plan', 'Plan')).toBe(title.replace('{{mode}}', 'Plan'));
   });
 
   it('does not prompt again when an Agent switch intent already exists', async () => {

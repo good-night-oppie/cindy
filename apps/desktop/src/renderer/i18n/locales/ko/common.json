@@ -14300,8 +14300,7 @@
           "confirm": "확인하고 보내기"
         },
         "permissionConfirmation": {
-          "titleFromFullAccess": "'전체 접근'으로 바꿀까요?",
-          "titleFromUnsupported": "이 권한 단계로 바꿀까요?",
+          "title": "'{{mode}}'(으)로 바꿀까요?",
           "cancel": "아직 바꾸지 않기",
           "confirm": "변경 확인"
         }

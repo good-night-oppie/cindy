@@ -14354,8 +14354,7 @@
           "confirm": "Confirm and send"
         },
         "permissionConfirmation": {
-          "titleFromFullAccess": "Change to Full access?",
-          "titleFromUnsupported": "Change to this permission level?",
+          "title": "Change to {{mode}}?",
           "cancel": "Don't change yet",
           "confirm": "Confirm change"
         }

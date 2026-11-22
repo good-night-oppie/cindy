@@ -103,6 +103,21 @@ export function agySwitchPermissionNeedsAgreement(sessionId: string, permissionM
   return agreed?.change !== change || agreed.mode !== permissionModeAfterSwitchToAgy(permissionMode);
 }
 
+/**
+ * The title of the dialog shown when a mode is picked in the permission menu while a switch into
+ * Antigravity is pending. It names the mode the user just picked, with the label the menu showed
+ * for it (the running engine's), not the mode the switch will turn it into; the body says that.
+ */
+export function agyPermissionChangeTitle(
+  t: (key: string, options?: Record<string, unknown>) => string,
+  runningAgent: string | null | undefined, pickedMode: string, displayName?: string,
+): string {
+  const mode = t(`newChat.permissionSelector.modes.${runningAgent ?? 'claude-code'}.${pickedMode}.label`, {
+    defaultValue: displayName ?? pickedMode,
+  });
+  return t('newChat.chatInput.agentSwitch.permissionConfirmation.title', { mode });
+}
+
 /** Title per change, and the two buttons, of a dialog that asks again about a pending switch. */
 export interface AgySwitchPermissionAgreementCopy {
   title: Record<AgySwitchPermissionChange, string>;

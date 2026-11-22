@@ -14300,8 +14300,7 @@
           "confirm": "确认并发"
         },
         "permissionConfirmation": {
-          "titleFromFullAccess": "改为「完全访问」乎？",
-          "titleFromUnsupported": "改为此权柄乎？",
+          "title": "改为「{{mode}}」乎？",
           "cancel": "姑且不改",
           "confirm": "确认更改"
         }

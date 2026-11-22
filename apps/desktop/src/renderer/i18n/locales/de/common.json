@@ -14354,8 +14354,7 @@
           "confirm": "Bestätigen und senden"
         },
         "permissionConfirmation": {
-          "titleFromFullAccess": "Zu „Vollzugriff“ wechseln?",
-          "titleFromUnsupported": "Zu dieser Berechtigungsstufe wechseln?",
+          "title": "Zu „{{mode}}“ wechseln?",
           "cancel": "Noch nicht ändern",
           "confirm": "Änderung bestätigen"
         }

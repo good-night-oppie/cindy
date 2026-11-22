@@ -14300,8 +14300,7 @@
           "confirm": "確認並發"
         },
         "permissionConfirmation": {
-          "titleFromFullAccess": "改為「完全存取」乎？",
-          "titleFromUnsupported": "改為此權柄乎？",
+          "title": "改為「{{mode}}」乎？",
           "cancel": "姑且不改",
           "confirm": "確認更改"
         }
