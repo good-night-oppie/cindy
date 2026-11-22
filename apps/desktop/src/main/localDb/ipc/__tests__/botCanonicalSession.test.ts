@@ -267,6 +267,14 @@ import {
   prepareImportedBotInvitation,
 } from '../bots';
 import { tx as runWorkerTx } from '../../worker/opHandlers/tx.js';
+import { applyAgentSwitchToSessionRow } from '../sessions';
+import { syncBotLanePermission } from '../../../maker-ipc/botPermissionSync';
+import { MAKER_INVOKE } from '../../../maker-ipc/channels';
+import { IpcHarness } from '../../../maker-ipc/__tests__/helpers/ipcHarness';
+import {
+  applyPendingAgentSwitchIfIdle, registerMakerSessionAgentSwitchHandler,
+  type AgentSwitchSessionRow, type MakerSessionAgentSwitchHandlerDeps, type PendingAgentSwitchIntent,
+} from '../../../maker-ipc/sessionAgentSwitchHandler';
 import * as modelSettings from '../../../maker-host/bot-model-chain-settings-store.js';
 import { assertTrustedAppRendererEvent } from '../../../security/trustedAppRenderer.js';
 import { runDeviceLinkInvokeContext } from '../../../device-link/invoke-context.js';
@@ -1449,6 +1457,124 @@ describe('Bot canonical Session lifecycle', () => {
       Object.defineProperty(process, 'platform', status);
       h.closeSession.mockReset().mockResolvedValue(undefined);
     }
+  });
+
+  // cindy#18 acceptance B5/B6 (QQ 2026-11-22), model-picker entry of cindy#19. A partner conversation
+  // that switches into Antigravity is moved off Full access in the switch commit. The partner's
+  // background lane sync treats the main conversation's mode as the truth for every lane, so it can
+  // raise that conversation back to Full access (B5) or push the main conversation's new mode to
+  // lanes on other engines and into the partner's saved profile (B6). Existing cases change the
+  // partner's permissions on purpose; none switches one conversation's engine.
+  // Integration tier: real partner profile, lanes, reconcile transaction and switch commit on SQLite,
+  // the real switch handler and lane sync; the runtime is a stand-in. Broadcasts are not observable here.
+  const switchPartnerConversationToAgy = async (sessionId: string, live: Map<string, { agentKind: string;
+    stablePermissionModeState: { mode: string }; isTurnRunning: () => boolean; compactSession: () => Promise<unknown>;
+    setPermissionMode: ReturnType<typeof vi.fn>; abort: ReturnType<typeof vi.fn> }>, launches: string[]) => {
+    const readRow = () => h.sqlite!.prepare(`SELECT id, agent_kind AS agentKind, model, provider_id AS providerId, status,
+      remote_host_id AS remoteHostId, orca_role AS orcaRole, sdk_session_id AS sdkSessionId, working_dir AS workingDir,
+      source, permission_mode AS permissionMode FROM sessions WHERE id = ?`).get(sessionId) as AgentSwitchSessionRow & { permissionMode: string };
+    const pending = new Map<string, PendingAgentSwitchIntent>();
+    const deps: MakerSessionAgentSwitchHandlerDeps = {
+      confirmNativeHistoryFallback: async () => true,
+      getSessionRow: async () => readRow(),
+      getLiveSession: id => live.get(id),
+      closeSession: async id => { live.delete(id); },
+      listMessagesForHandoff: async () => [{ role: 'user', content: 'hello', createdAt: 1 }],
+      applyAgentSwitchToDb: (id, patch) => applyAgentSwitchToSessionRow(id, patch),
+      setSessionProvider: () => {},
+      insertBoundaryMessage: async () => 'boundary',
+      applyResumeFallbackAtomically: async () => {},
+      setPendingHandoff: () => {},
+      bootstrapSwitchedSession: async () => {
+        const row = readRow();
+        launches.push(`${row.agentKind} ${row.permissionMode}`);
+        live.set(sessionId, { agentKind: row.agentKind, stablePermissionModeState: { mode: row.permissionMode },
+          isTurnRunning: () => false, compactSession: async () => undefined, setPermissionMode: vi.fn(async () => {}), abort: vi.fn(async () => {}) });
+      },
+      withCloseSuppressed: (_id, run) => run(),
+      withSessionLock: withSendToSessionLock,
+      pendingSwitches: { set: (id, intent) => void pending.set(id, intent), get: id => pending.get(id), clear: id => void pending.delete(id) },
+      log: { info: () => {}, warn: () => {} },
+    };
+    const ipc = new IpcHarness();
+    registerMakerSessionAgentSwitchHandler(ipc, deps);
+    await ipc.invoke(MAKER_INVOKE.SWITCH_SESSION_AGENT, sessionId, 'agy', 'gemini-test', null);
+    await withSendToSessionLock(sessionId, () => applyPendingAgentSwitchIfIdle(deps, sessionId, { bootstrapAfterSwitch: true }));
+  };
+  const partnerOnFullAccessWithLane = async () => {
+    const profile = await invoke('local-db:bots:update', { id: 'bot-1', capabilities: { permissions: 'trusted' } });
+    const chat = await invoke('local-db:bots:create-canonical-session', {
+      botId: 'bot-1', expectedCanonicalSessionId: null, expectedProfileVersion: profile.currentVersion,
+    });
+    const lane = await ensureBotChannelLaneSession({ botId: 'bot-1', routeKey: 'im:feishu:fixture:g:1', title: 'Fixture' });
+    if (!lane.ok) throw new Error(lane.message);
+    const main = chat.session.id as string;
+    h.sqlite!.prepare("UPDATE sessions SET agent_kind = 'codex' WHERE id IN (?, ?)").run(main, lane.sessionId);
+    const live = new Map<string, { agentKind: string; stablePermissionModeState: { mode: string }; isTurnRunning: () => boolean;
+      compactSession: () => Promise<unknown>; setPermissionMode: ReturnType<typeof vi.fn>; abort: ReturnType<typeof vi.fn> }>();
+    h.getSession.mockImplementation(id => id ? live.get(id) ?? null : null);
+    h.closeSession.mockImplementation(async (...args: unknown[]) => { live.delete(args[0] as string); });
+    const platform = Object.getOwnPropertyDescriptor(process, 'platform')!;
+    Object.defineProperty(process, 'platform', { ...platform, value: 'linux' });
+    onTestFinished(() => {
+      Object.defineProperty(process, 'platform', platform);
+      h.getSession.mockReset().mockReturnValue(null);
+      h.closeSession.mockReset().mockResolvedValue(undefined);
+    });
+    const state = async () => ({
+      main: h.sqlite!.prepare('SELECT agent_kind AS engine, permission_mode AS mode FROM sessions WHERE id = ?').get(main),
+      lane: h.sqlite!.prepare('SELECT agent_kind AS engine, permission_mode AS mode FROM sessions WHERE id = ?').get(lane.sessionId),
+      profile: (await invoke('local-db:bots:get', 'bot-1')).capabilities.permissions as string,
+    });
+    return { main, lane: lane.sessionId, live, state };
+  };
+
+  it('B5: a lane moved off Full access by its switch into Antigravity is not raised back by background sync', async () => {
+    const p = await partnerOnFullAccessWithLane();
+    const launches: string[] = [];
+    await switchPartnerConversationToAgy(p.lane, p.live, launches);
+    expect(launches).toEqual(['agy auto']);
+    expect(await p.state()).toEqual({
+      main: { engine: 'codex', mode: 'bypassPermissions' }, lane: { engine: 'agy', mode: 'auto' }, profile: 'trusted',
+    });
+    const running = p.live.get(p.lane)!;
+
+    await syncBotLanePermission(p.lane);
+
+    expect(await p.state()).toEqual({
+      main: { engine: 'codex', mode: 'bypassPermissions' }, lane: { engine: 'agy', mode: 'auto' }, profile: 'trusted',
+    });
+    expect(p.live.get(p.lane)).toBe(running);
+    expect(running.setPermissionMode).not.toHaveBeenCalled();
+  });
+
+  it('B6: switching the main conversation into Antigravity does not push its new mode to a lane on another engine', async () => {
+    const p = await partnerOnFullAccessWithLane();
+    const laneRuntime = { agentKind: 'codex', stablePermissionModeState: { mode: 'bypassPermissions' }, isTurnRunning: () => false,
+      compactSession: async () => undefined, setPermissionMode: vi.fn(async () => {}), abort: vi.fn(async () => {}) };
+    p.live.set(p.lane, laneRuntime);
+    const launches: string[] = [];
+    await switchPartnerConversationToAgy(p.main, p.live, launches);
+    expect(launches).toEqual(['agy auto']);
+
+    await syncBotLanePermission(p.lane);
+
+    expect(await p.state()).toEqual({
+      main: { engine: 'agy', mode: 'auto' }, lane: { engine: 'codex', mode: 'bypassPermissions' }, profile: 'trusted',
+    });
+    expect(p.live.get(p.lane)).toBe(laneRuntime);
+    expect(laneRuntime.setPermissionMode).not.toHaveBeenCalled();
+  });
+
+  it('B6: a permission change the user then saves on the partner still reaches every lane', async () => {
+    const p = await partnerOnFullAccessWithLane();
+    await switchPartnerConversationToAgy(p.main, p.live, []);
+
+    await invoke('local-db:bots:update', { id: 'bot-1', capabilities: { permissions: 'ask' } });
+
+    expect(await p.state()).toEqual({
+      main: { engine: 'agy', mode: 'ask' }, lane: { engine: 'codex', mode: 'ask' }, profile: 'ask',
+    });
   });
 
   it('widens an agy partner after its busy lane closes and refreshes both saved lanes', async () => {
