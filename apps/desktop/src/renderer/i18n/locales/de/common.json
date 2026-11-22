@@ -14355,10 +14355,10 @@
           "confirm": "Bestätigen und senden"
         },
         "permissionEntry": {
-          "notice": "Der Wechsel zu Antigravity ändert die Berechtigungen dieser Aufgabe, und diese Änderung musst du noch bestätigen. Wähle „Prüfen und bestätigen“; damit stimmst du nur der Änderung zu, es wird keine Nachricht gesendet.",
+          "notice": "Der Wechsel zu Antigravity ändert die Berechtigungen dieser Aufgabe, und diese Änderung musst du noch bestätigen. Wähle „Prüfen und bestätigen“; mit der Bestätigung hier stimmst du nur der Änderung zu, es wird keine Nachricht gesendet.",
           "titleFromFullAccess": "Änderung zu „Automatische Prüfung“ zustimmen?",
           "titleFromUnsupported": "Änderung zu „Standardberechtigungen“ zustimmen?",
-          "note": "Mit der Bestätigung wird keine Nachricht gesendet. Eine nicht verarbeitete Nachricht muss erneut gesendet werden."
+          "note": "Mit der Bestätigung wird keine Nachricht gesendet."
         },
         "permissionConfirmation": {
           "title": "Zu „{{mode}}“ wechseln?",

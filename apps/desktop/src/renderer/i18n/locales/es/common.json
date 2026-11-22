@@ -14471,10 +14471,10 @@
           "confirm": "Confirmar y enviar"
         },
         "permissionEntry": {
-          "notice": "Cambiar a Antigravity cambiará los permisos de esta tarea, y ese cambio todavía necesita tu confirmación. Selecciona «Revisar y confirmar»; al confirmar solo aceptas el cambio y no se envía ningún mensaje.",
+          "notice": "Cambiar a Antigravity cambiará los permisos de esta tarea, y ese cambio todavía necesita tu confirmación. Selecciona «Revisar y confirmar»; al confirmar aquí solo aceptas el cambio y no se envía ningún mensaje.",
           "titleFromFullAccess": "¿Aceptar el cambio a «Revisión automática»?",
           "titleFromUnsupported": "¿Aceptar el cambio a «Permisos predeterminados»?",
-          "note": "Al confirmar no se envía ningún mensaje. Un mensaje que no se procesó debe enviarse de nuevo."
+          "note": "Al confirmar no se envía ningún mensaje."
         },
         "permissionConfirmation": {
           "title": "¿Cambiar a «{{mode}}»?",

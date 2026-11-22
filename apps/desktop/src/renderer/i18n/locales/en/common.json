@@ -14355,10 +14355,10 @@
           "confirm": "Confirm and send"
         },
         "permissionEntry": {
-          "notice": "Switching to Antigravity will change this task's permissions, and that change still needs your confirmation. Select Review and confirm; confirming only agrees to the change and sends no message.",
+          "notice": "Switching to Antigravity will change this task's permissions, and that change still needs your confirmation. Select Review and confirm; confirming here only agrees to the change and doesn't send any message.",
           "titleFromFullAccess": "Agree to change to Auto-review?",
           "titleFromUnsupported": "Agree to change to Default permissions?",
-          "note": "Confirming sends no message. A message that wasn't processed has to be sent again."
+          "note": "Confirming doesn't send any message."
         },
         "permissionConfirmation": {
           "title": "Change to {{mode}}?",
