@@ -178,11 +178,11 @@ function fixture(initialMode: string) {
      * The task's confirmation entry: an answer about the pending switch to `model`, and nothing else.
      * `from` is where the answer comes from.
      */
-    agreeOnly: async (agreedFor: string, model = 'gemini-test', from: 'here' | 'remote' = 'here', shownRevision?: number | null) => {
+    agreeOnly: async (agreedFor: string, model = 'gemini-test', from: 'here' | 'remote' = 'here', shownRevision?: number | null, providerId: string | null = null) => {
       // By default the answer is about the registration the task's window shows right now.
       const revision = shownRevision !== undefined ? shownRevision
         : ((await ipc.invoke(MAKER_INVOKE.GET_SESSION_AGENT_SWITCH_INTENT, id)) as { agyPermissionRevision?: number } | null)?.agyPermissionRevision;
-      const call = () => ipc.invoke(MAKER_INVOKE.SWITCH_SESSION_AGENT, id, 'agy', model, null, undefined, undefined, {
+      const call = () => ipc.invoke(MAKER_INVOKE.SWITCH_SESSION_AGENT, id, 'agy', model, providerId, undefined, undefined, {
         agyPermissionAgreementOnly: true,
         ...(typeof revision === 'number' ? { agyPermissionRevision: revision } : {}),
         agyPermissionAgreement: { change: agySwitchPermissionChange(agreedFor), mode: permissionModeAfterSwitchToAgy(agreedFor) },
@@ -198,6 +198,10 @@ function fixture(initialMode: string) {
     hold: (route: Pick<ScheduledModelSelection, 'model' | 'providerId'> & Partial<Pick<ScheduledModelSelection, 'effort' | 'fastMode' | 'agentDeviceId'>>,
       currentAgentDeviceId?: string | null) => holdAgySwitchForConfirmation(switchDeps, id, route, currentAgentDeviceId),
     hasPendingSwitch: () => !!switchDeps.pendingSwitches?.get(id),
+    /** The host's own record, with what the windows are not told (where the switch came from). */
+    pendingRecord: () => switchDeps.pendingSwitches?.get(id),
+    hostRevision: () => switchDeps.pendingSwitches?.revision?.(id),
+    pickGeminiModelOfProvider: (providerId: string) => ipc.invoke(MAKER_INVOKE.SWITCH_SESSION_AGENT, id, 'agy', 'gemini-test', providerId),
     onLanded: (fn: () => void) => { hooks.landed = fn; },
     onRestoreWithdrawn: (fn: () => void) => { hooks.restoreWithdrawn = fn; },
     /** The app is quit and started again: pending switches are memory only; the store is not. */
@@ -563,10 +567,83 @@ describe('switching a task into Antigravity from the model picker, with permissi
     await expect(elsewhere.pendingSwitch()).resolves.toBeNull();
   });
 
+  // DD 7082445534, item 2. The agreement is written on the pending switch itself, under the task's
+  // send lock. It used to be written outside the lock, on a copy that replaced the switch and
+  // moved the host's revision: a withdrawal that had read the revision could then fail to clear
+  // the switch, and the applied switch no longer recognised its own intent when it finished.
+  it('writes the agreement on the pending switch itself, under the send lock, without making it another registration', async () => {
+    const h = fixture('bypassPermissions');
+    await h.pickGeminiModel(null);
+    const record = h.pendingRecord();
+    const revision = h.hostRevision();
+
+    let release!: () => void;
+    const lockHeld = withSendToSessionLock(h.id, () => new Promise<void>((resolve) => { release = resolve; }));
+    let answered = false;
+    const answer = h.agreeOnly('bypassPermissions').then((result) => { answered = true; return result; });
+    await settle();
+    expect(answered).toBe(false);
+    expect(h.pendingRecord()?.agyPermissionAgreement).toBeUndefined();
+    release();
+    await lockHeld;
+    await expect(answer).resolves.toMatchObject({ agyPermissionAgreementRecorded: true });
+
+    expect(h.pendingRecord()).toBe(record);
+    expect(h.hostRevision()).toBe(revision);
+    await expect(h.pendingSwitch()).resolves.toMatchObject({
+      agyPermissionAgreement: { change: 'fromFullAccess', mode: 'auto' }, agyPermissionRevision: revision,
+    });
+    // A withdrawal still clears it: nothing made it "another selection".
+    await h.withdrawSwitch();
+    await expect(h.pendingSwitch()).resolves.toBeNull();
+    await h.send();
+    expect(h.log).toEqual([]);
+  });
+
+  // DD's review of e4dff8f7 asked for this and 7082445534 (item 4) asked again: recording the
+  // agreement must not rewrite where the switch came from. A switch staged by configuration, or
+  // requested by an agent, that came back as "the user's own pick" would detach the task from what
+  // it follows. The windows are told that it was staged (item 5); the agent source stays host-only.
+  it.each([
+    ['staged by configuration', { configStaged: true, effort: 'high', fastMode: true }, { configStaged: true, effort: 'high', fastMode: true }, true],
+    ['requested by an agent', { runtimeSource: 'agent', effort: 'low' }, { runtimeSource: 'agent', effort: 'low' }, false],
+  ] as const)('keeps a switch %s what it was after its agreement is recorded', async (_name, extra, kept, reportedAsStaged) => {
+    const h = fixture('bypassPermissions');
+    await h.switchFromHost({ ...extra });
+    await expect(h.pendingSwitch()).resolves.toMatchObject(reportedAsStaged ? { configStaged: true } : { targetAgentKind: 'agy' });
+    if (!reportedAsStaged) expect(await h.pendingSwitch()).not.toHaveProperty('configStaged');
+    await expect(h.agreeOnly('bypassPermissions')).resolves.toMatchObject({ agyPermissionAgreementRecorded: true });
+    expect(h.pendingRecord()).toMatchObject({ ...kept, targetAgentKind: 'agy', model: 'gemini-test' });
+    await h.send();
+    expect(h.log).toEqual(['switched agy auto', 'launch agy auto isolated']);
+  });
+
+  it('keeps the place a held switch goes back to after its agreement is recorded', async () => {
+    const h = fixture('bypassPermissions');
+    h.hold({ model: 'gemini-test', providerId: null, agentDeviceId: null }, 'device-2');
+    await expect(h.agreeOnly('bypassPermissions')).resolves.toMatchObject({ agyPermissionAgreementRecorded: true });
+    expect(h.pendingRecord()).toMatchObject({ targetAgentDeviceId: null, restoresScheduledBaseline: true });
+  });
+
+  // Item 6: an answer names the switch by its provider too.
+  it('does not record an answer that names another provider than the pending switch has', async () => {
+    const h = fixture('bypassPermissions');
+    await h.pickGeminiModelOfProvider('antigravity');
+    const revision = await h.shownRevision();
+    await expect(h.agreeOnly('bypassPermissions', 'gemini-test', 'here', revision, null)).resolves.toMatchObject({ agyPermissionAgreementRecorded: false });
+    await expect(h.agreeOnly('bypassPermissions', 'gemini-test', 'here', revision, 'another-provider')).resolves.toMatchObject({ agyPermissionAgreementRecorded: false });
+    await expect(h.pendingSwitch()).resolves.toMatchObject({ providerId: 'antigravity', agyPermissionAgreement: null });
+    await expect(h.agreeOnly('bypassPermissions', 'gemini-test', 'here', revision, 'antigravity')).resolves.toMatchObject({ agyPermissionAgreementRecorded: true });
+  });
+
   it('records an agreement only for the stored mode it was given for, and not from a remote controller', async () => {
     const h = fixture('bypassPermissions');
     await h.pickGeminiModel(null);
-    await expect(h.agreeOnly('bypassPermissions', 'gemini-test', 'remote')).resolves.toMatchObject({ agyPermissionAgreementRecorded: false });
+    // Everything about the answer is right (the registration, the model, the agreement); it is
+    // refused for one reason only, that it comes from another computer.
+    await expect(h.agreeOnly('bypassPermissions', 'gemini-test', 'remote', await h.shownRevision()))
+      .resolves.toMatchObject({ agyPermissionAgreementRecorded: false });
+    await expect(h.pendingSwitch()).resolves.toMatchObject({ agyPermissionAgreement: null });
     await expect(h.send()).rejects.toMatchObject({ code: 'AGENT_SWITCH_PERMISSION_UNCONFIRMED' });
 
     await expect(h.agreeOnly('bypassPermissions')).resolves.toMatchObject({ agyPermissionAgreementRecorded: true });

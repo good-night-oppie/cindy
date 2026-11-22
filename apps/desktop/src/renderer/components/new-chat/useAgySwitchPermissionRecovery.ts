@@ -5,6 +5,7 @@ import type { ConfirmOptions } from '@/components/ui/confirm-dialog-provider';
 import { makerChatStore } from '@/lib/makerChatStore';
 import {
   agreeToPendingAgySwitchPermission, forgetAgySwitchPermissionAgreed, isAgentSwitchPermissionUnconfirmedError,
+  isAgySwitchPermissionDialogOpen,
 } from './agentSwitchConfirmation';
 import { recordAgySwitchPermissionAgreementWithHost } from './agySwitchPermissionHost';
 
@@ -34,11 +35,13 @@ export function useAgySwitchPermissionRecovery(input: {
   /** The task runs on another computer that this window controls. */
   remote: boolean;
   /**
-   * The engine of the task's pending switch, as the view renders it (null when none). Only so
-   * that the automatic step runs again when a switch appears: a message held with no switch
-   * pending (after a restart, say) is resent once when the user picks the engine again and agrees.
+   * What the view renders of the task's pending switch: its engine, which registration it is and
+   * what the host has recorded as agreed (null when none). Only so that the automatic step runs
+   * again when any of that changes: a message held with no switch pending (after a restart, say)
+   * is resent once when the user picks the engine again and agrees, and so is one whose question
+   * was being answered in another dialog of this task when it was held.
    */
-  pendingSwitchTarget?: string | null;
+  pendingSwitchKey?: string | null;
   confirm: (options: ConfirmOptions) => Promise<boolean>;
   retry: () => void;
 }): () => void {
@@ -71,6 +74,7 @@ export function useAgySwitchPermissionRecovery(input: {
         },
         t,
         registerWithHost: (intent, agreement) => recordAgySwitchPermissionAgreementWithHost(sessionId, intent, agreement),
+        currentIntent: () => makerChatStore.getAgentSwitchIntent(sessionId),
       });
       if (agreed) retry();
     } catch {
@@ -93,11 +97,14 @@ export function useAgySwitchPermissionRecovery(input: {
       return;
     }
     if (!held) return;
+    // The question is already on screen for this task (asked from its entry, say). When it is
+    // answered the host's record changes and this runs again; asking behind it would ask twice.
+    if (isAgySwitchPermissionDialogOpen(latest.current.confirm, sessionId)) return;
     const mode = permissionMode ?? '';
     if (automaticallyTried.current.modes.has(mode)) return;
     automaticallyTried.current.modes.add(mode);
     void recover(false);
-  }, [held, sessionId, input.error, permissionMode, input.pendingSwitchTarget, recover]);
+  }, [held, sessionId, input.error, permissionMode, input.pendingSwitchKey, recover]);
 
   return useCallback(() => {
     const now = latest.current;

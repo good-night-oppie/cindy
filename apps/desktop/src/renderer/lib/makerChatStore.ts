@@ -19002,6 +19002,15 @@ function mirrorAgentSwitchIntent(sessionId: string, value: unknown): void {
     // The same switch, about which the host now says something else on its permission agreement.
     // That is not another selection: the revision that guards selections in flight stays.
     if (current && next && 'agyPermissionAgreement' in next && !agyPermissionStateEquals(current, next)) {
+      // Within one registration an agreement is added or replaced, never taken away (a switch
+      // registered again has another revision). A report saying "none" for the registration this
+      // window already knows an agreement for was read before the agreement was written and
+      // arrived after it; taking it would bring the confirmation entry back right after the
+      // user confirmed.
+      if (current.agyPermissionAgreement && !next.agyPermissionAgreement
+        && current.agyPermissionRevision !== undefined && current.agyPermissionRevision === next.agyPermissionRevision) {
+        return;
+      }
       setState(sessionId, (s) => ({ ...s, agentSwitchIntent: next }));
     }
     return;

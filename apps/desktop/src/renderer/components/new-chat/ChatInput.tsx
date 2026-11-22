@@ -7479,6 +7479,7 @@ export function ChatInput({
         t,
         registerWithHost: (intent, agreement) =>
           recordAgySwitchPermissionAgreementWithHost(sourceSessionId, intent, agreement),
+        currentIntent: () => makerChatStore.getAgentSwitchIntent(sourceSessionId),
       });
     } catch (err) {
       // If the host has no record of the agreement, the mode is not stored and the message not queued.

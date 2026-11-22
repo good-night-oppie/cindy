@@ -180,7 +180,7 @@ import { Tip } from '@/components/ui/tooltip';
 import { RunningTokenCount } from './RunningTokenCount';
 import { useConfirmDialog } from '@/components/ui/confirm-dialog-provider';
 import { useAgySwitchPermissionRecovery } from '@/components/new-chat/useAgySwitchPermissionRecovery';
-import { isAgentSwitchPermissionUnconfirmedError } from '@/components/new-chat/agentSwitchConfirmation';
+import { agySwitchPermissionEntryIsOffered } from '@/components/new-chat/agentSwitchConfirmation';
 import { AgySwitchPermissionPendingNotice } from '@/components/chat/AgySwitchPermissionPendingNotice';
 import { useSilentEncryptedRetry } from '@/hooks/useSilentEncryptedRetry';
 import { TodaySpendChip } from '@/components/status/TodaySpendChip';
@@ -4796,7 +4796,9 @@ function CCAgentSessionContent({
     runningAgent: session ? dbToMakerAgentKind(session.agentKind) : null,
     permissionMode: session?.permissionMode,
     remote: remoteDeviceId != null,
-    pendingSwitchTarget: agentSwitchIntent?.target ?? null,
+    pendingSwitchKey: agentSwitchIntent
+      ? `${agentSwitchIntent.target}|${agentSwitchIntent.agyPermissionRevision ?? ''}|${agentSwitchIntent.agyPermissionAgreement?.change ?? ''}:${agentSwitchIntent.agyPermissionAgreement?.mode ?? ''}`
+      : null,
     confirm: confirmDialog,
     retry: handleRetry,
   });
@@ -5652,7 +5654,7 @@ function CCAgentSessionContent({
 
             {/* The task's own entry to confirm a pending switch's permission change; a held queued
                 message has the banner above instead. Only the task's computer can confirm. */}
-            {!readOnly && !remoteDeviceId && sessionId && !isAgentSwitchPermissionUnconfirmedError(error) && (
+            {sessionId && agySwitchPermissionEntryIsOffered({ readOnly, remote: remoteDeviceId != null, error }) && (
               <AgySwitchPermissionPendingNotice
                 sessionId={sessionId}
                 intent={agentSwitchIntent}
