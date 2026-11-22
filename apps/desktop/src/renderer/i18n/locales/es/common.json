@@ -14309,6 +14309,7 @@
       "pluginSenderFallback": "Complemento",
       "botRowAria": "Mensaje del amigo \"{{sender}}\" en cola",
       "dragAria": "Arrastra el mensaje en cola {{index}} para reordenarlo",
+      "steerHeldForAgySwitch": "Este mensaje espera a que confirmes el cambio de permisos; hasta entonces no se puede usar «Incorporar».",
       "steerAction": "Incorporar",
       "steerRunningTip": "Incorpora este mensaje a la tarea en curso sin interrumpirla; se atenderá cuando termine la acción actual",
       "steerPausedTip": "Continuar la tarea y atender este mensaje primero",

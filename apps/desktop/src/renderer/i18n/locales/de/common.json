@@ -14194,6 +14194,7 @@
       "pluginSenderFallback": "Plugin",
       "botRowAria": "Nachricht von Freund „{{sender}}“ in der Warteschlange",
       "dragAria": "Nachricht {{index}} in der Warteschlange zum Umsortieren ziehen",
+      "steerHeldForAgySwitch": "Diese Nachricht wartet darauf, dass du die Änderung der Berechtigungen bestätigst. Vorher ist „Einbringen“ nicht möglich.",
       "steerAction": "Einbringen",
       "steerRunningTip": "Diese Nachricht in die laufende Aufgabe einbringen, ohne sie zu unterbrechen; sie wird nach Abschluss der aktuellen Aktion bearbeitet",
       "steerPausedTip": "Aufgabe fortsetzen und diese Nachricht zuerst bearbeiten",

@@ -14140,6 +14140,7 @@
       "pluginSenderFallback": "插件",
       "botRowAria": "夥伴「{{sender}}」傳來的排隊訊息",
       "dragAria": "拖動第 {{index}} 條待傳送訊息排序",
+      "steerHeldForAgySwitch": "這則訊息在等你確認權限的改變，確認前不能插話。",
       "steerAction": "插話",
       "steerRunningTip": "插話到當前任務，不打斷正在執行的工作，當前動作完成後優先處理這條訊息",
       "steerPausedTip": "繼續任務，並優先處理這條訊息",

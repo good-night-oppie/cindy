@@ -14140,6 +14140,7 @@
       "pluginSenderFallback": "插件",
       "botRowAria": "伙伴「{{sender}}」发来的排队消息",
       "dragAria": "拖动第 {{index}} 条待发送消息排序",
+      "steerHeldForAgySwitch": "这条消息在等你确认权限的改变，确认前不能插话。",
       "steerAction": "插话",
       "steerRunningTip": "插话到当前任务，不打断正在执行的工作，当前动作完成后优先处理这条消息",
       "steerPausedTip": "继续任务，并优先处理这条消息",

@@ -14140,6 +14140,7 @@
       "pluginSenderFallback": "プラグイン",
       "botRowAria": "仲間「{{sender}}」からのキュー内メッセージ",
       "dragAria": "キューの {{index}} 番目のメッセージをドラッグして並べ替え",
+      "steerHeldForAgySwitch": "このメッセージは権限の変更の確認を待っているため、確認するまで割り込みはできません。",
       "steerAction": "割り込み",
       "steerRunningTip": "実行中のタスクを中断せずに割り込み送信します。現在の操作が完了した後に優先して処理されます",
       "steerPausedTip": "タスクを続行し、このメッセージを優先して処理します",

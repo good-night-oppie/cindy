@@ -135,6 +135,7 @@ describe('getPendingQueueRowPresentation', () => {
       syntheticKind: null,
       canEdit: false,
       canSteer: true,
+      steerHeldForAgySwitch: false,
     });
   });
 
@@ -179,6 +180,7 @@ describe('getPendingQueueRowPresentation', () => {
       syntheticKind: null,
       canEdit: false,
       canSteer: false,
+      steerHeldForAgySwitch: false,
     });
   });
 
@@ -333,6 +335,21 @@ describe('resolveSoleSteerableQueuedMessage', () => {
 
   it('targets the only queued row so the composer shortcut can steer it', () => {
     expect(resolveSoleSteerableQueuedMessage([queuedMessage()], idle)).toBe('client-1');
+  });
+
+  // cindy#19 (QQ's ruling "A"): a message the host holds for the user's agreement to a permission
+  // change cannot be interjected. The composer's shortcut for the only queued row leaves it
+  // alone; the row keeps the action, marked as held. A scheduler prompt, which never could be
+  // interjected, is not marked.
+  it('never targets a message held for a permission confirmation, which keeps the action as held', () => {
+    const held = queuedMessage({ awaitsAgySwitchConfirmation: true });
+    expect(getPendingQueueRowPresentation(held)).toMatchObject({ canSteer: false, steerHeldForAgySwitch: true, canEdit: true });
+    expect(resolveSoleSteerableQueuedMessage([held], idle)).toBeNull();
+    expect(getPendingQueueRowPresentation(queuedMessage())).toMatchObject({ canSteer: true, steerHeldForAgySwitch: false });
+    expect(getPendingQueueRowPresentation(queuedMessage({
+      awaitsAgySwitchConfirmation: true,
+      origin: { kind: 'scheduler', scheduleId: 's', scheduleName: 'Daily' } as never,
+    }))).toMatchObject({ canSteer: false, steerHeldForAgySwitch: false });
   });
 
   it('never targets a hidden answered question reply, but still targets a supplement', () => {

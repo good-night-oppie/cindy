@@ -14140,6 +14140,7 @@
       "pluginSenderFallback": "플러그인",
       "botRowAria": "동반자 \"{{sender}}\"에서 온 대기 메시지",
       "dragAria": "큐의 {{index}}번째 메시지를 드래그해 순서 변경",
+      "steerHeldForAgySwitch": "이 메시지는 권한 변경 확인을 기다리고 있어, 확인 전에는 끼어들기를 할 수 없습니다.",
       "steerAction": "끼어들기",
       "steerRunningTip": "실행 중인 작업을 중단하지 않고 끼어듭니다. 현재 동작이 끝난 후 이 메시지를 우선 처리합니다",
       "steerPausedTip": "작업을 계속하고 이 메시지를 우선 처리합니다",

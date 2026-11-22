@@ -42,6 +42,14 @@ export interface PendingQueueRowPresentation {
   canEdit: boolean;
   canSteer: boolean;
   /**
+   * The message could be interjected but for one thing: the host held it because the task's
+   * pending switch into Antigravity changes its permissions and the user has not agreed yet.
+   * The host refuses to interject it (it would reach the engine the task still runs on), so
+   * `canSteer` is false and no shortcut acts on it; the queue keeps "Interject" in place,
+   * unavailable, with the reason.
+   */
+  steerHeldForAgySwitch: boolean;
+  /**
    * 带 [UI_ACTION_TRIGGER] 前缀的合成指令行(续跑重试、Mivo 图片按钮等都可能
    * 在 session 忙时排进 pendingQueue,drain 前的 projection 或 drain 被 busy
    * 挡住时会短暂/持续出现在队列面板)。裸 prompt 不能给用户看,面板按此标记
@@ -82,6 +90,8 @@ export function getPendingQueueRowPresentation(entry: QueuedMessage): PendingQue
   const isContinueTrigger =
     entry.text === CONTINUE_AFTER_APP_EXIT_PROMPT || entry.text === CONTINUE_AFTER_ERROR_PROMPT;
   const isPendingEnqueue = entry.isPendingEnqueue === true;
+  const couldSteer = !isPendingEnqueue && (isOrca || isSession || !isMachineGenerated) && !isSyntheticTrigger && !isAnswered;
+  const steerHeldForAgySwitch = couldSteer && entry.awaitsAgySwitchConfirmation === true;
 
   return {
     isOrca,
@@ -122,7 +132,8 @@ export function getPendingQueueRowPresentation(entry: QueuedMessage): PendingQue
     canEdit: !isPendingEnqueue && !isMachineGenerated && !isSyntheticTrigger && !isAnswered,
     // 协同或其他任务消息可以转为插话:插话不改正文与来源,主进程在接受后结清协同回报。
     // An answer already shown on its question card has no row, so no shortcut may act on it either.
-    canSteer: !isPendingEnqueue && (isOrca || isSession || !isMachineGenerated) && !isSyntheticTrigger && !isAnswered,
+    canSteer: couldSteer && !steerHeldForAgySwitch,
+    steerHeldForAgySwitch,
     isSyntheticTrigger,
     syntheticKind: isSyntheticTrigger ? (isContinueTrigger ? 'continue' : 'generic') : null,
   };

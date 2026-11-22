@@ -1,5 +1,5 @@
 import { buildQueueRowPresentation } from '@cindy/maker-shared/queue';
-import { useEffect, useState } from 'react';
+import { useEffect, useId, useState } from 'react';
 import { ArrowDown, ArrowUp, ChevronDown, ListEnd, Pencil, Trash2 } from 'lucide-react';
 import { useTranslation } from 'react-i18next';
 import type { QueuedMessage } from '@/lib/makerChatStore';
@@ -70,6 +70,10 @@ export function PendingQueueBubble({
   });
   const busy = Object.values(availability.actions).every((action) => action.disabled);
   const [open, setOpen] = useState(false);
+  // Held for the user's agreement to a permission change: the menu keeps "Interject", unavailable,
+  // with the reason written under it, so that opening the menu is enough to read it.
+  const steerHeld = presentation.steerHeldForAgySwitch && !availability.actions.steer.disabled;
+  const steerHeldReasonId = useId();
   const sentAt = new Date(entry.chatMessage.createdAt ?? 0).getTime();
   const [statusShown, setStatusShown] = useState(!localSend || Date.now() - sentAt >= 600);
   useEffect(() => {
@@ -121,7 +125,25 @@ export function PendingQueueBubble({
             </button>
           </DropdownMenuTrigger>
           <DropdownMenuContent align="end">
-            {!availability.actions.steer.disabled && (
+            {steerHeld ? (
+              <>
+                <DropdownMenuItem
+                  className="gap-2"
+                  disabled
+                  aria-describedby={steerHeldReasonId}
+                  data-steer-held="true"
+                >
+                  <ArrowUp size={16} className="shrink-0" />
+                  {t('newChat.pendingQueue.steerAction')}
+                </DropdownMenuItem>
+                <p
+                  id={steerHeldReasonId}
+                  className="max-w-[240px] px-2 pb-1 text-12 leading-[1.4] text-[var(--text-secondary)]"
+                >
+                  {t('newChat.pendingQueue.steerHeldForAgySwitch')}
+                </p>
+              </>
+            ) : !availability.actions.steer.disabled && (
               <DropdownMenuItem
                 className="gap-2"
                 onSelect={() => {
