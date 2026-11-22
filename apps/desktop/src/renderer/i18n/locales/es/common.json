@@ -4368,6 +4368,12 @@
         "emptyList": "Haga clic en \"Agregar proveedor\" a continuación para conectar su primera fuente de modelo",
         "emptyModelsConnected": "Conectado: descubriendo modelos disponibles. Si permanece vacío, inténtalo de nuevo en breve.",
         "discoveryFailed": {
+          "sandboxBlocked": "Linux impide iniciar bubblewrap. Permite su ejecución y vuelve a intentarlo.",
+          "networkIsolationUnavailable": "No se pudo iniciar el aislamiento de red. Comprueba que pasta e iproute2 estén instalados y puedan ejecutarse.",
+          "unsafeTaskDir": "No se puede aislar de forma segura la carpeta de tareas o de estado. Comprueba la carpeta y sus permisos.",
+          "sandboxUnsupported": "Este equipo no admite el aislamiento necesario para cargar los modelos.",
+          "agyProbeFailed": "Cindy no pudo cargar la lista de modelos de Antigravity. Vuelve a intentarlo.",
+          "agyCliUnavailable": "Cindy no puede ejecutar una versión compatible de Antigravity CLI. Instala o actualiza agy.",
           "bwrapMissing": "Antigravity necesita bubblewrap para cargar los modelos de forma aislada. Instala o repara bubblewrap en este equipo Linux y vuelve a intentarlo.",
           "network": "No se puede conectar con este proveedor, por lo que su lista de modelos no está disponible. Verifique la configuración de su red o proxy y luego vuelva a intentarlo.",
           "timeout": "Se agotó el tiempo de conexión con este proveedor, por lo que su lista de modelos no está disponible. Verifique su red y luego vuelva a intentarlo.",
@@ -4379,6 +4385,12 @@
           "empty": "Este proveedor no devolvió ningún modelo utilizable. Verifique el acceso a su cuenta y luego vuelva a intentarlo."
         },
         "discoveryFailedStale": {
+          "sandboxBlocked": "Linux impide iniciar bubblewrap. Permite su ejecución y vuelve a intentarlo.",
+          "networkIsolationUnavailable": "No se pudo iniciar el aislamiento de red. Comprueba que pasta e iproute2 estén instalados y puedan ejecutarse.",
+          "unsafeTaskDir": "No se puede aislar de forma segura la carpeta de tareas o de estado. Comprueba la carpeta y sus permisos.",
+          "sandboxUnsupported": "Este equipo no admite el aislamiento necesario para cargar los modelos.",
+          "agyProbeFailed": "Cindy no pudo cargar la lista de modelos de Antigravity. Vuelve a intentarlo.",
+          "agyCliUnavailable": "Cindy no puede ejecutar una versión compatible de Antigravity CLI. Instala o actualiza agy.",
           "bwrapMissing": "Antigravity necesita bubblewrap para cargar los modelos de forma aislada. Instala o repara bubblewrap en este equipo Linux y vuelve a intentarlo.",
           "network": "No se puede conectar con este proveedor. La lista a continuación corresponde a la última actualización exitosa. Verifique la configuración de su red o proxy y luego vuelva a intentarlo.",
           "timeout": "Se agotó el tiempo de conexión a este proveedor. La lista a continuación corresponde a la última actualización exitosa. Verifique su red y luego vuelva a intentarlo.",
@@ -14166,6 +14178,13 @@
       "listAria": "Modos de permisos",
       "autoFallback": "La revisión automática no está disponible temporalmente. Se cambió a los permisos predeterminados y se te pedirá autorización cuando sea necesario.",
       "modes": {
+        "agy": {
+          "isolated": "Antigravity puede modificar la carpeta de la tarea y sus ajustes, leer archivos necesarios del sistema y acceder a Internet. Las demás carpetas personales están ocultas. Cindy comparte el archivo de inicio de sesión local en modo de solo lectura si existe. Sus herramientas pueden solicitar acceso a otros archivos.",
+          "host": "Antigravity puede acceder a los archivos de tu cuenta, incluso fuera de la carpeta de la tarea. Revisa sus solicitudes antes de aprobarlas.",
+          "full": "Antigravity puede modificar los archivos de tu cuenta y usar la red. Cindy aprueba sus solicitudes sin preguntar.",
+          "autoIsolated": "Cindy revisa automáticamente las solicitudes. Antigravity puede modificar la carpeta de la tarea y sus ajustes, leer archivos necesarios del sistema y acceder a Internet. Las demás carpetas personales están ocultas. Cindy comparte el archivo de inicio de sesión local en modo de solo lectura si existe. Sus herramientas pueden solicitar acceso a otros archivos.",
+          "autoHost": "Cindy revisa automáticamente las solicitudes. Antigravity puede acceder a los archivos de tu cuenta, incluso fuera de la carpeta de la tarea. Revisa sus solicitudes antes de aprobarlas."
+        },
         "claude-code": {
           "ask": {
             "label": "Permisos predeterminados",
@@ -14803,6 +14822,12 @@
     "verificationFailed": "Cindy no pudo confirmar si se restauró el inicio de sesión de ChatGPT. Vuelve a comprobarlo."
   },
   "chat": {
+    "agyBlocked": "Cindy impidió que Antigravity intentara {{action}} «{{path}}» fuera de la carpeta de la tarea. Copia el archivo a esa carpeta para continuar.",
+    "agyFileActions": {
+      "read": "leer",
+      "write": "modificar",
+      "unknown": "usar"
+    },
     "agyIdleExit": "Antigravity se cerró mientras la tarea estaba inactiva. Envía un mensaje aquí para continuar.",
     "pluginModelRoute": {
       "routed": "eligió para esta tarea",

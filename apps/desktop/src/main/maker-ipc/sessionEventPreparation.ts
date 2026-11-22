@@ -1,3 +1,4 @@
+import { redactSensitiveText } from '@cindy/maker-shared/error-redaction';
 import { parseOutputLimitDetails } from '@cindy/maker-shared';
 import { NATIVE_SUBSCRIPTION_ACCOUNT } from '@cindy/maker-core';
 import { taskResultClientIdForInput } from '../../shared/botCollaboration.js';
@@ -202,7 +203,7 @@ export function prepareSessionEvent(
     // event as well would let older renderers adopt the notice as their active
     // assistant stream and overwrite/misdate the next model reply.
     const redacted = deps.redactEventForRenderer(event);
-    const data = redacted.data as { text?: unknown; message?: unknown } | null;
+    const data = redacted.data as { text?: unknown; message?: unknown; denial?: AgentMeta['agySandboxDenial'] } | null;
     const text = agyFileAccess ? data?.message : data?.text;
     const inputId = deps.agentInputCoordinatorHolder?.getActiveInputClientId(session.id, event.sessionTurnGeneration);
     // Private-message visibility is still owned by the accepted input, even
@@ -215,7 +216,10 @@ export function prepareSessionEvent(
       : event.agentMeta?.botPrivateReply;
     if (typeof text === 'string') {
       const visibility = typeof privateReply === 'boolean' ? { botPrivateReply: privateReply } : null;
-      onStandaloneTextEvent(session.id, text, agyFileAccess ? { ...visibility, agyFileAccessNotice: true } : visibility);
+      const denial = notice?.reason === 'agy_sandbox_blocked' ? data?.denial : undefined;
+      const blocked = denial && typeof denial.path === 'string' && ['read', 'write', 'unknown'].includes(denial.kind)
+        ? { agySandboxDenial: { kind: denial.kind, path: redactSensitiveText(denial.path) } } : {};
+      onStandaloneTextEvent(session.id, text, agyFileAccess ? { ...visibility, ...blocked, agyFileAccessNotice: true } : visibility);
     }
     return;
   }

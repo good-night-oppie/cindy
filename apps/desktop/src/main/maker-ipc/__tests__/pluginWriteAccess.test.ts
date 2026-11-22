@@ -1,3 +1,4 @@
+import { withAgyPermissionTransition } from '../agyPermissionLifecycle.js';
 import { Session } from '../../../../../../packages/maker-core/src/session.js';
 import { readFileSync } from 'node:fs';
 import { describe, expect, it, vi } from 'vitest';
@@ -49,7 +50,7 @@ function fixture(platform = process.platform) {
  let remote = false;
  const persistedResults = new WeakSet<object>();
  const forgetGrants = vi.fn();
- const settingDeps = {...deps, process: {platform}, syncBotLinkedLanePermissions: vi.fn(async()=>{}), forgetCredentialGrants:forgetGrants, log:{warn:vi.fn()}, ipcMain:{handle:(_name:unknown,fn:typeof setMode)=>{setMode=fn;}}, MAKER_INVOKE:{SET_PERMISSION_MODE:'permission'}, isDeviceLinkInvoke:()=>remote, assertTrustedAppRendererEvent:()=>{}, assertReviewSettingsUnlocked:async()=>{}, isSessionPermissionMode:()=>true, throwIpcError:(code:string,message:string)=>{throw Object.assign(Error(message),{code});}, persistPermissionModeWithoutRuntime:async(_id:string,mode:string)=>(await epoch.client.tx('bots.persistSessionPermission',{mode})).updated, markRemoteSettingPersistedInsideHandler:(result:object)=>persistedResults.add(result)};
+ const settingDeps = {...deps, botPermissionTargets: async () => [], withAgyPermissionTransition: (targets: Parameters<typeof withAgyPermissionTransition>[0], mode: string, maker: Parameters<typeof withAgyPermissionTransition>[2], commit: Parameters<typeof withAgyPermissionTransition>[3]) => withAgyPermissionTransition(targets, mode, maker, commit, platform), process: {platform}, syncBotLinkedLanePermissions: vi.fn(async()=>{}), forgetCredentialGrants:forgetGrants, log:{warn:vi.fn()}, ipcMain:{handle:(_name:unknown,fn:typeof setMode)=>{setMode=fn;}}, MAKER_INVOKE:{SET_PERMISSION_MODE:'permission'}, isDeviceLinkInvoke:()=>remote, assertTrustedAppRendererEvent:()=>{}, assertReviewSettingsUnlocked:async()=>{}, isSessionPermissionMode:()=>true, throwIpcError:(code:string,message:string)=>{throw Object.assign(Error(message),{code});}, persistPermissionModeWithoutRuntime:async(_id:string,mode:string)=>(await epoch.client.tx('bots.persistSessionPermission',{mode})).updated, markRemoteSettingPersistedInsideHandler:(result:object)=>persistedResults.add(result)};
  new Function(...Object.keys(settingDeps), settingJs)(...Object.values(settingDeps));
  expect(setMode, 'SET_PERMISSION_MODE source extraction must register its handler').toBeTypeOf('function');
  const planPersist=vi.fn(async(_id:string,patch:{planModeEnabled:boolean})=>{history.planModeEnabled=patch.planModeEnabled;});

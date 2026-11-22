@@ -102,7 +102,7 @@ export class AgyTranslator {
             // The write notice above already told the user about this step.
             if (!writeOutside && !this.sandboxNotified.has(denial.path)) {
               this.sandboxNotified.add(denial.path);
-              event('error', { message: agySandboxBlockedText(denial), isTerminal: false, reason: 'agy_sandbox_blocked' });
+              event('error', { message: agySandboxBlockedText(denial, this.files?.locale?.()), isTerminal: false, reason: 'agy_sandbox_blocked', denial });
             }
           }
           event('tool_result_full', { toolUseId: id, fullText, isError: tool.status === 'failed' });
@@ -159,10 +159,11 @@ export function agyToolPaths(tool: AcpRecord, homeDir: string): string[] {
   return out;
 }
 
-/** `[agy_sandbox_blocked]` code + English fallback; zh/en wording pending JJ (cindy#1). */
-export function agySandboxBlockedText(denial: AgySandboxDenial): string {
+/** Human-readable fallback for clients without structured file access cards. */
+export function agySandboxBlockedText(denial: AgySandboxDenial, locale?: string | null): string {
   const copy = AGY_SANDBOX_USER_COPY_DRAFT.blocked;
-  return `[agy_sandbox_blocked] ${copy.en.replace('{action}', copy.action[denial.kind].en).replace('{path}', denial.path)}`;
+  const lang = agyCopyLocale(locale);
+  return copy[lang].replace('{action}', copy.action[denial.kind][lang]).replace('{path}', () => denial.path);
 }
 
 function finite(value: unknown): value is number {

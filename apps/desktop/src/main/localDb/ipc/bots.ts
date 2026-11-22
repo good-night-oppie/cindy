@@ -103,7 +103,8 @@ import {
   inferBotTemplatePresetId,
   isBotTemplatePresetId,
 } from '../../../shared/botTemplatePreset.js';
-import { syncBotLanePermission, syncBotLinkedLanePermissions, syncBotPermissionsByBotId } from '../../maker-ipc/botPermissionSync.js';
+import { withAgyPermissionTransition } from '../../maker-ipc/agyPermissionLifecycle.js';
+import { botPermissionTargets, syncBotLanePermission, syncBotLinkedLanePermissions, syncBotPermissionsByBotId } from '../../maker-ipc/botPermissionSync.js';
 import { withSessionPermissionChange } from '../../maker-ipc/sessionPermissionChange.js';
 import { withBotPermissionChangeForBot } from '../../maker-ipc/botPermissionDispatch.js';
 import { broadcastSessionPatched, restoreArchivedSessionForSend } from './sessions.js';
@@ -2273,7 +2274,7 @@ export async function updateBotProfile(raw: unknown, expectedVersion?: number,
     .from(botSessionLinks).where(and(eq(botSessionLinks.botId, id),
       inArray(botSessionLinks.role, ['canonical', 'group', 'channel', 'thread', 'routine']),
       isNull(botSessionLinks.archivedAt))) : [];
-  const commitProfile = async () => {
+  const commitProfile = async (alreadyLocked?: ReadonlySet<string>) => {
     await coordinateBotModelSelection(modelFollowers.map((link) => link.sessionId), async () => {
       // Hold send locks only through persistence/invalidation, not runtime
       // permission refresh, which may wait for the current turn to finish.
@@ -2301,7 +2302,7 @@ export async function updateBotProfile(raw: unknown, expectedVersion?: number,
           !isManagedBotAvatarUrl(patch.avatar),
         now,
       });
-    });
+    }, alreadyLocked);
     owner.assertCurrent();
     if (changesPermissions) {
       // Read the committed canonical row: profile and chat permissions change together,
@@ -2337,8 +2338,15 @@ export async function updateBotProfile(raw: unknown, expectedVersion?: number,
     // Serialize the DB commit and runtime continuation together with the chat
     // permission chip; native Session serialization alone only orders transports.
     await withBotPermissionChangeForBot(id, async () => {
-      if (canonical) await withSessionPermissionChange(canonical.sessionId, commitProfile);
-      else await commitProfile();
+      const prepare = async () => {
+        owner.assertCurrent();
+        const targets = await botPermissionTargets(client, { botId: id });
+        owner.assertCurrent();
+        await withAgyPermissionTransition(targets, botSessionPermissionMode(normalizedNextConfig), getMakerIfReady(), commitProfile,
+          process.platform, modelFollowers.map(row => row.sessionId));
+      };
+      if (canonical) await withSessionPermissionChange(canonical.sessionId, prepare);
+      else await prepare();
     });
   } else await commitProfile();
   // The files are the user's editing surface: rewrite only the file whose content this

@@ -4312,6 +4312,12 @@
         "emptyList": "Klicke unten auf „Anbieter hinzufügen“, um deine erste Modellquelle zu verbinden",
         "emptyModelsConnected": "Verbunden — verfügbare Modelle werden ermittelt. Falls die Liste leer bleibt, versuche es in Kürze erneut.",
         "discoveryFailed": {
+          "sandboxBlocked": "Linux blockiert bubblewrap. Erlaube die Ausführung und versuche es erneut.",
+          "networkIsolationUnavailable": "Die Netzwerkisolierung konnte nicht starten. Prüfe, ob pasta und iproute2 installiert und ausführbar sind.",
+          "unsafeTaskDir": "Der Aufgaben- oder Statusordner lässt sich nicht sicher isolieren. Prüfe den Ordner und seine Berechtigungen.",
+          "sandboxUnsupported": "Dieser Computer unterstützt die zum Laden der Modelle erforderliche Isolierung nicht.",
+          "agyProbeFailed": "Cindy konnte die Antigravity-Modellliste nicht laden. Versuche es erneut.",
+          "agyCliUnavailable": "Cindy kann keine unterstützte Antigravity CLI ausführen. Installiere oder aktualisiere agy.",
           "bwrapMissing": "Antigravity benötigt bubblewrap, um Modelle isoliert zu laden. Installiere oder repariere bubblewrap auf diesem Linux-Rechner und versuche es erneut.",
           "network": "Dieser Anbieter ist nicht erreichbar, daher ist seine Modellliste nicht verfügbar. Prüfe deine Netzwerk- oder Proxy-Einstellungen und versuche es erneut.",
           "timeout": "Zeitüberschreitung bei der Verbindung zu diesem Anbieter, daher ist seine Modellliste nicht verfügbar. Prüfe dein Netzwerk und versuche es erneut.",
@@ -4323,6 +4329,12 @@
           "empty": "Dieser Anbieter hat keine nutzbaren Modelle zurückgegeben. Prüfe die Zugriffsrechte deines Kontos und versuche es erneut."
         },
         "discoveryFailedStale": {
+          "sandboxBlocked": "Linux blockiert bubblewrap. Erlaube die Ausführung und versuche es erneut.",
+          "networkIsolationUnavailable": "Die Netzwerkisolierung konnte nicht starten. Prüfe, ob pasta und iproute2 installiert und ausführbar sind.",
+          "unsafeTaskDir": "Der Aufgaben- oder Statusordner lässt sich nicht sicher isolieren. Prüfe den Ordner und seine Berechtigungen.",
+          "sandboxUnsupported": "Dieser Computer unterstützt die zum Laden der Modelle erforderliche Isolierung nicht.",
+          "agyProbeFailed": "Cindy konnte die Antigravity-Modellliste nicht laden. Versuche es erneut.",
+          "agyCliUnavailable": "Cindy kann keine unterstützte Antigravity CLI ausführen. Installiere oder aktualisiere agy.",
           "bwrapMissing": "Antigravity benötigt bubblewrap, um Modelle isoliert zu laden. Installiere oder repariere bubblewrap auf diesem Linux-Rechner und versuche es erneut.",
           "network": "Dieser Anbieter ist nicht erreichbar. Die Liste unten stammt von der letzten erfolgreichen Aktualisierung. Prüfe deine Netzwerk- oder Proxy-Einstellungen und versuche es erneut.",
           "timeout": "Zeitüberschreitung bei der Verbindung zu diesem Anbieter. Die Liste unten stammt von der letzten erfolgreichen Aktualisierung. Prüfe dein Netzwerk und versuche es erneut.",
@@ -14051,6 +14063,13 @@
       "listAria": "Berechtigungsmodi",
       "autoFallback": "Die automatische Prüfung ist vorübergehend nicht verfügbar. Auf Standardberechtigungen umgestellt; bei Bedarf wirst du gefragt.",
       "modes": {
+        "agy": {
+          "isolated": "Antigravity kann den Aufgabenordner und seine Einstellungen ändern, benötigte Systemdateien lesen und das Internet nutzen. Andere persönliche Ordner sind verborgen. Cindy gibt die lokale Anmeldedatei schreibgeschützt frei, sofern sie vorhanden ist. Cindy-Werkzeuge können Zugriff auf weitere Dateien anfragen.",
+          "host": "Antigravity kann auch außerhalb des Aufgabenordners auf Dateien deines Kontos zugreifen. Prüfe Anfragen vor der Freigabe.",
+          "full": "Antigravity kann Dateien deines Kontos ändern und das Netzwerk nutzen. Cindy genehmigt Anfragen ohne Rückfrage.",
+          "autoIsolated": "Cindy prüft Freigabeanfragen automatisch. Antigravity kann den Aufgabenordner und seine Einstellungen ändern, benötigte Systemdateien lesen und das Internet nutzen. Andere persönliche Ordner sind verborgen. Cindy gibt die lokale Anmeldedatei schreibgeschützt frei, sofern sie vorhanden ist. Cindy-Werkzeuge können Zugriff auf weitere Dateien anfragen.",
+          "autoHost": "Cindy prüft Freigabeanfragen automatisch. Antigravity kann auch außerhalb des Aufgabenordners auf Dateien deines Kontos zugreifen. Prüfe Anfragen vor der Freigabe."
+        },
         "claude-code": {
           "ask": {
             "label": "Standardberechtigungen",
@@ -14681,6 +14700,12 @@
     "verificationFailed": "Cindy konnte nicht bestätigen, ob die ChatGPT-Anmeldung wiederhergestellt ist. Prüfe es erneut."
   },
   "chat": {
+    "agyBlocked": "Antigravity wollte „{{path}}“ außerhalb des Aufgabenordners {{action}}. Cindy hat dies blockiert. Kopiere die Datei in den Aufgabenordner, um fortzufahren.",
+    "agyFileActions": {
+      "read": "lesen",
+      "write": "ändern",
+      "unknown": "verwenden"
+    },
     "agyIdleExit": "Antigravity wurde beendet, während diese Aufgabe inaktiv war. Sende hier eine Nachricht, um fortzufahren.",
     "pluginModelRoute": {
       "routed": "hat für diese Aufgabe gewählt:",

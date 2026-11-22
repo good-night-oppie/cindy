@@ -325,6 +325,20 @@ describe('probeAgySystemSandbox', () => {
     const pastaCall = calls.find(c => c[0]!.endsWith('pasta'))!;
     expect(pastaCall).toEqual(expect.arrayContaining(['agy-net-guard', '/usr/sbin/ip', '/bin/true']));
   });
+  it('checks only the mount namespace for Full access when pasta is absent', () => {
+    const calls: string[][] = [];
+    const deps = { platform: 'linux' as const, exists: (p: string) => p === '/usr/bin/bwrap',
+      run: (cmd: string, args: readonly string[]) => {
+        calls.push([cmd, ...args]);
+        return { status: 0, stdout: 'bubblewrap 0.9.0', stderr: '' };
+      } };
+    expect(probeAgySystemSandbox(deps, 'full')).toMatchObject({ ok: true, bwrapPath: '/usr/bin/bwrap' });
+    expect(calls).toHaveLength(2);
+    expect(calls[1]).toEqual(['/usr/bin/bwrap', '--die-with-parent', '--bind', '/', '/', '--dev-bind', '/dev', '/dev', '--', '/bin/true']);
+    expect(probeAgySystemSandbox(deps)).toMatchObject({ ok: false, reason: 'network-isolation-missing' });
+    expect(probeAgySystemSandbox({ ...deps, exists: () => false }, 'full')).toMatchObject({ ok: false, reason: 'bwrap-missing' });
+  });
+
   it('reports a missing bubblewrap', () => {
     expect(probeAgySystemSandbox({ platform: 'linux', exists: () => false })).toMatchObject({ ok: false, reason: 'bwrap-missing' });
   });

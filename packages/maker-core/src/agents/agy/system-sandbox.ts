@@ -20,6 +20,7 @@
  * 供 translator 在工具结果后追加宿主标注、并给用户白话提示（文案待 JJ 定稿）。
  */
 
+import { AgyBinaryUnavailableError } from './version.js';
 import { execFile, spawnSync } from 'node:child_process';
 import { existsSync, lstatSync, readFileSync, readlinkSync, realpathSync } from 'node:fs';
 import { chmod, mkdir, mkdtemp, opendir, lstat, writeFile } from 'node:fs/promises';
@@ -174,15 +175,16 @@ export function parseBwrapVersion(text: string): [number, number, number] | null
  */
 type ProbeResult = ReturnType<NonNullable<AgySandboxProbeDeps['run']>>;
 
-export function probeAgySystemSandbox(deps: AgySandboxProbeDeps = {}): AgySandboxProbe {
-  const steps = sandboxProbeSteps(deps);
+export function probeAgySystemSandbox(deps?: AgySandboxProbeDeps, mode?: 'sandbox'): AgySandboxProbe;
+export function probeAgySystemSandbox(deps: AgySandboxProbeDeps, mode: 'full'): BwrapProbe;
+export function probeAgySystemSandbox(deps: AgySandboxProbeDeps = {}, mode: 'sandbox' | 'full' = 'sandbox'): AgySandboxProbe | BwrapProbe {
+  const steps = mode === 'full' ? fullAccessProbeSteps(deps) : sandboxProbeSteps(deps);
   let step = steps.next();
   while (!step.done) step = steps.next((deps.run ?? defaultRun)(...step.value));
   return step.value;
 }
 
-async function probeForLaunch(): Promise<AgySandboxProbe> {
-  const steps = sandboxProbeSteps({});
+async function probeForLaunch<T>(steps: Generator<[string, readonly string[]], T, ProbeResult>): Promise<T> {
   let step = steps.next();
   while (!step.done) {
     const [command, args] = step.value;
@@ -195,7 +197,9 @@ async function probeForLaunch(): Promise<AgySandboxProbe> {
   return step.value;
 }
 
-function* sandboxProbeSteps(deps: AgySandboxProbeDeps): Generator<[string, readonly string[]], AgySandboxProbe, ProbeResult> {
+type BwrapProbe = Pick<AgySandboxProbeOk, 'ok' | 'bwrapPath' | 'version' | 'supportsDisableUserns'> | AgySandboxProbeFailed;
+
+function* bwrapProbeSteps(deps: AgySandboxProbeDeps, trialArgs: string[]): Generator<[string, readonly string[]], BwrapProbe, ProbeResult> {
   const platform = deps.platform ?? process.platform;
   if (platform !== 'linux') {
     return { ok: false, reason: 'unsupported-platform', detail: `platform ${platform}` };
@@ -209,11 +213,23 @@ function* sandboxProbeSteps(deps: AgySandboxProbeDeps): Generator<[string, reado
   if (v.status !== 0 || !parsed) {
     return { ok: false, reason: 'bwrap-missing', detail: (v.stderr || v.stdout).trim() || 'bwrap --version failed' };
   }
-  const trial = yield [bwrapPath, ['--unshare-all', '--share-net', '--die-with-parent',
-    '--ro-bind', '/', '/', '--proc', '/proc', '--dev', '/dev', '--', '/bin/true']];
+  const trial = yield [bwrapPath, [...trialArgs, '--', '/bin/true']];
   if (trial.status !== 0) {
     return { ok: false, reason: 'bwrap-blocked', detail: trial.stderr.trim() || `exit ${trial.status}` };
   }
+  const [maj, min] = parsed;
+  return { ok: true, bwrapPath, version: parsed.join('.'), supportsDisableUserns: maj > 0 || min >= 8 };
+}
+
+function fullAccessProbeSteps(deps: AgySandboxProbeDeps) {
+  return bwrapProbeSteps(deps, ['--die-with-parent', '--bind', '/', '/', '--dev-bind', '/dev', '/dev']);
+}
+
+function* sandboxProbeSteps(deps: AgySandboxProbeDeps): Generator<[string, readonly string[]], AgySandboxProbe, ProbeResult> {
+  const base = yield* bwrapProbeSteps(deps, ['--unshare-all', '--share-net', '--die-with-parent',
+    '--ro-bind', '/', '/', '--proc', '/proc', '--dev', '/dev']);
+  if (!base.ok) return base;
+  const exists = deps.exists ?? existsSync;
   const pastaPath = (deps.pastaCandidates ?? DEFAULT_PASTA_CANDIDATES).find(p => exists(p));
   if (!pastaPath) return { ok: false, reason: 'network-isolation-missing', detail: 'pasta (passt) not installed' };
   const ipPath = (deps.ipCandidates ?? DEFAULT_IP_CANDIDATES).find(p => exists(p));
@@ -222,12 +238,11 @@ function* sandboxProbeSteps(deps: AgySandboxProbeDeps): Generator<[string, reado
   if (netTrial.status !== 0) {
     return { ok: false, reason: 'network-isolation-missing', detail: netTrial.stderr.trim() || `pasta exit ${netTrial.status}` };
   }
-  const [maj, min] = parsed;
   const pastaHelp = yield [pastaPath, ['--help']];
   const pastaSupportsDnsHost = `${pastaHelp.stdout}
 ${pastaHelp.stderr}`.includes('--dns-host');
   const setprivPath = ['/usr/bin/setpriv', '/bin/setpriv'].find(p => exists(p));
-  return { ok: true, bwrapPath, pastaPath, ipPath, version: parsed.join('.'), supportsDisableUserns: maj > 0 || min >= 8,
+  return { ...base, pastaPath, ipPath,
     pastaSupportsDnsHost, ...(setprivPath ? { setprivPath } : {}) };
 }
 
@@ -450,11 +465,22 @@ export function filterAgyUnsandboxedEnv(env: NodeJS.ProcessEnv, homeDir: string,
   return out;
 }
 
+function resolveAgyBinaryPath(binaryPath: string, fs: AgySandboxFsView): string {
+  try {
+    return fs.realpath(binaryPath);
+  } catch (error) {
+    if ((error as NodeJS.ErrnoException).code === 'ENOENT') {
+      throw new AgyBinaryUnavailableError('Antigravity CLI was not found on this computer.', 'agy_binary_missing');
+    }
+    throw error;
+  }
+}
+
 export function buildAgySandboxLaunch(input: AgySandboxLaunchInput): AgySandboxLaunch {
   const fs = input.fs ?? realFs;
   const taskDir = fs.realpath(input.taskDir);
   const homeDir = fs.realpath(input.homeDir);
-  const binary = fs.realpath(input.binaryPath);
+  const binary = resolveAgyBinaryPath(input.binaryPath, fs);
   const writable = (input.writableDirs ?? []).map(w => ({ source: fs.realpath(w.source), target: w.target ?? fs.realpath(w.source) }));
   assertAgyTaskDirPaths(taskDir, homeDir, writable.flatMap(w => [w.source, w.target]));
   const readOnly = (input.readOnlyPaths ?? []).filter(p => fs.exists(p)).map(p => fs.realpath(p));
@@ -597,7 +623,7 @@ export async function prepareAgySandboxedLaunch(
     hardlinkScanLimit?: number;
   },
 ): Promise<AgySandboxLaunch & { hardlinkScan: HardlinkScanResult }> {
-  const probe = input.probe ?? await probeForLaunch();
+  const probe = input.probe ?? await probeForLaunch(sandboxProbeSteps({}));
   if (!probe.ok) throw new AgySandboxUnavailableError(probe.reason, probe.detail);
   const hardlinkScan = await scanTaskDirForHardlinks(input.taskDir, input.hardlinkScanLimit);
   if (hardlinkScan.hardlinked) {
@@ -668,8 +694,8 @@ export function agySandboxDenialModelNote(denial: AgySandboxDenial): string {
  */
 export const AGY_SANDBOX_USER_COPY_DRAFT = {
   blocked: {
-    'zh-CN': 'Antigravity 想{action}任务文件夹外的「{path}」，Cindy 已拦下。Antigravity 只能用这个任务文件夹里的文件。如果需要这个文件，请把它复制到任务文件夹里，再让 Antigravity 继续。',
-    en: 'Antigravity tried to {action} "{path}", which is outside this task\'s folder. Cindy blocked it. Antigravity can only use files in the task folder. If it needs this file, copy it into the task folder and ask Antigravity to continue.',
+    "zh-CN": "Antigravity 想{action}任务文件夹外的「{path}」，已被拦下。在这个权限档位下，Antigravity 碰不到任务文件夹以外的这个文件。如果确实需要它，可以把它复制到任务文件夹里，再让 Antigravity 继续。",
+    "en": "Antigravity tried to {action} “{path}”, which is outside this task's folder, and was blocked. At this permission level, Antigravity can't reach this file outside the task folder. If it really needs the file, copy it into the task folder and ask Antigravity to continue.",
     action: { read: { 'zh-CN': '读取', en: 'read' }, write: { 'zh-CN': '修改', en: 'change' }, unknown: { 'zh-CN': '使用', en: 'use' } },
   },
   unavailable: {
@@ -710,16 +736,16 @@ export function buildAgyFullAccessLaunch(input: {
       a.push('--ro-bind', token, token);
     }
   }
-  a.push('--chdir', taskDir, '--', fs.realpath(input.binaryPath), ...input.args);
+  a.push('--chdir', taskDir, '--', resolveAgyBinaryPath(input.binaryPath, fs), ...input.args);
   return { command: input.bwrapPath, args: a, env: filterAgyUnsandboxedEnv(input.env, homeDir, taskDir, input.passEnvKeys) };
 }
 
 /** Probe, create the private state root, and build the full-access launch. Fails closed like the sandbox. */
 export async function prepareAgyFullAccessLaunch(input: {
   binaryPath: string; args: readonly string[]; taskDir: string; homeDir: string; stateRoot: string;
-  env: NodeJS.ProcessEnv; passEnvKeys?: readonly string[]; probe?: AgySandboxProbe; shareCliLogin?: boolean;
+  env: NodeJS.ProcessEnv; passEnvKeys?: readonly string[]; probe?: BwrapProbe; shareCliLogin?: boolean;
 }): Promise<AgySandboxLaunch> {
-  const probe = input.probe ?? await probeForLaunch();
+  const probe = input.probe ?? await probeForLaunch(fullAccessProbeSteps({}));
   if (!probe.ok) throw new AgySandboxUnavailableError(probe.reason, probe.detail);
   const stateMounts = await ensureAgyPrivateState(input.stateRoot, input.homeDir);
   return buildAgyFullAccessLaunch({ ...input, bwrapPath: probe.bwrapPath, stateMounts });

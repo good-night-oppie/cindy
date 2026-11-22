@@ -1,3 +1,4 @@
+import { assertSessionNotRestarting } from '../../../maker-ipc/sendToSessionLock.js';
 import { seedBotReadPositions, markBotReadPositions, pruneBotReadState as pruneHostBotReads } from '../../../maker-ipc/botReadStateStore';
 import { listBotDelegationHistory } from '../../../maker-ipc/botDelegationHistory';
 import { readBotResponsibilityScope } from '../../../maker-ipc/botTaskCreation';
@@ -167,7 +168,7 @@ vi.mock('../../client/current', () => ({
       return current;
     };
   })(),
-  getDbClient: () => ({ drizzle: h.db, tx: h.tx }),
+  getDbClient: () => ({ drizzle: h.db, tx: h.tx, query: async (sql: string, params: unknown[]) => h.sqlite!.prepare(sql).all(...params) }),
   tryGetDbClient: () => ({ drizzle: h.db, tx: h.tx }),
 }));
 vi.mock('../../../security/trustedAppRenderer.js', () => ({
@@ -1407,6 +1408,43 @@ describe('Bot canonical Session lifecycle', () => {
     const updated = await invoke('local-db:bots:update', { id: 'bot-1', name: 'New name' });
     expect(updated.name).toBe('New name');
     expect(updated.invitation.stage).toBe('avatar');
+  });
+
+  it('keeps the saved bot profile and every linked mode until the last Full access runtime has exited', async () => {
+    const profile = await invoke('local-db:bots:update', { id: 'bot-1', capabilities: { permissions: 'trusted' } });
+    const chat = await invoke('local-db:bots:create-canonical-session', {
+      botId: 'bot-1', expectedCanonicalSessionId: null, expectedProfileVersion: profile.currentVersion,
+    });
+    const lane = await ensureBotChannelLaneSession({ botId: 'bot-1', routeKey: 'im:feishu:fixture:g:1', title: 'Fixture' });
+    if (!lane.ok) throw new Error(lane.message);
+    const ids = [chat.session.id, lane.sessionId];
+    const modes = () => h.sqlite!.prepare('SELECT permission_mode FROM sessions WHERE id IN (?, ?)').pluck().all(...ids);
+    const status = Object.getOwnPropertyDescriptor(process, 'platform')!;
+    const live = { agentKind: 'agy', stablePermissionModeState: { mode: 'bypassPermissions' },
+      isTurnRunning: () => false, compactSession: vi.fn(), setPermissionMode: vi.fn() };
+    const running = new Set(ids);
+    h.getSession.mockImplementation(id => id && running.has(id) ? live : null);
+    h.closeSession.mockRejectedValueOnce(new Error('Fixture close unconfirmed'));
+    try {
+      Object.defineProperty(process, 'platform', { ...status, value: 'linux' });
+      const change = () => invoke('local-db:bots:update', { id: 'bot-1', capabilities: { permissions: 'ask' } });
+      await expect(change()).rejects.toThrow('Fixture close unconfirmed');
+      expect(modes()).toEqual(['bypassPermissions', 'bypassPermissions']);
+      expect((await invoke('local-db:bots:get', 'bot-1')).capabilities.permissions).toBe('trusted');
+      expect(live.setPermissionMode).not.toHaveBeenCalled();
+      h.closeSession.mockImplementation(async (...args: unknown[]) => {
+        expect(modes()).toEqual(['bypassPermissions', 'bypassPermissions']);
+        for (const sessionId of ids) expect(() => assertSessionNotRestarting(sessionId)).toThrow('restart');
+        running.delete(args[0] as string);
+      });
+      await change();
+      expect(running.size).toBe(0);
+      expect(modes()).toEqual(['ask', 'ask']);
+      expect((await invoke('local-db:bots:get', 'bot-1')).capabilities.permissions).toBe('ask');
+    } finally {
+      Object.defineProperty(process, 'platform', status);
+      h.closeSession.mockReset().mockResolvedValue(undefined);
+    }
   });
 
   it.each([['ask', 'ask'], ['auto', 'auto'], ['trusted', 'bypassPermissions']])('applies saved %s permissions to the existing chat and live runtime', async (permissions, mode) => {

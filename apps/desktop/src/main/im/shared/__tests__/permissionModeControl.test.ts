@@ -11,6 +11,8 @@ vi.mock('../sessionRepo', () => ({
 }));
 
 import { ui } from '../../wecom/uiText';
+import { withAgyPermissionTransition } from '../../../maker-ipc/agyPermissionLifecycle';
+import { withSendToSessionLock } from '../../../maker-ipc/sendToSessionLock';
 import {
   changeSessionPermissionMode,
   permissionModeCommandContext,
@@ -29,6 +31,41 @@ const modes = [
 ];
 
 describe('shared IM permission mode control', () => {
+  it.each([true, false])('fences IM dispatch until agy close settles (success: %s)', async success => {
+    const id = 'agy-im-session';
+    const setPermissionMode = vi.fn();
+    const live = { agentKind: 'agy', stablePermissionModeState: { mode: 'bypassPermissions' },
+      isTurnRunning: () => false, setPermissionMode };
+    let closed = false;
+    let finish!: () => void;
+    const closing = new Promise<void>(resolve => { finish = resolve; });
+    const runtime = {
+      getSession: () => closed ? null : live,
+      closeSession: vi.fn(async () => {
+        await closing;
+        if (!success) throw new Error('close failed');
+        closed = true;
+      }),
+    };
+    const persist = vi.fn(async () => {});
+    const change = changeSessionPermissionMode({
+      sessionId: id, mode: 'auto', modes, readPreviousMode: async () => 'bypassPermissions',
+      getLiveSession: runtime.getSession, persist,
+      withRuntimeTransition: (previousMode, commit) => withAgyPermissionTransition(
+        [{ sessionId: id, agentKind: 'agy', previousMode }], 'auto',
+        runtime as unknown as Parameters<typeof withAgyPermissionTransition>[2], commit, 'linux'),
+    });
+    await vi.waitFor(() => expect(runtime.closeSession).toHaveBeenCalledOnce());
+    const send = vi.fn(async () => {});
+    await expect(withSendToSessionLock(id, send)).rejects.toThrow(/restart/i);
+    expect(send).not.toHaveBeenCalled();
+    expect(persist).not.toHaveBeenCalled();
+    finish();
+    expect((await change).kind).toBe(success ? 'changed' : 'failed');
+    expect(persist).toHaveBeenCalledTimes(success ? 1 : 0);
+    expect(setPermissionMode).not.toHaveBeenCalled();
+  });
+
   beforeEach(() => {
     vi.clearAllMocks();
     mocks.readPermissionMode.mockResolvedValue('auto');

@@ -75,15 +75,12 @@ import { readImDefaultSettings } from '../defaultSettingsStore';
 import { decodeFeishuLaneUserId, type IdentityKey } from '@cindy/im';
 import {
   readModelRouteSnapshot,
-  readPermissionMode,
   switchSessionWorkingDir,
   touchUserSent,
   updateModelEffort,
-  updatePermissionMode,
 } from './sessionRepo';
 import { companionManagedCommandFallback } from './botCommands';
 import { markImSessionManualRouteOverride } from './manualRouteOverride';
-import { changeSessionPermissionMode } from './permissionModeControl';
 import type { ImCardBuilders } from './cardBuilders';
 import { enqueueAskCardPatch } from './askCardPatchQueue';
 import {
@@ -534,14 +531,11 @@ export function createCardActionHandler(
 
     // Validate against the bound agent's actual capabilities — single source of
     // truth is the agent module (e.g. claude-code/index.ts CLAUDE_PERMISSION_MODES).
-    const result = await changeSessionPermissionMode({
+    const result = await turnRunner.changePermissionMode({
       sessionId,
       mode,
       modes: getMaker().getCapabilities(agentKind).permissionModes,
       confirmedFullAccess: event.buttonId === 'permmode:confirm-full-access',
-      readPreviousMode: () => readPermissionMode(sessionId),
-      getLiveSession: () => turnRunner.getMakerSessionById(sessionId),
-      persist: (nextMode) => updatePermissionMode(sessionId, nextMode),
     });
 
     if (result.kind === 'confirmation-required') {
@@ -634,14 +628,11 @@ export function createCardActionHandler(
     }
     const agentKind: AgentKind =
       event.payload.agentKind === 'codex' ? 'codex' : adapter.config.agentKind;
-    const result = await changeSessionPermissionMode({
+    const result = await turnRunner.changePermissionMode({
       sessionId,
       mode: 'auto',
       modes: getMaker().getCapabilities(agentKind).permissionModes,
       confirmedFullAccess: false,
-      readPreviousMode: () => readPermissionMode(sessionId),
-      getLiveSession: () => turnRunner.getMakerSessionById(sessionId),
-      persist: (nextMode) => updatePermissionMode(sessionId, nextMode),
     });
     const label =
       result.kind === 'changed'

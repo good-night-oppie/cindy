@@ -1384,7 +1384,7 @@ export type DbTxArgsByName = {
   'bots.retireCloudCopy': { botId: string; at: number };
   'bots.deleteProfile': BotsDeleteProfileArgs;
   'bots.prepareProfileDeletion': { botId: string };
-  'bots.reconcileLanePermission': { sessionId: string };
+  'bots.reconcileLanePermission': { sessionId: string; preview?: boolean; expectedMode?: string };
   'bots.persistSessionPermission': { sessionId: string; mode: string };
   'bots.createGroupLane': BotGroupsCreateLaneArgs;
   'bots.createChannelLane': BotsCreateChannelLaneArgs;

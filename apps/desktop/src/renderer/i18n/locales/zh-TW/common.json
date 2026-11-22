@@ -4269,6 +4269,12 @@
         "emptyList": "點選左下角「新增供應商」連接你的第一個模型來源",
         "emptyModelsConnected": "已連線，正在自動發現可用模型；若持續為空，請稍後重試。",
         "discoveryFailed": {
+          "sandboxBlocked": "Linux 阻止了 bubblewrap 啟動。請允許它執行後重試。",
+          "networkIsolationUnavailable": "無法啟動網路隔離。請確認已安裝 pasta 和 iproute2 並允許執行，再試一次。",
+          "unsafeTaskDir": "無法安全隔離本機的任務或狀態資料夾。請檢查資料夾及其權限，再試一次。",
+          "sandboxUnsupported": "這台電腦不支援載入模型所需的隔離環境。",
+          "agyProbeFailed": "無法載入 Antigravity 模型清單，請重試。",
+          "agyCliUnavailable": "Cindy 無法執行受支援的 Antigravity CLI。請在本機安裝或更新 agy 後重試。",
           "bwrapMissing": "Antigravity 需要 bubblewrap 才能隔離載入模型。請在這台 Linux 電腦上安裝或修復 bubblewrap，然後重試。",
           "network": "無法連線到該供應商，因此拿不到模型列表。請檢查網路或 Proxy 設定後重試。",
           "timeout": "連線至該供應商逾時，因此拿不到模型列表。請檢查網路後重試。",
@@ -4280,6 +4286,12 @@
           "empty": "該供應商沒有返回任何可用模型。請確認帳號權限後重試。"
         },
         "discoveryFailedStale": {
+          "sandboxBlocked": "Linux 阻止了 bubblewrap 啟動。請允許它執行後重試。",
+          "networkIsolationUnavailable": "無法啟動網路隔離。請確認已安裝 pasta 和 iproute2 並允許執行，再試一次。",
+          "unsafeTaskDir": "無法安全隔離本機的任務或狀態資料夾。請檢查資料夾及其權限，再試一次。",
+          "sandboxUnsupported": "這台電腦不支援載入模型所需的隔離環境。",
+          "agyProbeFailed": "無法載入 Antigravity 模型清單，請重試。",
+          "agyCliUnavailable": "Cindy 無法執行受支援的 Antigravity CLI。請在本機安裝或更新 agy 後重試。",
           "bwrapMissing": "Antigravity 需要 bubblewrap 才能隔離載入模型。請在這台 Linux 電腦上安裝或修復 bubblewrap，然後重試。",
           "network": "無法連線到該供應商，下面是上次取得的模型列表。請檢查網路或 Proxy 設定後重試。",
           "timeout": "連線至該供應商逾時，下面是上次取得的模型列表。請檢查網路後重試。",
@@ -13997,6 +14009,13 @@
       "listAria": "權限模式",
       "autoFallback": "自動審核暫時不可用，已切換為預設權限；需要時會詢問你。",
       "modes": {
+        "agy": {
+          "isolated": "Antigravity 可修改工作資料夾和自己的設定、讀取必要的系統檔案並連網。家目錄中的其他資料夾會隱藏。本機若有登入檔，Cindy 會以唯讀方式共用。Cindy 工具可能要求存取其他檔案。",
+          "host": "Antigravity 可存取你有權使用的檔案，包括工作資料夾外的檔案。允許前請檢查其要求。",
+          "full": "Antigravity 可修改你有權使用的檔案並連網。Cindy 會直接允許其要求。",
+          "autoIsolated": "Cindy 會自動審核操作要求。Antigravity 可修改工作資料夾和自己的設定、讀取必要的系統檔案並連網。家目錄中的其他資料夾會隱藏。本機若有登入檔，Cindy 會以唯讀方式共用。Cindy 工具可能要求存取其他檔案。",
+          "autoHost": "Cindy 會自動審核操作要求。Antigravity 可存取你有權使用的檔案，包括工作資料夾外的檔案。允許前請檢查其要求。"
+        },
         "claude-code": {
           "ask": {
             "label": "預設權限",
@@ -14621,6 +14640,12 @@
     "verificationFailed": "暫時無法確認 ChatGPT 登入是否已恢復，請重新檢測。"
   },
   "chat": {
+    "agyBlocked": "Antigravity 想{{action}}工作資料夾外的「{{path}}」，Cindy 已攔下。如需使用該檔案，請先將它複製到工作資料夾。",
+    "agyFileActions": {
+      "read": "讀取",
+      "write": "修改",
+      "unknown": "使用"
+    },
     "agyIdleExit": "任務閒置時 Antigravity 已結束。在這裡傳送訊息即可繼續。",
     "pluginModelRoute": {
       "routed": "為這個任務選了",

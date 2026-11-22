@@ -130,6 +130,7 @@ export interface PluginModelRouteNote {
 export interface CcMeta {
   /** A host-projected Antigravity file-access notice in this task's timeline. */
   agyFileAccessNotice?: true;
+  agySandboxDenial?: { kind: 'read' | 'write' | 'unknown'; path: string };
   /** 新任务「让插件选」的结果(宿主写入，非模型回复)。 */
   pluginModelRoute?: PluginModelRouteNote;
   /** Model boundary recorded by the host when the next input is dispatched. */

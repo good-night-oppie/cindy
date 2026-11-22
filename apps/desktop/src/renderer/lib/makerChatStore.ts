@@ -20013,7 +20013,7 @@ function mapServerMessages(serverMsgs: Message[]): ChatMessage[] {
     if (m.role === 'assistant' && m.agentMeta?.agyFileAccessNotice === true && typeof m.content === 'string') {
       return {
         clientId: m.clientId, role: 'assistant' as const, content: '', isStreaming: false,
-        systemCardType: 'agy-file-access' as const, systemCardData: { text: decodeRemoteErrorMessage(m.content) },
+        systemCardType: 'agy-file-access' as const, systemCardData: { text: decodeRemoteErrorMessage(m.content.replace(/^\[agy_sandbox_blocked\] /, '')), denial: m.agentMeta.agySandboxDenial },
         botPrivateReply: m.agentMeta.botPrivateReply,
       };
     }

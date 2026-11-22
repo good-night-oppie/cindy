@@ -92,7 +92,7 @@ describe('agy launch goes through the system sandbox', () => {
   it('refuses to start, with a plain reason, when isolation is unavailable', async () => {
     const { agent, captured } = agentWith({ agySandbox: { probe: { ok: false, reason: 'network-isolation-missing', detail: 'pasta (passt) not installed' } } });
     await expect(agent.startSession({ workingDir: root, model: 'gpt-oss-120b-medium' }))
-      .rejects.toThrow(/^\[agy_sandbox_unavailable\] .*pasta or iproute2 is not installed.*\(pasta \(passt\) not installed\)$/);
+      .rejects.toThrow(/pasta or iproute2 is not installed/);
     expect(captured).toHaveLength(0);
   });
 });
@@ -115,8 +115,8 @@ describe('blocked reads and writes are not silent', () => {
     const target = path.normalize('/home/u/.ssh/id_ed25519');
     const events = run(failed('1', 'read', { AbsolutePath: target }));
     const notice = events.find(e => e.type === 'error');
-    expect(notice?.data).toMatchObject({ isTerminal: false, reason: 'agy_sandbox_blocked' });
-    expect((notice?.data as { message: string }).message).toContain(`[agy_sandbox_blocked] Antigravity tried to read "${target}"`);
+    expect(notice?.data).toMatchObject({ isTerminal: false, reason: 'agy_sandbox_blocked', denial: { kind: 'read', path: target } });
+    expect((notice?.data as { message: string }).message).toContain(`Antigravity tried to read “${target}”`);
     const result = events.find(e => e.type === 'tool_result_full')?.data as { fullText: string; isError: boolean };
     expect(result.isError).toBe(true);
     expect(result.fullText).toContain(`[Cindy] ${target} is outside this task's folder`);

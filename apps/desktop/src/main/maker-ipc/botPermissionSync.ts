@@ -5,6 +5,21 @@ import { getMakerIfReady } from '../maker-host/index.js';
 import { forgetCredentialGrants } from '../remote-agent/executor/credentialGrants.js';
 import { withSessionPermissionChange } from './sessionPermissionChange.js';
 
+import { withAgyPermissionTransition, type PermissionTarget } from './agyPermissionLifecycle.js';
+
+export async function botPermissionTargets(
+  client: NonNullable<ReturnType<typeof getCurrentDbClientSnapshot>>['client'],
+  selector: { botId: string } | { sessionId: string },
+): Promise<PermissionTarget[]> {
+  if (process.platform !== 'linux') return [];
+  const byBot = 'botId' in selector;
+  return client.query<PermissionTarget>(`SELECT s.id AS sessionId, s.agent_kind AS agentKind,
+    s.permission_mode AS previousMode FROM sessions s JOIN bot_session_links l ON s.id = l.session_id
+    WHERE l.bot_id = ${byBot ? '?' : "(SELECT bot_id FROM bot_session_links WHERE session_id = ? AND role IN ('canonical','channel','group','thread','routine') AND archived_at IS NULL)"}
+    AND l.role IN ('canonical','channel','group','thread','routine') AND l.archived_at IS NULL
+    AND s.status = 'active' AND s.source = 'bot'`, [byBot ? selector.botId : selector.sessionId]);
+}
+
 /** Follow committed values under the same fence as explicit permission changes. */
 export async function syncBotLanePermission(sessionId: string): Promise<void> {
   const owner = getCurrentDbClientSnapshot();
@@ -18,11 +33,22 @@ export async function syncBotLanePermission(sessionId: string): Promise<void> {
       assertCurrent();
       let saved: { mode: string | null; changed: boolean; canonicalSessionId?: string };
       try {
-        saved = await owner.client.tx('bots.reconcileLanePermission', { sessionId });
+        const maker = getMakerIfReady();
+        const targets = maker ? await botPermissionTargets(owner.client, { sessionId }) : [];
+        const repair = () => owner.client.tx('bots.reconcileLanePermission', { sessionId });
+        if (targets.some(row => (maker?.getSession(row.sessionId)?.agentKind ?? row.agentKind) === 'agy')) {
+          const { mode } = await owner.client.tx('bots.reconcileLanePermission', { sessionId, preview: true });
+          saved = mode ? await withAgyPermissionTransition(targets, mode, maker, async () => {
+            assertCurrent();
+            return owner.client.tx('bots.reconcileLanePermission', { sessionId, expectedMode: mode });
+          }) : await repair();
+        } else {
+          saved = await repair();
+        }
       } catch (error) {
         assertCurrent();
         const maker = getMakerIfReady();
-        if (maker?.getSession(sessionId)) await maker.closeSession(sessionId);
+        if (maker?.getSession(sessionId) && maker.getSession(sessionId)?.agentKind !== 'agy') await maker.closeSession(sessionId);
         throw error;
       }
       const { mode, changed } = saved;

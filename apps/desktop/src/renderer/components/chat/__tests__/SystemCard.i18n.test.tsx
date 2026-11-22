@@ -46,6 +46,21 @@ it.each([
   expect(screen.getByRole('note').textContent).toBe(text);
 });
 
+it('renders a structured blocked read in the current language without its internal reason code', async () => {
+  await i18n.changeLanguage('zh-CN');
+  const path = '/test/<report>';
+  const [row] = makerChatStore.__mapServerMessagesForTest([{
+    id: 'row', clientId: 'blocked', sessionId: 'task', role: 'assistant', content: 'English fallback',
+    toolUseId: null, agentMeta: { agyFileAccessNotice: true, agySandboxDenial: { kind: 'read', path } },
+    createdAt: new Date().toISOString(),
+  }]);
+  render(<SystemCard cardType={row!.systemCardType!} data={row!.systemCardData} />);
+  const text = screen.getByRole('note').textContent;
+  expect(text).toContain(path);
+  expect(text).toContain('读取');
+  expect(text).not.toMatch(/agy_sandbox_blocked|English fallback/);
+});
+
 it('shows a model-only boundary without inventing a Harness change', () => {
   render(<SystemCard cardType="agent-switch" data={{
     fromModel: 'owner-model', toModel: 'automation-model', modelOnly: true,

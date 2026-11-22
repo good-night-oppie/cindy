@@ -4368,6 +4368,12 @@
         "emptyList": "Clique em \"Adicionar fornecedor\" abaixo para ligar a sua primeira fonte de modelos",
         "emptyModelsConnected": "Ligado — a detetar modelos disponíveis. Se continuar vazio, tente novamente dentro de momentos.",
         "discoveryFailed": {
+          "sandboxBlocked": "O Linux bloqueou o bubblewrap. Permita a sua execução e tente novamente.",
+          "networkIsolationUnavailable": "Não foi possível iniciar o isolamento da rede. Verifique se o pasta e o iproute2 estão instalados e podem ser executados.",
+          "unsafeTaskDir": "Não foi possível isolar em segurança a pasta da tarefa ou de estado. Verifique a pasta e as permissões.",
+          "sandboxUnsupported": "Este computador não suporta o isolamento necessário para carregar os modelos.",
+          "agyProbeFailed": "O Cindy não conseguiu carregar a lista de modelos do Antigravity. Tente novamente.",
+          "agyCliUnavailable": "O Cindy não consegue executar uma versão compatível da CLI do Antigravity. Instale ou atualize o agy.",
           "bwrapMissing": "O Antigravity precisa do bubblewrap para carregar modelos em isolamento. Instale ou repare o bubblewrap neste computador Linux e tente novamente.",
           "network": "Não é possível contactar este fornecedor, pelo que a lista de modelos está indisponível. Verifique as definições de rede ou proxy e tente novamente.",
           "timeout": "A ligação a este fornecedor excedeu o tempo limite, pelo que a lista de modelos está indisponível. Verifique a rede e tente novamente.",
@@ -4379,6 +4385,12 @@
           "empty": "Este fornecedor não devolveu modelos utilizáveis. Verifique o acesso da sua conta e tente novamente."
         },
         "discoveryFailedStale": {
+          "sandboxBlocked": "O Linux bloqueou o bubblewrap. Permita a sua execução e tente novamente.",
+          "networkIsolationUnavailable": "Não foi possível iniciar o isolamento da rede. Verifique se o pasta e o iproute2 estão instalados e podem ser executados.",
+          "unsafeTaskDir": "Não foi possível isolar em segurança a pasta da tarefa ou de estado. Verifique a pasta e as permissões.",
+          "sandboxUnsupported": "Este computador não suporta o isolamento necessário para carregar os modelos.",
+          "agyProbeFailed": "O Cindy não conseguiu carregar a lista de modelos do Antigravity. Tente novamente.",
+          "agyCliUnavailable": "O Cindy não consegue executar uma versão compatível da CLI do Antigravity. Instale ou atualize o agy.",
           "bwrapMissing": "O Antigravity precisa do bubblewrap para carregar modelos em isolamento. Instale ou repare o bubblewrap neste computador Linux e tente novamente.",
           "network": "Não é possível contactar este fornecedor. A lista abaixo é da última atualização bem-sucedida. Verifique as definições de rede ou proxy e tente novamente.",
           "timeout": "A ligação a este fornecedor excedeu o tempo limite. A lista abaixo é da última atualização bem-sucedida. Verifique a rede e tente novamente.",
@@ -14166,6 +14178,13 @@
       "listAria": "Modos de permissões",
       "autoFallback": "A revisão automática está temporariamente indisponível. Foi ativado o modo de permissões Predefinido e será pedida confirmação quando necessário.",
       "modes": {
+        "agy": {
+          "isolated": "O Antigravity pode alterar a pasta da tarefa e suas configurações, ler ficheiros necessários do sistema e usar a internet. Outras pastas pessoais ficam ocultas. A Cindy partilha o ficheiro de login local apenas para leitura se ele existir. Suas ferramentas podem pedir acesso a outros ficheiros.",
+          "host": "O Antigravity pode acessar ficheiros da sua conta, inclusive fora da pasta da tarefa. Confira os pedidos antes de autorizar.",
+          "full": "O Antigravity pode alterar os ficheiros da sua conta e usar a rede. A Cindy autoriza os pedidos sem perguntar.",
+          "autoIsolated": "A Cindy analisa automaticamente os pedidos. O Antigravity pode alterar a pasta da tarefa e suas configurações, ler ficheiros necessários do sistema e usar a internet. Outras pastas pessoais ficam ocultas. A Cindy partilha o ficheiro de login local apenas para leitura se ele existir. Suas ferramentas podem pedir acesso a outros ficheiros.",
+          "autoHost": "A Cindy analisa automaticamente os pedidos. O Antigravity pode acessar ficheiros da sua conta, inclusive fora da pasta da tarefa. Confira os pedidos antes de autorizar."
+        },
         "claude-code": {
           "ask": {
             "label": "Permissões predefinidas",
@@ -14803,6 +14822,12 @@
     "verificationFailed": "O Cindy não conseguiu confirmar se o início de sessão no ChatGPT foi restabelecido. Verifique novamente."
   },
   "chat": {
+    "agyBlocked": "A Cindy impediu o Antigravity de {{action}} “{{path}}” fora da pasta da tarefa. Copie o ficheiro para essa pasta para continuar.",
+    "agyFileActions": {
+      "read": "ler",
+      "write": "alterar",
+      "unknown": "usar"
+    },
     "agyIdleExit": "O Antigravity terminou enquanto a tarefa estava inativa. Envie uma mensagem aqui para continuar.",
     "pluginModelRoute": {
       "routed": "escolheu para esta tarefa",

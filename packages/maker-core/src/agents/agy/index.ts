@@ -72,12 +72,12 @@ export const AGY_ACP_ARGS = ['acp', '--disable-telemetry'] as const;
 
 const yes = { supported: true } as const;
 const no = { supported: false, reason: 'not-implemented' } as const;
-// Wording pending JJ (cindy#1 6908586833 item 4): say exactly what the isolation does and does not do.
-const NATIVE_PERMISSION_DESCRIPTION = 'Antigravity can read and change this task folder and its own settings. It can read the system files it needs and reach the internet. Other home folders stay hidden. When you share your CLI sign-in, it can read the login token but cannot change it. Cindy tools run on your computer and may ask to use other files.';
-// Used only where no system-level isolation exists (Windows, macOS). Wording pending JJ.
-const UNSANDBOXED_PERMISSION_DESCRIPTION = 'Antigravity runs without system-level file isolation on this computer: it can reach any file your user account can, limited only by the approval requests it sends to Cindy. Requests outside this task\'s folder are worth reading before you allow them.';
-// Same meaning as Full access on the other engines: no file isolation, network commands allowed, no questions.
-const FULL_ACCESS_PERMISSION_DESCRIPTION = 'Antigravity runs without Cindy\x27s file isolation: it can read and change any file your account can, including outside this task\x27s folder, and run network commands. Cindy allows the approval requests agy sends without confirmation.';
+// Approved copy and renderer translations: cindy#18 issuecomment-7075986321.
+const NATIVE_PERMISSION_DESCRIPTION = "You decide on the approval requests Antigravity sends. It can read and change this task folder and its own settings, read the system files it needs, and reach the internet. Other files in your home folder stay hidden from it. It can read the Google sign-in Antigravity uses, but can't change it. Cindy tools run on your computer and may ask you to allow other files.";
+const UNSANDBOXED_PERMISSION_DESCRIPTION = "You decide on the approval requests Antigravity sends. This computer has no system-level file isolation for it: it can reach any file your account can. Cindy can't stop what it does without sending a request. Read requests outside this task's folder carefully before you allow them.";
+const AUTO_PERMISSION_DESCRIPTION = "Cindy automatically reviews the approval requests Antigravity sends, which may take extra time. It can read and change this task folder and its own settings, read the system files it needs, and reach the internet. Other files in your home folder stay hidden from it. It can read the Google sign-in Antigravity uses, but can't change it. Cindy tools run on your computer and may ask you to allow other files.";
+const UNSANDBOXED_AUTO_DESCRIPTION = "Cindy automatically reviews the approval requests Antigravity sends, which may take extra time. This computer has no system-level file isolation for it: it can reach any file your account can. Cindy can't stop what it does without sending a request.";
+const FULL_ACCESS_PERMISSION_DESCRIPTION = "No Cindy file isolation: Antigravity can read and change any file your account can, including outside this task's folder, and run network commands. Its approval requests are allowed without asking you.";
 const CONTROL_TIMEOUT = 30_000;
 const CANCEL_TIMEOUT = 10_000;
 const PROMPT_REQUEST_TIMEOUT = 24 * 60 * 60 * 1000;
@@ -130,9 +130,9 @@ export class AgyAgent extends BaseAgent {
     switchModel: yes, availableModels: [], hasFastMode: false,
     effort: no, effortLevels: [], reasoningDisplay: ['off', 'full'],
     permissionModes: [
-      { id: 'ask', displayName: 'Default permissions', description: NATIVE_PERMISSION_DESCRIPTION },
-      { id: 'default', displayName: 'Default permissions', description: NATIVE_PERMISSION_DESCRIPTION },
-      { id: 'auto', displayName: 'Auto-review', description: `Cindy automatically reviews the approval requests agy sends. ${NATIVE_PERMISSION_DESCRIPTION}` },
+      { id: 'ask', agyFileIsolation: true, displayName: 'Default permissions', description: NATIVE_PERMISSION_DESCRIPTION },
+      { id: 'default', agyFileIsolation: true, displayName: 'Default permissions', description: NATIVE_PERMISSION_DESCRIPTION },
+      { id: 'auto', agyFileIsolation: true, displayName: 'Auto-review', description: AUTO_PERMISSION_DESCRIPTION },
       { id: 'bypassPermissions', displayName: 'Full access', description: FULL_ACCESS_PERMISSION_DESCRIPTION },
     ],
     setPermissionModeMidSession: yes,
@@ -158,11 +158,12 @@ export class AgyAgent extends BaseAgent {
   constructor(protected override deps: AgyAgentDeps) {
     super(deps);
     // Never claim file isolation on a host that has none (copy wording pending JJ).
-    if (deps.agySandbox?.allowWithoutSystemSandbox) {
+    if (process.platform !== 'linux' && deps.agySandbox?.allowWithoutSystemSandbox) {
       this.capabilities = {
         ...this.capabilities,
         permissionModes: this.capabilities.permissionModes.map(mode => ({
-          ...mode, description: (mode.description ?? '').replace(NATIVE_PERMISSION_DESCRIPTION, UNSANDBOXED_PERMISSION_DESCRIPTION),
+          ...mode, agyFileIsolation: false, description: mode.id === 'bypassPermissions' ? FULL_ACCESS_PERMISSION_DESCRIPTION
+            : mode.id === 'auto' ? UNSANDBOXED_AUTO_DESCRIPTION : UNSANDBOXED_PERMISSION_DESCRIPTION,
         })),
       };
     }
@@ -197,7 +198,7 @@ export class AgyAgent extends BaseAgent {
     if (this.probePromise) return this.probePromise;
     this.probePromise = (async () => {
       const binaryPath = this.deps.binaryPath;
-      if (!binaryPath) throw new Error('agy binary path is not configured');
+      if (!binaryPath) throw new AgyBinaryUnavailableError('Antigravity CLI is not configured.', 'agy_binary_missing');
       const config = this.deps.agySandbox;
       if (process.platform !== 'linux' && !config?.allowWithoutSystemSandbox) {
         throw new AgySandboxUnavailableError('unsupported-platform', process.platform);
@@ -638,7 +639,7 @@ export class AgyAgent extends BaseAgent {
       // System-level isolation: agy only touches the task folder and its private state; no host
       // loopback, no session bus (cindy#1 6908586833, 6909268027). Fails closed, never runs bare.
       if (unsandboxedByPlatform) {
-        emit({ type: 'error', data: { message: agyNoSystemIsolationText(this.deps.uiLocale), isTerminal: false } });
+        emit({ type: 'error', data: { message: agyNoSystemIsolationText(this.deps.uiLocale), reason: 'agy_no_system_isolation', isTerminal: false } });
       }
       // Cindy's own tools (memory, helper, plugins...) are served by the host's loopback MCP
       // bridge, the same per-session bridge Pi uses. Inside the Linux sandbox only the bridge's
@@ -896,6 +897,9 @@ export class AgyAgent extends BaseAgent {
         async setPermissionMode(next) {
           if (closed || fenced) throw new Error('agy session is closed');
           if (!['ask', 'default', 'auto', 'bypassPermissions'].includes(next)) throw new NotSupportedError('permissionMode', no);
+          if (process.platform === 'linux' && fullAccessLaunch && next !== 'bypassPermissions') {
+            throw new Error('Restart the Antigravity session before tightening Full access');
+          }
           if (mode === next) return;
           mode = next;
           permissionGeneration++;
@@ -922,7 +926,7 @@ export class AgyAgent extends BaseAgent {
       if (error instanceof AgentNotAuthenticatedError) throw error;
       if (isAuthError(error)) throw new AgentNotAuthenticatedError('agy', AGY_SIGN_IN_MESSAGE);
       if (error instanceof AgyBinaryUnavailableError) throw new AgentStartupStoppedError(error);
-      if (error instanceof AgySandboxUnavailableError) throw new AgentStartupStoppedError(new Error(agySandboxUnavailableText(error)));
+      if (error instanceof AgySandboxUnavailableError) throw new AgentStartupStoppedError(new Error(agySandboxUnavailableText(error, this.deps.uiLocale?.())));
       if (!(error instanceof AcpRpcError) && !(error instanceof NotSupportedError) && client) {
         const hint = stderrHint(client);
         if (hint) throw new AgentStartupStoppedError(new Error(`${error instanceof Error ? error.message : String(error)}${hint}`));
@@ -943,15 +947,16 @@ function realpathOr(dir: string): string {
 export function agyNoSystemIsolationText(locale?: () => string | null | undefined): string {
   const language = locale?.() ?? '';
   if (/^zh\b|^zh-/i.test(language) || language === 'zh-CN' || language === 'zh-TW') {
-    return '[agy_no_system_isolation] 这台电脑上没有系统级文件隔离，Antigravity 能碰到你这个账户能碰到的文件，只能靠它在动之前先向你申请来限制范围。任务文件夹以外的请求，请看清楚再同意。';
+    return '这台电脑上没有系统级文件隔离，Antigravity 能碰到你这个账户能碰到的文件，只能靠它在动之前先向你申请来限制范围。任务文件夹以外的请求，请看清楚再同意。';
   }
-  return '[agy_no_system_isolation] This computer has no system-level file isolation: Antigravity can reach any file your account can, limited only by asking you first. Read requests outside this task folder before you allow them.';
+  return 'This computer has no system-level file isolation: Antigravity can reach any file your account can, limited only by asking you first. Read requests outside this task folder before you allow them.';
 }
 
-/** `[agy_sandbox_unavailable]` code + English fallback; zh/en wording pending JJ (cindy#1). */
-function agySandboxUnavailableText(error: AgySandboxUnavailableError): string {
+/** Localized startup failure, without an internal error code in user-facing text. */
+function agySandboxUnavailableText(error: AgySandboxUnavailableError, locale?: string | null): string {
   const copy = AGY_SANDBOX_USER_COPY_DRAFT.unavailable;
-  return `[agy_sandbox_unavailable] ${copy.en.replace('{reason}', copy.reason[error.reason].en)} (${error.detail})`;
+  const language = locale?.startsWith('zh') ? 'zh-CN' : 'en';
+  return copy[language].replace('{reason}', copy.reason[error.reason][language]);
 }
 
 const AGY_SIGN_IN_MESSAGE = 'The Antigravity ACP session requires authentication. Check the CLI authentication environment; this does not establish that the local login has expired.';

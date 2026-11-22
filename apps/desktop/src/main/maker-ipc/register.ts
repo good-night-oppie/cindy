@@ -1,4 +1,4 @@
-import { retryAntigravityModels } from '../maker-host/antigravity-models.js';
+import { probeAntigravityModelsIfNeeded, retryAntigravityModels } from '../maker-host/antigravity-models.js';
 import { readContextRecoverySessionWithPorts, classifyCodexHistoryWithPorts, commitContextRecoveryWithPorts, replayContextRecoveryWithPorts, contextRecoveryRebuilt, contextRecoveryAbortSignal } from './contextRecoveryAssembly.js';
 import { needsSubscriptionAccountHandoff, hasRestoredPooledCodexQuota } from '../subscription-accounts/runtime.js';
 import { prepareSubscriptionAccountForSend } from '../subscription-accounts/prepareSend.js';
@@ -741,7 +741,8 @@ import { markGroupCindyTask } from './groupCollaborationSkill.js';
 import { listPrRefs } from '../git-context/prRefsStore.js';
 import { gitExec } from '../worktree/gitExec.js';
 import { BOT_GROUP_CLIENT_ID_PREFIX, botGroupLiveTaskStateOfPhase } from '../../shared/botGroupChat.js';
-import { syncBotLanePermission, syncBotLinkedLanePermissions } from './botPermissionSync.js';
+import { withAgyPermissionTransition } from './agyPermissionLifecycle.js';
+import { botPermissionTargets, syncBotLanePermission, syncBotLinkedLanePermissions } from './botPermissionSync.js';
 import { ensureBotGroupLaneSession } from '../localDb/ipc/bots.js';
 import { restartBotRuntime } from './botRuntimeRestart.js';
 import { registerBotLifecycleHandlers } from './botLifecycleService.js';
@@ -7296,12 +7297,12 @@ export function registerMakerIpc(maker: Maker, options: RegisterMakerIpcOptions)
     },
   );
 
-  // agy 模型探活:选择器打开前真实起一次 `agy acp` 读 catalog 写进 capabilities
-  // (缓存后空转)。cwd 用当前工作目录即可—— catalog 与目录无关,任务文件夹在
-  // 创建时才定;不在此登记 agy 任务文件夹,避免探活本身污染任务记录。
+  // Opening a picker uses the same retry policy as provider-list reads. Only the
+  // explicit rediscover action retries a persistent launch failure.
   ipcMain.handle(MAKER_INVOKE.PROBE_AGENT_MODELS, async (_e, agentKind: unknown) => {
-    const kind = requireAgentKind(agentKind);
-    await maker.probeAgentModels(kind, process.cwd());
+    if (requireAgentKind(agentKind) !== 'agy') return;
+    const failure = await probeAntigravityModelsIfNeeded();
+    if (failure) throw new Error(failure.kind);
   });
 
   ipcMain.handle(MAKER_INVOKE.GET_CAPABILITIES, (_e, agentKind: unknown) => {
@@ -22794,34 +22795,25 @@ export function registerMakerIpc(maker: Maker, options: RegisterMakerIpcOptions)
       assertOwnerCurrent();
       if (!row) throwIpcError('NOT_FOUND', 'session not found');
       await beforeMutation?.();
-      const sess = maker.getSession(sessionId);
-      const crossingIsolation = (sess?.agentKind ?? row.agentKind) === 'agy' && process.platform === 'linux'
-        && (row.permissionMode === 'bypassPermissions') !== (mode === 'bypassPermissions');
-      const tightening = crossingIsolation && mode !== 'bypassPermissions';
-      const persistMode = async () => {
+      const target = { sessionId, agentKind: row.agentKind, previousMode: row.permissionMode };
+      const linked = mode === 'ask' || mode === 'auto' || mode === 'bypassPermissions'
+        ? await botPermissionTargets(snapshot!.client, { sessionId }) : [];
+      assertOwnerCurrent();
+      await withAgyPermissionTransition([...linked, target], mode, maker, async closed => {
         await beforeMutation?.();
         assertOwnerCurrent();
-        const saved = await snapshot!.client.tx('bots.persistSessionPermission', {sessionId, mode});
-        if (!saved.updated) throwIpcError('NOT_FOUND', 'session not found');
-        assertOwnerCurrent();
-      };
-      if (tightening) {
-        // Keep sends and lazy session creation outside the close-and-persist interval.
-        await withSessionRestartLock(sessionId, async () => {
-          assertOwnerCurrent();
-          const current = maker.getSession(sessionId);
-          if (current?.isTurnRunning()) await current.abort();
-          await maker.closeSession(sessionId, 'runtime-refresh');
-          await persistMode();
-        });
-      } else {
+        const sess = closed.has(sessionId) ? undefined : maker.getSession(sessionId);
         let runtimeChanged = false;
         try {
           if (sess) {
             await sess.setPermissionMode(mode as PermissionMode);
             runtimeChanged = true;
           }
-          await persistMode();
+          await beforeMutation?.();
+          assertOwnerCurrent();
+          const saved = await snapshot!.client.tx('bots.persistSessionPermission', {sessionId, mode});
+          if (!saved.updated) throwIpcError('NOT_FOUND', 'session not found');
+          assertOwnerCurrent();
         } catch (error) {
           if (runtimeChanged && sess && snapshot === getCurrentDbClientSnapshot()) {
             await sess.setPermissionMode(row.permissionMode as PermissionMode).catch((rollbackError) => {
@@ -22830,19 +22822,7 @@ export function registerMakerIpc(maker: Maker, options: RegisterMakerIpcOptions)
           }
           throw error;
         }
-      }
-      // Antigravity on Linux: Full access is a different launch (no file/network isolation) from
-      // the other modes, and the isolation is fixed per process. Crossing that line recycles the
-      // runtime; the next message starts agy again in the new mode and resumes the conversation.
-      // Same rule as Codex: loosening waits for the running turn, tightening stops it now.
-      if (sess && crossingIsolation && !tightening) {
-        await (sess.isTurnRunning()
-          ? maker.closeSessionIfCurrent(sess, 'runtime-refresh', { afterCurrentTurn: true })
-          : maker.closeSession(sessionId, 'runtime-refresh')
-        ).catch((error) => {
-          log.warn('agy access-mode relaunch failed', { sessionId, error: String(error) });
-        });
-      }
+      });
       // 分享供应商的「本任务总是允许」随权限档变化失效；Agent 实例被回收时执行器收不到这次切换。
       if (row.permissionMode !== mode) forgetCredentialGrants(sessionId);
       broadcastSessionPatched(sessionId, { permissionMode: mode });

@@ -151,12 +151,20 @@ export function PermissionSelector({
   const TriggerIcon = PERMISSION_ICONS[effectiveMode] ?? Hand;
   const labelOf = (option: PermissionModeDescriptor | undefined, fallbackId: string) => {
     const id = option?.id ?? fallbackId;
-    return t(`newChat.permissionSelector.modes.${agentKind}.${id}.label`, {
+    const labelKind = agentKind === 'agy' ? 'codex' : agentKind;
+    const labelId = agentKind === 'agy' && id === 'default' ? 'ask' : id;
+    return t(`newChat.permissionSelector.modes.${labelKind}.${labelId}.label`, {
       defaultValue: option?.displayName ?? fallbackId,
     });
   };
   const descriptionOf = (option: PermissionModeDescriptor | undefined, fallbackId: string) => {
     const id = option?.id ?? fallbackId;
+    if (agentKind === 'agy' && option && (id === 'bypassPermissions' || option.agyFileIsolation !== undefined)) {
+      const key = id === 'bypassPermissions' ? 'full' : id === 'auto'
+        ? (option.agyFileIsolation ? 'autoIsolated' : 'autoHost')
+        : (option.agyFileIsolation ? 'isolated' : 'host');
+      return t(`newChat.permissionSelector.modes.agy.${key}`, { defaultValue: option.description ?? '' });
+    }
     return t(`newChat.permissionSelector.modes.${agentKind}.${id}.description`, {
       defaultValue: option?.description ?? '',
     });

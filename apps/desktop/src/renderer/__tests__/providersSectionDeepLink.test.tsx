@@ -237,15 +237,15 @@ afterEach(() => {
 });
 
 describe('ProvidersSection — 深链定位', () => {
-  it('offers a retry from the bubblewrap installation hint for Antigravity', async () => {
+  it.each(['bwrapMissing', 'sandboxBlocked', 'networkIsolationUnavailable', 'unsafeTaskDir', 'sandboxUnsupported', 'agyCliUnavailable'] as const)('offers a retry from the Antigravity %s hint', async kind => {
     providersState.providers = [makeProvider('antigravity', {
       connected: true, agents: ['agy'], models: { agy: [] },
-      modelDiscoveryFailure: { kind: 'bwrapMissing', at: '2026-11-20T00:00:00Z' },
+      modelDiscoveryFailure: { kind, at: '2026-11-20T00:00:00Z' },
     })];
     const retry = vi.fn().mockResolvedValue({ ok: true });
     window.electronAPI.maker.rediscoverModels = retry;
     renderAt('?tab=providers&connect=antigravity');
-    expect(await screen.findByText('settings.providers.detail.discoveryFailed.bwrapMissing')).toBeTruthy();
+    expect(await screen.findByText(`settings.providers.detail.discoveryFailed.${kind}`)).toBeTruthy();
     fireEvent.click(screen.getByRole('button', { name: 'settings.providers.button.retry' }));
     await waitFor(() => expect(retry).toHaveBeenCalledExactlyOnceWith('antigravity'));
   });

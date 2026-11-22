@@ -1,6 +1,6 @@
 import { ANTIGRAVITY_PROVIDER_ID, BUILTIN_PROVIDERS, type ProviderView } from '@cindy/model-providers';
 import { afterEach, expect, it, vi } from 'vitest';
-import { attachAntigravityModels, retryAntigravityModels, setAntigravityModelSource } from '../antigravity-models';
+import { attachAntigravityModels, probeAntigravityModelsIfNeeded, retryAntigravityModels, setAntigravityModelSource } from '../antigravity-models';
 
 const provider: ProviderView = {
   ...BUILTIN_PROVIDERS.find(item => item.id === ANTIGRAVITY_PROVIDER_ID)!,
@@ -10,13 +10,20 @@ const model = { id: 'fixture', displayName: 'Fixture', contextWindow: 1000, effo
 
 afterEach(() => vi.useRealTimers());
 
-it('publishes a missing-bubblewrap hint once and waits for an explicit retry to load models', async () => {
+it.each([
+  ['AgySandboxUnavailableError', 'bwrap-missing', 'bwrapMissing'],
+  ['AgySandboxUnavailableError', 'bwrap-blocked', 'sandboxBlocked'],
+  ['AgySandboxUnavailableError', 'network-isolation-missing', 'networkIsolationUnavailable'],
+  ['AgySandboxUnavailableError', 'task-dir-unsafe', 'unsafeTaskDir'],
+  ['AgySandboxUnavailableError', 'unsupported-platform', 'sandboxUnsupported'],
+  ['AgyBinaryUnavailableError', 'agy_binary_missing', 'agyCliUnavailable'],
+])('reports a persistent %s (%s) once, then recovers after explicit retry', async (name, reason, expectedKind) => {
   vi.useFakeTimers();
   const models: typeof model[] = [];
   const changed = vi.fn();
   const probe = vi.fn<() => Promise<void>>()
     .mockRejectedValueOnce(Object.assign(new Error('host detail'), {
-      name: 'AgySandboxUnavailableError', reason: 'bwrap-missing',
+      name, reason,
     }))
     .mockImplementationOnce(async () => { models.push(model); });
   setAntigravityModelSource({ read: () => models, changed, probe });
@@ -27,10 +34,11 @@ it('publishes a missing-bubblewrap hint once and waits for an explicit retry to 
   expect(probe).toHaveBeenCalledTimes(1);
   expect(changed).toHaveBeenCalledTimes(1);
   expect(attachAntigravityModels(provider).modelDiscoveryFailure).toEqual({
-    kind: 'bwrapMissing', at: new Date().toISOString(),
+    kind: expectedKind, at: new Date().toISOString(),
   });
 
   await vi.advanceTimersByTimeAsync(120_000);
+  expect((await probeAntigravityModelsIfNeeded())?.kind).toBe(expectedKind);
   attachAntigravityModels(provider);
   await vi.advanceTimersByTimeAsync(0);
   expect(probe).toHaveBeenCalledTimes(1);
@@ -48,7 +56,13 @@ it('allows another automatic probe after a temporary failure', async () => {
   setAntigravityModelSource({ read: () => [], changed: vi.fn(), probe });
   attachAntigravityModels(provider);
   await vi.advanceTimersByTimeAsync(60_001);
-  expect(attachAntigravityModels(provider).modelDiscoveryFailure?.kind).toBe('rejected');
+  expect(attachAntigravityModels(provider).modelDiscoveryFailure?.kind).toBe('agyProbeFailed');
   await vi.advanceTimersByTimeAsync(0);
   expect(probe).toHaveBeenCalledTimes(2);
+});
+
+it('preserves a rejection reported by ACP', async () => {
+  const probe = vi.fn().mockRejectedValue(Object.assign(new Error('Rejected'), { name: 'AcpRpcError', code: -32603 }));
+  setAntigravityModelSource({ read: () => [], changed: vi.fn(), probe });
+  expect((await probeAntigravityModelsIfNeeded())?.kind).toBe('rejected');
 });

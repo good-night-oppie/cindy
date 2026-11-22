@@ -4269,6 +4269,12 @@
         "emptyList": "萬里長風，始於一縷：點左下角「增供方」，迎君之首個模型來源。",
         "emptyModelsConnected": "已連，吾正四下尋訪可用模型；若久候仍空，請稍後再試。",
         "discoveryFailed": {
+          "sandboxBlocked": "Linux 禁 bubblewrap 運行。請允之而後重試。",
+          "networkIsolationUnavailable": "網路未能隔離。請查 pasta、iproute2 皆已安裝且可運行，再試。",
+          "unsafeTaskDir": "任務或狀態目錄不可安全隔離。請核目錄及其權限，再試。",
+          "sandboxUnsupported": "此機不支援載入模型所需之隔離。",
+          "agyProbeFailed": "未能載入 Antigravity 模型表，請重試。",
+          "agyCliUnavailable": "此機未能運行合用之 Antigravity CLI。請安裝或更新 agy，再試。",
           "bwrapMissing": "Antigravity 須借 bubblewrap 隔離載入模型。請於此 Linux 機安裝或修復 bubblewrap，再試。",
           "network": "不能連此供方，故不得模型清單。請察網路或 Proxy 之設後再試。",
           "timeout": "連此供方逾時，故不得模型清單。請察網路後再試。",
@@ -4280,6 +4286,12 @@
           "empty": "此供方未返任何可用模型。請確認名籍權柄後再試。"
         },
         "discoveryFailedStale": {
+          "sandboxBlocked": "Linux 禁 bubblewrap 運行。請允之而後重試。",
+          "networkIsolationUnavailable": "網路未能隔離。請查 pasta、iproute2 皆已安裝且可運行，再試。",
+          "unsafeTaskDir": "任務或狀態目錄不可安全隔離。請核目錄及其權限，再試。",
+          "sandboxUnsupported": "此機不支援載入模型所需之隔離。",
+          "agyProbeFailed": "未能載入 Antigravity 模型表，請重試。",
+          "agyCliUnavailable": "此機未能運行合用之 Antigravity CLI。請安裝或更新 agy，再試。",
           "bwrapMissing": "Antigravity 須借 bubblewrap 隔離載入模型。請於此 Linux 機安裝或修復 bubblewrap，再試。",
           "network": "不能連此供方，下為前次所得之模型清單。請察網路或 Proxy 之設後再試。",
           "timeout": "連此供方逾時，下為前次所得之模型清單。請察網路後再試。",
@@ -13997,6 +14009,13 @@
       "listAria": "權柄模式",
       "autoFallback": "自動審批暫不可用，已切換為預設權柄；需時將詢問君。",
       "modes": {
+        "agy": {
+          "isolated": "Antigravity 可修改工作資料夾和自己的設定、讀取必要的系統檔案並連網。家目錄中的其他資料夾會隱藏。本機若有登入檔，Cindy 會以唯讀方式共用。Cindy 工具可能要求存取其他檔案。",
+          "host": "Antigravity 可存取你有權使用的檔案，包括工作資料夾外的檔案。允許前請檢查其要求。",
+          "full": "Antigravity 可修改你有權使用的檔案並連網。Cindy 會直接允許其要求。",
+          "autoIsolated": "Cindy 會自動審核操作要求。Antigravity 可修改工作資料夾和自己的設定、讀取必要的系統檔案並連網。家目錄中的其他資料夾會隱藏。本機若有登入檔，Cindy 會以唯讀方式共用。Cindy 工具可能要求存取其他檔案。",
+          "autoHost": "Cindy 會自動審核操作要求。Antigravity 可存取你有權使用的檔案，包括工作資料夾外的檔案。允許前請檢查其要求。"
+        },
         "claude-code": {
           "ask": {
             "label": "預設權柄",
@@ -14621,6 +14640,12 @@
     "verificationFailed": "暫未能確知 ChatGPT 登入已復否，請再察。"
   },
   "chat": {
+    "agyBlocked": "Antigravity 想{{action}}工作資料夾外的「{{path}}」，Cindy 已攔下。如需使用該檔案，請先將它複製到工作資料夾。",
+    "agyFileActions": {
+      "read": "讀取",
+      "write": "修改",
+      "unknown": "使用"
+    },
     "agyIdleExit": "任務閒時，Antigravity 已退。於此發訊即可續之。",
     "teammateProcess": {
       "empty": "此番無可示之處理記錄",

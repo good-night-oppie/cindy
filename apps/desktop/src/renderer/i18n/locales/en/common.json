@@ -4312,6 +4312,12 @@
         "emptyList": "Click “Add provider” below to connect your first model source",
         "emptyModelsConnected": "Connected — discovering available models. If it stays empty, try again shortly.",
         "discoveryFailed": {
+          "sandboxBlocked": "Linux prevents bubblewrap from starting. Allow it to run, then retry.",
+          "networkIsolationUnavailable": "Network isolation could not start. Check that pasta and iproute2 are installed and allowed to run, then retry.",
+          "unsafeTaskDir": "The local task or state folder cannot be isolated safely. Check the folder and its permissions, then retry.",
+          "sandboxUnsupported": "This computer does not support the isolation needed to load models.",
+          "agyProbeFailed": "Cindy could not load the Antigravity model list. Try again.",
+          "agyCliUnavailable": "Cindy cannot run a supported Antigravity CLI. Install or update agy on this computer, then retry.",
           "bwrapMissing": "Antigravity needs bubblewrap to load models safely. Install or repair bubblewrap on this Linux computer, then retry.",
           "network": "Can't reach this provider, so its model list is unavailable. Check your network or proxy settings, then retry.",
           "timeout": "Connection to this provider timed out, so its model list is unavailable. Check your network, then retry.",
@@ -4323,6 +4329,12 @@
           "empty": "This provider returned no usable models. Check your account's access, then retry."
         },
         "discoveryFailedStale": {
+          "sandboxBlocked": "Linux prevents bubblewrap from starting. Allow it to run, then retry.",
+          "networkIsolationUnavailable": "Network isolation could not start. Check that pasta and iproute2 are installed and allowed to run, then retry.",
+          "unsafeTaskDir": "The local task or state folder cannot be isolated safely. Check the folder and its permissions, then retry.",
+          "sandboxUnsupported": "This computer does not support the isolation needed to load models.",
+          "agyProbeFailed": "Cindy could not load the Antigravity model list. Try again.",
+          "agyCliUnavailable": "Cindy cannot run a supported Antigravity CLI. Install or update agy on this computer, then retry.",
           "bwrapMissing": "Antigravity needs bubblewrap to load models safely. Install or repair bubblewrap on this Linux computer, then retry.",
           "network": "Can't reach this provider. The list below is from the last successful refresh. Check your network or proxy settings, then retry.",
           "timeout": "Connection to this provider timed out. The list below is from the last successful refresh. Check your network, then retry.",
@@ -14051,6 +14063,13 @@
       "listAria": "Permission modes",
       "autoFallback": "Auto-review is temporarily unavailable. Switched to Default permissions and will ask when needed.",
       "modes": {
+        "agy": {
+          "isolated": "You decide on the approval requests Antigravity sends. It can read and change this task folder and its own settings, read the system files it needs, and reach the internet. Other files in your home folder stay hidden from it. It can read the Google sign-in Antigravity uses, but can't change it. Cindy tools run on your computer and may ask you to allow other files.",
+          "host": "You decide on the approval requests Antigravity sends. This computer has no system-level file isolation for it: it can reach any file your account can. Cindy can't stop what it does without sending a request. Read requests outside this task's folder carefully before you allow them.",
+          "full": "No Cindy file isolation: Antigravity can read and change any file your account can, including outside this task's folder, and run network commands. Its approval requests are allowed without asking you.",
+          "autoIsolated": "Cindy automatically reviews the approval requests Antigravity sends, which may take extra time. It can read and change this task folder and its own settings, read the system files it needs, and reach the internet. Other files in your home folder stay hidden from it. It can read the Google sign-in Antigravity uses, but can't change it. Cindy tools run on your computer and may ask you to allow other files.",
+          "autoHost": "Cindy automatically reviews the approval requests Antigravity sends, which may take extra time. This computer has no system-level file isolation for it: it can reach any file your account can. Cindy can't stop what it does without sending a request."
+        },
         "claude-code": {
           "ask": {
             "label": "Default permissions",
@@ -14681,6 +14700,12 @@
     "verificationFailed": "Cindy couldn’t confirm whether the ChatGPT sign-in has recovered. Check again."
   },
   "chat": {
+    "agyBlocked": "Antigravity tried to {{action}} “{{path}}”, which is outside this task's folder, and was blocked. At this permission level, Antigravity can't reach this file outside the task folder. If it really needs the file, copy it into the task folder and ask Antigravity to continue.",
+    "agyFileActions": {
+      "read": "read",
+      "write": "change",
+      "unknown": "use"
+    },
     "agyIdleExit": "Antigravity stopped while this task was idle. Send a message here to resume.",
     "pluginModelRoute": {
       "routed": "chose for this task",

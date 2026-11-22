@@ -72,6 +72,7 @@ export interface EffortDescriptor {
 }
 
 export interface PermissionModeDescriptor {
+  agyFileIsolation?: boolean;
   id: PermissionMode;
   displayName: string;
   description?: string;

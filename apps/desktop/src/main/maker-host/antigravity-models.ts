@@ -29,15 +29,31 @@ export function setAntigravityModelSource(next: AntigravityModelSource): void {
   failure = undefined;
 }
 
+type FailureKind = ProviderModelDiscoveryFailureView['kind'];
+
+function localFailureKind(error: unknown): FailureKind | undefined {
+  if (!(error instanceof Error)) return;
+  if (error.name === 'AgyBinaryUnavailableError') return 'agyCliUnavailable';
+  if (error.name !== 'AgySandboxUnavailableError' || !('reason' in error)) return;
+  switch (error.reason) {
+    case 'bwrap-missing': return 'bwrapMissing';
+    case 'bwrap-blocked': return 'sandboxBlocked';
+    case 'network-isolation-missing': return 'networkIsolationUnavailable';
+    case 'task-dir-unsafe': return 'unsafeTaskDir';
+    case 'unsupported-platform': return 'sandboxUnsupported';
+  }
+}
+
 async function probe(current: AntigravityModelSource): Promise<void> {
   try {
     await current.probe();
     if (current === source) failure = current.read().length ? undefined : { kind: 'empty', at: new Date().toISOString() };
   } catch (error) {
     if (current !== source) return;
-    const missingBwrap = error instanceof Error && error.name === 'AgySandboxUnavailableError'
-      && 'reason' in error && error.reason === 'bwrap-missing';
-    failure = { kind: missingBwrap ? 'bwrapMissing' : 'rejected', at: new Date().toISOString() };
+    const rpcError = error instanceof Error && error.name === 'AcpRpcError';
+    const remoteFailure = rpcError && 'code' in error && error.code === -32000 ? 'unauthorized' : 'rejected';
+    const kind = localFailureKind(error) ?? (rpcError ? remoteFailure : 'agyProbeFailed');
+    failure = { kind, at: new Date().toISOString() };
   } finally {
     if (current === source) {
       pending = null;
@@ -52,6 +68,20 @@ export async function retryAntigravityModels(): Promise<ProviderModelDiscoveryFa
   return failure ?? null;
 }
 
+/** Shared by provider-list reads and automatic model-picker probes. */
+export async function probeAntigravityModelsIfNeeded(): Promise<ProviderModelDiscoveryFailureView | null> {
+  if (!source || source.read().length) return null;
+  if (pending) {
+    await pending;
+    return failure ?? null;
+  }
+  if (failure) {
+    const retryable = failure.kind === 'agyProbeFailed' || failure.kind === 'rejected' || failure.kind === 'empty';
+    if (!retryable || Date.now() - Date.parse(failure.at) <= PROBE_RETRY_MS) return failure;
+  }
+  return retryAntigravityModels();
+}
+
 /**
  * The Google Gemini subscription provider has no model list of its own: its models only exist in
  * the Antigravity CLI. Once the provider is connected, attach the CLI's list so every reader of
@@ -62,9 +92,7 @@ export function attachAntigravityModels(provider: ProviderView): ProviderView {
   if (provider.id !== ANTIGRAVITY_PROVIDER_ID || !provider.connected || !source) return provider;
   const models = source.read();
   if (!models.length) {
-    if (!pending && (!failure || (failure.kind !== 'bwrapMissing' && Date.now() - Date.parse(failure.at) > PROBE_RETRY_MS))) {
-      void retryAntigravityModels();
-    }
+    void probeAntigravityModelsIfNeeded();
     return failure ? { ...provider, modelDiscoveryFailure: failure } : provider;
   }
   return {

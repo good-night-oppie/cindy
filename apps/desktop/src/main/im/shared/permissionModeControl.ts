@@ -41,6 +41,7 @@ export async function changeSessionPermissionMode(args: {
   confirmedFullAccess?: boolean;
   readPreviousMode(): Promise<PermissionMode | null>;
   getLiveSession(): { setPermissionMode(mode: PermissionMode): Promise<void> } | null;
+  withRuntimeTransition?(previous: PermissionMode, commit: () => Promise<void>): Promise<void>;
   persist(mode: PermissionMode): Promise<void>;
 }): Promise<PermissionModeChangeResult> {
   const descriptor = args.modes.find((candidate) => candidate.id === args.mode);
@@ -66,25 +67,25 @@ export async function changeSessionPermissionMode(args: {
       };
     }
 
-    const live = args.getLiveSession();
-    let runtimeChanged = false;
+    let changedLive = false;
+    const commit = async () => {
+      assertCurrent();
+      const live = args.getLiveSession();
+      if (live) await live.setPermissionMode(args.mode);
+      try {
+        assertCurrent();
+        await args.persist(args.mode);
+        assertCurrent();
+        changedLive = Boolean(live);
+      } catch (error) {
+        if (live && snapshot === getCurrentDbClientSnapshot()) await live.setPermissionMode(previousMode);
+        throw error;
+      }
+    };
     try {
-      if (live) {
-        await live.setPermissionMode(args.mode);
-        runtimeChanged = true;
-      }
-      assertCurrent();
-      await args.persist(args.mode);
-      assertCurrent();
+      if (args.withRuntimeTransition) await args.withRuntimeTransition(previousMode, commit);
+      else await commit();
     } catch (error) {
-      if (runtimeChanged && live && snapshot === getCurrentDbClientSnapshot()) {
-        try {
-          await live.setPermissionMode(previousMode);
-        } catch {
-          // The original failure is more useful to the caller. Rollback remains
-          // best effort, matching the existing Feishu card behavior.
-        }
-      }
       return {
         kind: 'failed',
         reason: error instanceof Error ? error.message : String(error),
@@ -95,7 +96,7 @@ export async function changeSessionPermissionMode(args: {
       kind: 'changed',
       mode: args.mode,
       label: descriptor.displayName,
-      live: Boolean(live),
+      live: changedLive,
     };
   });
 }
