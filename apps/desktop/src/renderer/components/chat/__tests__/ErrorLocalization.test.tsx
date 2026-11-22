@@ -372,3 +372,21 @@ it.each([['en', en], ['zh-CN', zhCN]] as const)('tells a remote controller where
   fireEvent.click(screen.getByRole('button', { name: strings.chat.errorBanner.retry }));
   expect(onRetry).toHaveBeenCalledExactlyOnceWith('the held message');
 });
+
+// QQ's ruling: the remote controller is shown which computer to go back to. JJ 7081641637: by the
+// name the user sees in Cindy when it is known, never by the device id; otherwise the text above.
+it.each([
+  ['its display name', 'Katana desk', true],
+  ['no name', null, false],
+  ['only its id', 'device-1', false],
+] as const)('names the task computer to a remote controller when it knows %s', async (_name, deviceName, named) => {
+  const i18n = createInstance();
+  await i18n.init({ lng: 'zh-CN', resources: { 'zh-CN': { translation: zhCN } } });
+  render(<I18nextProvider i18n={i18n}><ErrorBanner
+    error="AGENT_SWITCH_PERMISSION_UNCONFIRMED: The pending switch to Antigravity would change this task's permissions"
+    retryText="the held message" onRetry={vi.fn()} onCancel={vi.fn()}
+    deviceLinkDeviceId="device-1" deviceLinkDeviceName={deviceName} /></I18nextProvider>);
+  expect(screen.queryByText(/任务所在的电脑「Katana desk」上确认/) !== null).toBe(named);
+  expect(screen.queryByText(zhCN.chat.errorBanner.agentSwitchPermissionUnconfirmedRemote) !== null).toBe(!named);
+  expect(screen.queryByText(/device-1/)).toBeNull();
+});

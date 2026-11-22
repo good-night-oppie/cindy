@@ -14930,6 +14930,7 @@
       "viewBalanceTitle": "打开「用量和计费」查看余额并充值",
       "agentSwitchPermissionUnconfirmed": "这条消息还没有发出。切换到 Antigravity 会改变这个任务的权限，这次改变还需要你确认。点「查看并确认」；你确认后才会切换并发送这条消息。",
       "agentSwitchPermissionUnconfirmedRemote": "这条消息还没有发出。切换到 Antigravity 会改变这个任务的权限，这次改变要在任务所在的那台电脑上确认，确认后才会切换并发送。那边确认后，如果这条消息还没发出，点「重试」。",
+      "agentSwitchPermissionUnconfirmedRemoteNamed": "这条消息还没有发出。切换到 Antigravity 会改变这个任务的权限，这次改变要在任务所在的电脑「{{device}}」上确认，确认后才会切换并发送。那边确认后，如果这条消息还没发出，点「重试」。",
       "agentSwitchPermissionSwitchGone": "这条消息还没有发出。它在等任务切换到 Antigravity，但那次切换已经失效了。要切换的话，重新选一个 Antigravity 的模型并确认；不想切换的话，删掉这条消息，再重新发一次。",
       "agentSwitchPermissionReview": "查看并确认",
       "credentialSwitchBusy": "其他 Codex 任务仍在运行，暂时无法应用本任务选择的供应商（共享的 Codex 进程需要重启）。等这些任务结束后再点「重试」。",

@@ -114,6 +114,11 @@ interface ErrorBannerProps {
   /** device-link 被控端设备 id。非空表示 turn 不在本机执行，本机认证恢复入口必须禁用。 */
   deviceLinkDeviceId?: string | null;
   /**
+   * The name the user sees in Cindy for the computer the task runs on, when it is known. Never
+   * the device id: the remote controller's banner tells the user which computer to go to.
+   */
+  deviceLinkDeviceName?: string | null;
+  /**
    * Whether the task has a switch into Antigravity pending. A message held for one that is no
    * longer pending (the app was restarted, or the switch withdrawn) has nothing to confirm: the
    * banner says to pick the model again. Undefined is read as pending.
@@ -188,6 +193,7 @@ export function ErrorBanner({
   remoteHostId,
   agentDeviceId,
   deviceLinkDeviceId,
+  deviceLinkDeviceName,
   agySwitchPending,
   modelId,
   providerId,
@@ -562,8 +568,11 @@ export function ErrorBanner({
     displayError = t('ipcError.PI_IMAGE_INPUT_UNSUPPORTED');
   } else if (isAgentSwitchPermissionUnconfirmedError(error)) {
     // The host takes an agreement only from the computer the task runs on.
+    const taskComputer = deviceLinkDeviceName?.trim();
     displayError = deviceLinkDeviceId
-      ? t('chat.errorBanner.agentSwitchPermissionUnconfirmedRemote')
+      ? taskComputer && taskComputer !== deviceLinkDeviceId
+        ? t('chat.errorBanner.agentSwitchPermissionUnconfirmedRemoteNamed', { device: taskComputer })
+        : t('chat.errorBanner.agentSwitchPermissionUnconfirmedRemote')
       : agySwitchPending === false
         ? t('chat.errorBanner.agentSwitchPermissionSwitchGone')
         : t('chat.errorBanner.agentSwitchPermissionUnconfirmed');
