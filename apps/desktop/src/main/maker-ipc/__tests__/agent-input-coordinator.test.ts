@@ -6057,6 +6057,8 @@ describe('AgentInputCoordinator send transaction', () => {
     const h = createHarness();
     const sid = 'held-across-restart';
     h.sendToAgent.mockResolvedValueOnce(hostSendFailure('AGENT_SWITCH_PERMISSION_UNCONFIRMED', 'confirm the change'));
+    // The queue is only written to disk once this host has read what was there.
+    await h.coordinator.ensureQueueRestored(sid);
     h.coordinator.enqueue(sid, makeItem('q-1', 'first'));
     await flush();
     await flush();
