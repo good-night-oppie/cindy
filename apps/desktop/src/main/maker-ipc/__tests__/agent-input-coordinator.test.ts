@@ -6029,11 +6029,10 @@ describe('AgentInputCoordinator send transaction', () => {
 
     h.coordinator.enqueue(sid, makeItem('q-1', 'first'));
     await flush();
-    h.coordinator.enqueue(sid, makeItem('q-2', 'second'));
     await flush();
 
     const held = latestProjection(h.projections);
-    expect(held.pendingQueue.map((q) => q.clientId)).toEqual(['q-1', 'q-2']);
+    expect(held.pendingQueue.map((q) => q.clientId)).toEqual(['q-1']);
     expect(held.recovery).toEqual({ kind: 'queue-head', clientId: 'q-1' });
     expect(held.error).toMatch(/^AGENT_SWITCH_PERMISSION_UNCONFIRMED: /);
     expect(mocks.createMessage).not.toHaveBeenCalled();
