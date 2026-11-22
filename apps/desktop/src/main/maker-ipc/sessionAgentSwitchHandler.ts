@@ -378,6 +378,11 @@ export interface MakerSessionAgentSwitchHandlerDeps {
    * 意图保留、下一条消息重试, 不把用户选择当成功消费。
    */
   onUserRouteSelectionLanded?(sessionId: string): void | Promise<void>;
+  /**
+   * The user withdrew the pending switch that stood for the model a schedule had replaced, by
+   * picking a model of the engine the task runs on. The host retires that saved model.
+   */
+  onScheduledRestoreWithdrawn?(sessionId: string): void | Promise<void>;
   log: {
     info(message: string, fields?: Record<string, unknown>): void;
     warn(message: string, fields?: Record<string, unknown>): void;
@@ -421,6 +426,12 @@ export interface PendingAgentSwitchIntent {
    * pending switch" names the revision it was asked about.
    */
   revision?: number;
+  /**
+   * Stands for the model a schedule had replaced and that could not be put back without the
+   * user's agreement (see holdAgySwitchForConfirmation). The saved model stays on record while
+   * this is pending; withdrawing it is the user's decision not to go back.
+   */
+  restoresScheduledBaseline?: true;
   /** Agent-requested complete selection, exposed by the runtime control query. */
   runtimeSource?: 'agent';
   /**
@@ -1022,6 +1033,8 @@ export async function performSessionAgentSwitch(
     // 同引擎 = 纯模型切换,调用方应走 SET_MODEL;这里按 no-op 成功返回。
     // 顺带清 pending:用户先登记了跨引擎切换、又选回当前引擎 = 改主意取消。
     let sameEngineRevision: number | undefined;
+    // Choosing to stay: the model the withdrawn switch stood for is not to be put back later.
+    const withdrawsScheduledRestore = deps.pendingSwitches?.get?.(sessionId)?.restoresScheduledBaseline === true;
     if (deps.pendingSwitches?.clearIfRevision && pendingRevisionAtStart !== undefined) {
       const clearedRevision = deps.pendingSwitches.clearIfRevision(
         sessionId,
@@ -1041,6 +1054,7 @@ export async function performSessionAgentSwitch(
       // 最小测试 harness / 旧内嵌调用方没有修订能力时维持原 no-op 清除语义。
       deps.pendingSwitches?.clear(sessionId);
     }
+    if (withdrawsScheduledRestore) await deps.onScheduledRestoreWithdrawn?.(sessionId);
     deps.onPendingSwitchChanged?.(sessionId, null);
     return {
       switched: false,
@@ -1797,21 +1811,39 @@ export function applyPendingAgentSwitchIfIdle(
  * again and was refused again. The switch is registered as pending instead, with no agreement,
  * so the task shows where to confirm it, every entry is refused the same way until then, and
  * picking a model of the current engine withdraws it. A switch already pending is the user's
- * newer choice and is left as it is. Resolves whether a pending switch now stands for it.
+ * newer choice and is left as it is.
+ *
+ * The pending switch is in memory. The saved model it stands for is not touched here: it stays
+ * on record until the switch is applied or withdrawn, so after a restart the same model is held
+ * again, with no agreement, instead of the task quietly staying where the schedule left it.
+ *
+ * Where it runs: Antigravity runs only on the task's own computer (performSessionAgentSwitch
+ * refuses any other). If the schedule moved the task to another computer, the pending switch
+ * says "back to the task's computer"; a saved model that names another computer cannot be an
+ * Antigravity one and is not held (nothing is defaulted to this computer).
+ * Resolves whether a pending switch now stands for the saved model.
  */
 export function holdAgySwitchForConfirmation(
   deps: Pick<MakerSessionAgentSwitchHandlerDeps, 'pendingSwitches' | 'onPendingSwitchChanged'>,
   sessionId: string,
-  route: { model: string; providerId: string | null; effort?: string | null; fastMode?: boolean | 'ultrafast' },
+  route: {
+    model: string; providerId: string | null; effort?: string | null; fastMode?: boolean | 'ultrafast';
+    /** Where the saved model ran: null = the task's computer; undefined = not recorded. */
+    agentDeviceId?: string | null;
+  },
+  currentAgentDeviceId?: string | null,
 ): boolean {
   if (!deps.pendingSwitches) return false;
   if (deps.pendingSwitches.get(sessionId)) return true;
+  if (route.agentDeviceId) return false;
   const intent: PendingAgentSwitchIntent = {
+    restoresScheduledBaseline: true,
     targetAgentKind: 'agy',
     model: route.model,
     providerId: route.providerId,
     ...(route.effort ? { effort: route.effort } : {}),
     ...((typeof route.fastMode === 'boolean' || route.fastMode === 'ultrafast') ? { fastMode: route.fastMode } : {}),
+    ...(currentAgentDeviceId ? { targetAgentDeviceId: null } : {}),
   };
   deps.pendingSwitches.set(sessionId, intent);
   deps.onPendingSwitchChanged?.(sessionId, projectPendingAgentSwitchIntent(intent));

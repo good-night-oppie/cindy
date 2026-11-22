@@ -86,6 +86,7 @@ function fixture(initialMode: string) {
 
   // The registry the app uses: it stamps each registration with the session's revision.
   const pendingSwitches = createPendingAgentSwitchRegistry();
+  const hooks = { landed: () => {}, restoreWithdrawn: () => {} };
   const guards: Array<{ guarded: boolean; agreement?: unknown }> = [];
   const switchDeps: MakerSessionAgentSwitchHandlerDeps = {
     confirmNativeHistoryFallback: vi.fn(async () => true),
@@ -114,6 +115,8 @@ function fixture(initialMode: string) {
     withCloseSuppressed: vi.fn((_sessionId, fn) => fn()),
     withSessionLock: withSendToSessionLock,
     pendingSwitches,
+    onUserRouteSelectionLanded: () => { hooks.landed(); },
+    onScheduledRestoreWithdrawn: () => { hooks.restoreWithdrawn(); },
     log: { info: vi.fn(), warn: vi.fn() },
   };
   const ipc = new IpcHarness();
@@ -192,8 +195,13 @@ function fixture(initialMode: string) {
     shownRevision: async () =>
       ((await ipc.invoke(MAKER_INVOKE.GET_SESSION_AGENT_SWITCH_INTENT, id)) as { agyPermissionRevision?: number } | null)?.agyPermissionRevision,
     /** As register.ts wires the schedule's restore: the refused switch becomes a pending one. */
-    hold: (route: Pick<ScheduledModelSelection, 'model' | 'providerId' | 'effort' | 'fastMode'>) =>
-      holdAgySwitchForConfirmation(switchDeps, id, route),
+    hold: (route: Pick<ScheduledModelSelection, 'model' | 'providerId'> & Partial<Pick<ScheduledModelSelection, 'effort' | 'fastMode' | 'agentDeviceId'>>,
+      currentAgentDeviceId?: string | null) => holdAgySwitchForConfirmation(switchDeps, id, route, currentAgentDeviceId),
+    hasPendingSwitch: () => !!switchDeps.pendingSwitches?.get(id),
+    onLanded: (fn: () => void) => { hooks.landed = fn; },
+    onRestoreWithdrawn: (fn: () => void) => { hooks.restoreWithdrawn = fn; },
+    /** The app is quit and started again: pending switches are memory only; the store is not. */
+    restartHost: () => { switchDeps.pendingSwitches = createPendingAgentSwitchRegistry(); },
     pendingSwitch: () => ipc.invoke(MAKER_INVOKE.GET_SESSION_AGENT_SWITCH_INTENT, id),
     /** Picking a model of the engine the task runs on withdraws the pending switch. */
     withdrawSwitch: () => ipc.invoke(MAKER_INVOKE.SWITCH_SESSION_AGENT, id, 'claude-code', 'claude-test', null),
@@ -443,58 +451,116 @@ describe('switching a task into Antigravity from the model picker, with permissi
     expect(h.log).toEqual(['switched agy auto', 'launch agy auto isolated']);
   });
 
-  // DD 7080449825 (the rest of blocker 2): after a scheduled run with its own model, the next send
-  // puts the user's model back. When that is a switch into Antigravity which would change the
-  // task's permissions, the host refuses it, and it did so again on every later send, with no
-  // switch pending that anyone could confirm: the task was stuck. The refused restore now becomes
-  // a pending switch without agreement and the saved model is retired, so the existing entries
-  // apply: nothing is sent until the user confirms in the task, or withdraws the switch.
+  // DD 7080449825 (the rest of blocker 2) and QQ's ruling on it. After a scheduled run with its own
+  // model, the next send puts the user's model back. When that is a switch into Antigravity which
+  // would change the task's permissions, the host refuses it, and it did so again on every later
+  // send with no switch pending that anyone could confirm: the task was stuck.
+  // The refused restore now becomes a pending switch without agreement. The saved model stays on
+  // record (it is what the task shows as its model, and it survives a restart) until the user
+  // confirms, withdraws, or picks something else; while the switch is pending the restore is not
+  // attempted again; after a restart nothing agreed earlier counts.
   // The scope, the registry and both handlers are real; the store and the runtime are stand-ins.
-  it.each(['confirms', 'withdraws'] as const)('turns a refused restore of the model a schedule replaced into a pending switch, and sends nothing until the user %s', async (answer) => {
-    const h = fixture('bypassPermissions');
-    const usersModel: ScheduledModelSelection = { agentKind: 'agy', model: 'gemini-test', providerId: null, effort: null, fastMode: false };
+  // Retiring the saved model is the host's updateScheduledPreference(null), stood in for here.
+  function scheduleReplacedTheModel(h: ReturnType<typeof fixture>, currentAgentDeviceId: string | null = null) {
+    const usersModel: ScheduledModelSelection = { agentKind: 'agy', model: 'gemini-test', providerId: null, effort: null, fastMode: false, agentDeviceId: null };
     let profile: ScheduledModelSelection = usersModel;
-    let baseline: string | null = null;
+    const saved = { baseline: null as string | null, retiredBy: [] as string[] };
     const restores: string[] = [];
+    h.onLanded(() => { saved.baseline = null; saved.retiredBy.push('landed'); });
+    h.onRestoreWithdrawn(() => { saved.baseline = null; saved.retiredBy.push('withdrawn'); });
     const scope = createScheduledModelScope({
       createId: () => 'scope-1',
-      read: async () => ({ profile: { ...profile, effort: profile.effort ?? '' }, baseline }),
-      write: async (_id, value) => { baseline = value ? JSON.stringify(value) : null; },
+      read: async () => ({ profile: { ...profile, effort: profile.effort ?? '' }, baseline: saved.baseline }),
+      write: async (_id, value) => { saved.baseline = value ? JSON.stringify(value) : null; },
       isBusy: () => false,
-      apply: async (_id, saved) => {
-        restores.push(saved.model);
-        await h.switchFromHost({ applyNow: true, configStaged: true, model: saved.model });
+      apply: async (_id, target) => {
+        restores.push(target.model);
+        await h.switchFromHost({ applyNow: true, configStaged: true, model: target.model });
       },
-      holdBaselineForConfirmation: (_id, saved) => saved.agentKind === 'agy' && h.hold(saved),
+      holdBaselineForConfirmation: (_id, target, current) => target.agentKind === 'agy' && h.hold(target, current.agentDeviceId),
+      baselineAwaitsPendingSwitch: (_id, target) => target.agentKind === 'agy' && h.hasPendingSwitch(),
     });
-    await scope.begin(h.id);
-    profile = { agentKind: 'claude-code', model: 'claude-test', providerId: null, effort: null, fastMode: false };
-    expect(baseline).not.toBeNull();
-    // The send step, in the order register.ts runs it.
-    const send = async () => { await scope.restore(h.id); await h.send(); };
+    return {
+      saved, restores,
+      begin: async () => {
+        await scope.begin(h.id);
+        profile = { agentKind: 'claude-code', model: 'claude-test', providerId: null, effort: null, fastMode: false, agentDeviceId: currentAgentDeviceId };
+      },
+      /** The send step, in the order register.ts runs it. */
+      send: async () => { await scope.restore(h.id); await h.send(); },
+    };
+  }
+  const HELD = { code: 'AGENT_SWITCH_PERMISSION_UNCONFIRMED' };
 
-    await expect(send()).rejects.toMatchObject({ code: 'AGENT_SWITCH_PERMISSION_UNCONFIRMED' });
-    expect(baseline).toBeNull();
+  it('keeps the model a schedule replaced on record while its refused restore waits, across a restart, and applies it once when the user confirms', async () => {
+    const h = fixture('bypassPermissions');
+    const s = scheduleReplacedTheModel(h);
+    await s.begin();
+
+    await expect(s.send()).rejects.toMatchObject(HELD);
+    expect(JSON.parse(s.saved.baseline!)).toMatchObject({ agentKind: 'agy', model: 'gemini-test', agentDeviceId: null });
     await expect(h.pendingSwitch()).resolves.toMatchObject({ targetAgentKind: 'agy', model: 'gemini-test', agyPermissionAgreement: null });
-    await expect(send()).rejects.toMatchObject({ code: 'AGENT_SWITCH_PERMISSION_UNCONFIRMED' });
-    expect(restores).toEqual(['gemini-test']);
+    // Waiting: the restore is not tried again and nothing is registered again.
+    const registered = await h.shownRevision();
+    await expect(s.send()).rejects.toMatchObject(HELD);
+    await expect(s.send()).rejects.toMatchObject(HELD);
+    expect(s.restores).toEqual(['gemini-test']);
+    expect(await h.shownRevision()).toBe(registered);
+
+    // The user agrees, and the app is restarted before any message is sent.
+    await expect(h.agreeOnly('bypassPermissions')).resolves.toMatchObject({ agyPermissionAgreementRecorded: true });
+    h.restartHost();
+    await expect(h.pendingSwitch()).resolves.toBeNull();
+    expect(JSON.parse(s.saved.baseline!)).toMatchObject({ agentKind: 'agy', model: 'gemini-test' });
+    // Still refused, still nothing sent anywhere; the same model is held again, with no agreement.
+    await expect(s.send()).rejects.toMatchObject(HELD);
+    await expect(h.pendingSwitch()).resolves.toMatchObject({ model: 'gemini-test', agyPermissionAgreement: null });
+    expect(s.restores).toEqual(['gemini-test', 'gemini-test']);
     expect(h.log).toEqual([]);
     expect(h.row).toMatchObject({ agentKind: 'cc', permissionMode: 'bypassPermissions' });
 
-    if (answer === 'confirms') {
-      await expect(h.agreeOnly('bypassPermissions')).resolves.toMatchObject({ agyPermissionAgreementRecorded: true });
-      await send();
-      await send();
-      expect(h.log).toEqual(['switched agy auto', 'launch agy auto isolated']);
-    } else {
-      // Picking a model of the engine the task runs on: it stays there, with its permissions.
-      await h.withdrawSwitch();
-      await send();
-      expect(h.log).toEqual([]);
-      expect(h.row).toMatchObject({ agentKind: 'cc', permissionMode: 'bypassPermissions' });
-      await expect(h.pendingSwitch()).resolves.toBeNull();
-    }
-    expect(restores).toEqual(['gemini-test']);
+    await expect(h.agreeOnly('bypassPermissions')).resolves.toMatchObject({ agyPermissionAgreementRecorded: true });
+    await s.send();
+    await s.send();
+    expect(h.log).toEqual(['switched agy auto', 'launch agy auto isolated']);
+    expect(s.saved).toMatchObject({ baseline: null, retiredBy: ['landed'] });
+    expect(s.restores).toEqual(['gemini-test', 'gemini-test']);
+  });
+
+  it('does not put the model back once the user withdraws the held restore, not even after a restart', async () => {
+    const h = fixture('bypassPermissions');
+    const s = scheduleReplacedTheModel(h);
+    await s.begin();
+    await expect(s.send()).rejects.toMatchObject(HELD);
+
+    // Picking a model of the engine the task runs on: it stays there, with its permissions.
+    await h.withdrawSwitch();
+    expect(s.saved).toMatchObject({ baseline: null, retiredBy: ['withdrawn'] });
+    await s.send();
+    h.restartHost();
+    await s.send();
+    expect(h.log).toEqual([]);
+    expect(h.row).toMatchObject({ agentKind: 'cc', permissionMode: 'bypassPermissions' });
+    await expect(h.pendingSwitch()).resolves.toBeNull();
+    expect(s.restores).toEqual(['gemini-test']);
+  });
+
+  // Where it goes back to. Antigravity runs only on the task's own computer, so a saved
+  // Antigravity model was running there. If the schedule moved the task elsewhere, the held switch
+  // says "back to the task's computer" rather than leaving the place to whatever is current; a
+  // saved model that names another computer is not held at all, so nothing is defaulted to here.
+  it('holds the restore for the place the saved model ran in', async () => {
+    const moved = fixture('bypassPermissions');
+    expect(moved.hold({ model: 'gemini-test', providerId: null, agentDeviceId: null }, 'device-2')).toBe(true);
+    await expect(moved.pendingSwitch()).resolves.toMatchObject({ targetAgentKind: 'agy', agentDeviceId: null });
+
+    const sameComputer = fixture('bypassPermissions');
+    expect(sameComputer.hold({ model: 'gemini-test', providerId: null, agentDeviceId: null }, null)).toBe(true);
+    expect(await sameComputer.pendingSwitch()).not.toHaveProperty('agentDeviceId');
+
+    const elsewhere = fixture('bypassPermissions');
+    expect(elsewhere.hold({ model: 'gemini-test', providerId: null, agentDeviceId: 'device-2' }, null)).toBe(false);
+    await expect(elsewhere.pendingSwitch()).resolves.toBeNull();
   });
 
   it('records an agreement only for the stored mode it was given for, and not from a remote controller', async () => {

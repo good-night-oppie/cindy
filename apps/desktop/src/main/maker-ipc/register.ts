@@ -11487,6 +11487,8 @@ export function registerMakerIpc(maker: Maker, options: RegisterMakerIpcOptions)
       if (intent) recordUserSessionRuntimeMutation(sessionId);
       broadcastSessionPatched(sessionId, { agentSwitchIntent: intent });
     },
+    // Same effect as any other selection of the user's that lands: the saved model is retired.
+    onScheduledRestoreWithdrawn: async (sessionId) => { await updateScheduledPreference(sessionId, null); },
     // 用户选择落地 → 给 IM 任务打「脱离跟随」标记(同值重选也永久脱离, PR #5155)。
     onUserRouteSelectionLanded: async (sessionId) => {
       await updateScheduledPreference(sessionId, null);
@@ -11797,8 +11799,9 @@ export function registerMakerIpc(maker: Maker, options: RegisterMakerIpcOptions)
   const scheduledModelScope = createScheduledModelScope({
     createId,
     ownerEpoch: captureSessionRuntimeControlOwnerEpoch,
-    holdBaselineForConfirmation: (sessionId, baseline) => baseline.agentKind === 'agy'
-      && holdAgySwitchForConfirmation(agentSwitchDeps, sessionId, baseline),
+    holdBaselineForConfirmation: (sessionId, baseline, current) => baseline.agentKind === 'agy'
+      && holdAgySwitchForConfirmation(agentSwitchDeps, sessionId, baseline, current.agentDeviceId),
+    baselineAwaitsPendingSwitch: (sessionId, baseline) => baseline.agentKind === 'agy' && !!agentSwitchPending.get(sessionId),
     prepareBaseline: async (sessionId) => {
       await reconcileBotModelRoute(sessionId, true);
       // Reconciliation applies idle companion choices through the normal switch
