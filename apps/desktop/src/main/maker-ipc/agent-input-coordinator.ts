@@ -3986,6 +3986,9 @@ export class AgentInputCoordinator {
     const deliveryIds = [...new Set([...(current.mergedDeliveryClientIds ?? []), ...(replacement.mergedDeliveryClientIds ?? [])])];
     if (deliveryIds.length) replacement.mergedDeliveryClientIds = deliveryIds;
     if (current.clientId === replacement.clientId) {
+      // Editing the text does not change which engine the message was waiting for.
+      if (current.awaitsAgySwitchConfirmation) replacement.awaitsAgySwitchConfirmation = true;
+      else delete replacement.awaitsAgySwitchConfirmation;
       if (this.restoredQueueItems.has(current)) this.restoredQueueItems.add(replacement);
       // Editing content cannot erase or forge the host's stable retry lineage.
       replacement.retrySourceClientId = current.retrySourceClientId;
@@ -6031,6 +6034,7 @@ export class AgentInputCoordinator {
     }
     const message = sendFailureMessage(result);
     const logFields = sendFailureLogFields(result);
+    const heldForAgySwitch = result.kind === 'host-send' && result.code === 'AGENT_SWITCH_PERMISSION_UNCONFIRMED';
 
     if (!active.persisted) {
       if (isSessionRunningSendFailure(result)) {
@@ -6055,6 +6059,12 @@ export class AgentInputCoordinator {
       if (!latest.pendingQueue.some((q) => q.clientId === item.clientId)) {
         latest.pendingQueue = [item, ...latest.pendingQueue];
         this.prependPendingCompactWaitClientId(latest, item.clientId);
+      }
+      // Outlives the pending switch it waits for (see the field).
+      if (heldForAgySwitch) {
+        for (const queued of latest.pendingQueue) {
+          if (queued.clientId === item.clientId) queued.awaitsAgySwitchConfirmation = true;
+        }
       }
       this.clearCredentialSwitchWait(latest);
       latest.error = message;

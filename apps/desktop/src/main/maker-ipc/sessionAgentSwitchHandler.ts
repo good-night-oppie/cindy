@@ -1767,6 +1767,22 @@ export function applyPendingAgentSwitchIfIdle(
   return run;
 }
 
+/**
+ * The last check before a queued message is dispatched, after the pending switch (if any) was
+ * applied. A message that was once held for an unconfirmed switch into Antigravity was written
+ * for that engine; the switch it waited for is only in memory and is gone after a restart, when
+ * the queue comes back. Without this the message would then go to the engine the task still
+ * runs on. It goes only once the task runs Antigravity, that is after the user has picked the
+ * engine again and agreed; until then it is refused the same way and stays at the queue's head.
+ */
+export async function assertMessageHeldForAgySwitchMayGo(
+  deps: Pick<MakerSessionAgentSwitchHandlerDeps, 'getSessionRow'>, sessionId: string, wasHeldForAgySwitch: boolean,
+): Promise<void> {
+  if (!wasHeldForAgySwitch) return;
+  const row = await deps.getSessionRow(sessionId);
+  if (row && row.agentKind !== 'agy') throw new AgentSwitchPermissionUnconfirmedError();
+}
+
 export function registerMakerSessionAgentSwitchHandler(
   registry: IpcHandlerRegistry,
   deps: MakerSessionAgentSwitchHandlerDeps,

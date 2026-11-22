@@ -309,6 +309,14 @@ export interface AgentInputQueuedMessage {
   autoReviewUserText?: string | AgentRequestReceipt;
   /** Host-owned text-only input; retained by queue persistence and retry. */
   toolsDisabled?: boolean;
+  /**
+   * Host-stamped when this message was refused because the task's pending switch into
+   * Antigravity would change its permissions without an agreement. The pending switch lives in
+   * memory and the queue does not, so after a restart only this says that the message was never
+   * meant for the engine the task still runs on: it is not dispatched until the task runs
+   * Antigravity. Retained by queue persistence and edits; removing the message is the way out.
+   */
+  awaitsAgySwitchConfirmation?: true;
   clientId: string;
   /** Opt-in: a cancelled delivery ID must never become a fresh enqueue on reconnect. */
   durableDelivery?: true;

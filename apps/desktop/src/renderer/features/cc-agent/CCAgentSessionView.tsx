@@ -5628,6 +5628,7 @@ function CCAgentSessionContent({
                 agentKind={session?.agentKind}
                 remoteHostId={session?.remoteHostId ?? undefined}
                 deviceLinkDeviceId={remoteDeviceId}
+                agySwitchPending={agentSwitchIntent?.target === 'agy'}
                 agentDeviceId={session?.agentDeviceId}
                 modelId={session?.model}
                 providerId={session?.providerId}

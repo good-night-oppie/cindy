@@ -39,7 +39,7 @@ import {
   isRemoteAgentResumeRejectedError,
 } from '@cindy/maker-shared/error-redaction';
 import { chatRemoteErrorGuidanceKey } from '@/lib/autoReviewUnavailableGuidance';
-import { AlertCircle, ArrowRightLeft, Check, Split, Play, RotateCcw, RefreshCw, Timer, Wallet } from 'lucide-react';
+import { AlertCircle, ArrowRightLeft, Check, Info, Split, Play, RotateCcw, RefreshCw, Timer, Wallet } from 'lucide-react';
 import { useTranslation } from 'react-i18next';
 import { toast } from '@/lib/toast';
 import { Spinner } from '@/components/ui/spinner';
@@ -113,6 +113,12 @@ interface ErrorBannerProps {
   remoteHostId?: string;
   /** device-link 被控端设备 id。非空表示 turn 不在本机执行，本机认证恢复入口必须禁用。 */
   deviceLinkDeviceId?: string | null;
+  /**
+   * Whether the task has a switch into Antigravity pending. A message held for one that is no
+   * longer pending (the app was restarted, or the switch withdrawn) has nothing to confirm: the
+   * banner says to pick the model again. Undefined is read as pending.
+   */
+  agySwitchPending?: boolean;
   /** 当前 session 的 model id。用于判断 OpenAI/ChatGPT 连接来源及桥接模型。 */
   modelId?: string;
   /** 当前会话显式选择的模型来源。OpenAI 重连只能处理 openai / 无显式来源的历史会话；
@@ -182,6 +188,7 @@ export function ErrorBanner({
   remoteHostId,
   agentDeviceId,
   deviceLinkDeviceId,
+  agySwitchPending,
   modelId,
   providerId,
   onSwitchToClaudeSubscription,
@@ -201,6 +208,9 @@ export function ErrorBanner({
   // A message the host holds until the user confirms a permission change: Escape closes the
   // confirmation dialog, and must not also take away the only place to open it again.
   const heldForPermissionConfirmation = isAgentSwitchPermissionUnconfirmedError(error);
+  // The action opens the confirmation here; elsewhere (a remote controller, a switch that is no
+  // longer pending) it is the ordinary retry.
+  const reviewsHeldPermission = heldForPermissionConfirmation && !deviceLinkDeviceId && agySwitchPending !== false;
   useEffect(() => {
     if (!dismissOnEscape || !onCancel || heldForPermissionConfirmation) return;
     const onKeyDown = (event: KeyboardEvent) => {
@@ -550,7 +560,9 @@ export function ErrorBanner({
     // The host takes an agreement only from the computer the task runs on.
     displayError = deviceLinkDeviceId
       ? t('chat.errorBanner.agentSwitchPermissionUnconfirmedRemote')
-      : t('chat.errorBanner.agentSwitchPermissionUnconfirmed');
+      : agySwitchPending === false
+        ? t('chat.errorBanner.agentSwitchPermissionSwitchGone')
+        : t('chat.errorBanner.agentSwitchPermissionUnconfirmed');
   } else if (isCredentialSwitchBusy) {
     displayError = t('chat.errorBanner.credentialSwitchBusy');
   } else if (isAccountBoundaryPending) {
@@ -825,6 +837,9 @@ export function ErrorBanner({
       icon={
         openAiConnectionRecoveredSinceError ? (
           <Check size={16} className="text-[var(--text-secondary)]" />
+        ) : heldForPermissionConfirmation ? (
+          // Waiting for the user, not a failure: the neutral mark, for this state only.
+          <Info size={16} className="text-[var(--text-secondary)]" />
         ) : (
           <AlertCircle
             size={16}
@@ -981,11 +996,10 @@ export function ErrorBanner({
               disabled={forkStripEncryptedRunning}
               loading={retrying}
               onClick={() => void handleRetry()}
-              title={t('chat.errorBanner.retryTitle')}
+              title={reviewsHeldPermission ? undefined : t('chat.errorBanner.retryTitle')}
             >
-              <RotateCcw size={12} />
-              {heldForPermissionConfirmation && !deviceLinkDeviceId
-                ? t('chat.errorBanner.agentSwitchPermissionReview') : t('chat.errorBanner.retry')}
+              {!reviewsHeldPermission && <RotateCcw size={12} />}
+              {reviewsHeldPermission ? t('chat.errorBanner.agentSwitchPermissionReview') : t('chat.errorBanner.retry')}
             </Button>
           )}
           {(showHistoryRecovery || showInvalidEncryptedContentRecovery) && onForkStripEncrypted && (

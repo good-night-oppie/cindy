@@ -1195,6 +1195,7 @@ import {
 } from '../../shared/orcaRemoteWorker.js';
 import {
   applyPendingAgentSwitchIfIdle,
+  assertMessageHeldForAgySwitchMayGo,
   createPendingAgentSwitchRegistry,
   isUserPendingAgentSwitchIntent,
   performSessionAgentSwitch,
@@ -18312,6 +18313,10 @@ export function registerMakerIpc(maker: Maker, options: RegisterMakerIpcOptions)
     applyPendingAgentSwitch: async (sessionId, options) => {
       if (!options?.scheduled) await scheduledModelScope.restore(sessionId);
       await applyPendingAgentSwitchIfIdle(agentSwitchDeps, sessionId);
+      const dispatchedClientId = options?.clientId;
+      await assertMessageHeldForAgySwitchMayGo(agentSwitchDeps, sessionId, !!dispatchedClientId
+        && (agentInputCoordinatorHolder?.hasQueuedItemWhere(sessionId,
+          item => item.clientId === dispatchedClientId && item.awaitsAgySwitchConfirmation === true) ?? false));
       if (!options?.scheduled) await recoverRenamedSessionModelOnSend(sessionId);
       // 桌面发送也是「消息真正发出去」的边界：回合中登记、随后被模型选择器取消的预算
       // 重建必须在这里补一次（调用方已持 send 锁）。

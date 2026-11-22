@@ -25,6 +25,8 @@ import { createInterruptedTurnAutoResumeHooks } from '../interruptedTurnAutoResu
 import { ProviderGroupUsageLimitError, providerGroupSwitchCause } from '../../provider-group/failurePolicy.js';
 import { SUPERSEDE_ASYNC_QUESTIONS, type Session } from '@cindy/maker-core';
 import { createSessionBindingLifecycle, createSessionCloseTeardown } from '../sessionBindingLifecycle.js';
+import { assertMessageHeldForAgySwitchMayGo } from '../sessionAgentSwitchHandler.js';
+import { AgentSwitchPermissionUnconfirmedError } from '../agentSwitchPermissionAgreement.js';
 import { captureProductTurnFailureOwner, createDeferredProductTurnFailureGate } from '../productTurnFailureOwner.js';
 import { createProviderGroupHeldRecovery, createProviderGroupHeldTurnErrors } from '../../provider-group/heldTurnErrors.js';
 import { createProviderGroupHeldWorkerTerminals } from '../../provider-group/heldWorkerTerminals.js';
@@ -6042,6 +6044,70 @@ describe('AgentInputCoordinator send transaction', () => {
     await flush();
     expect(h.sendToAgent).toHaveBeenCalledTimes(2);
     expect(h.sendToAgent.mock.calls[1]?.[1]).toMatchObject({ content: 'first' });
+  });
+
+  // cindy#19 (QQ's ruling on restarts): the pending switch is in the host's memory, the queue is
+  // on disk. After a restart the held message was still at the queue's head and the switch was
+  // gone, so "Continue sending" would have sent it to the engine the task still ran on, which the
+  // user never chose for it. The held item now carries that it was waiting for Antigravity, through
+  // persistence and edits, and the send step refuses it until the task runs Antigravity.
+  // The queue and its snapshot are real, on a second coordinator standing for the restarted host;
+  // the send step is the stand-in, applying the real rule the way register.ts wires it.
+  it('after a restart keeps a message that was held for a switch into Antigravity off the old engine, and sends it once the task runs Antigravity', async () => {
+    const h = createHarness();
+    const sid = 'held-across-restart';
+    h.sendToAgent.mockResolvedValueOnce(hostSendFailure('AGENT_SWITCH_PERMISSION_UNCONFIRMED', 'confirm the change'));
+    h.coordinator.enqueue(sid, makeItem('q-1', 'first'));
+    await flush();
+    await flush();
+    expect(h.coordinator.replaceQueuedMessage(sid, 'q-1', makeItem('q-1', 'first, edited'))).toBe(true);
+    await flush();
+    const snapshot = JSON.parse(JSON.stringify(h.persistQueueSnapshot.mock.calls.at(-1)?.[1] ?? []));
+    expect(snapshot).toHaveLength(1);
+    expect(snapshot[0]).toMatchObject({ clientId: 'q-1', text: 'first, edited', awaitsAgySwitchConfirmation: true });
+
+    const restarted = createHarness();
+    restarted.setLoadQueueSnapshot(async () => snapshot);
+    await restarted.coordinator.ensureQueueRestored(sid);
+    const row = { agentKind: 'cc' };
+    const dispatched: unknown[] = [];
+    restarted.sendToAgent.mockImplementation(async (id, message, _create, opts) => {
+      // No pending switch survived, so nothing is applied before the check.
+      const clientId = opts?.persistUserMessage?.clientId;
+      try {
+        await assertMessageHeldForAgySwitchMayGo({ getSessionRow: async () => row as never }, id,
+          restarted.coordinator.hasQueuedItemWhere(id, item => item.clientId === clientId && item.awaitsAgySwitchConfirmation === true));
+      } catch (error) {
+        if (!(error instanceof AgentSwitchPermissionUnconfirmedError)) throw error;
+        return hostSendFailure(error.code, error.message);
+      }
+      dispatched.push((message as { content?: unknown }).content);
+      return sendSuccess();
+    });
+
+    // The ordinary "Continue sending" of a queue paused by the restart.
+    restarted.coordinator.resume(sid);
+    await flush();
+    await flush();
+    expect(dispatched).toEqual([]);
+    const held = restarted.coordinator.getProjection(sid);
+    expect(held.pendingQueue.map((q) => q.clientId)).toEqual(['q-1']);
+    expect(held.recovery).toEqual({ kind: 'queue-head', clientId: 'q-1' });
+    expect(held.error).toMatch(/^AGENT_SWITCH_PERMISSION_UNCONFIRMED: /);
+    expect(mocks.createMessage).not.toHaveBeenCalled();
+
+    // Asking again without having picked the engine again changes nothing.
+    await restarted.coordinator.retryLastError(sid);
+    await flush();
+    expect(dispatched).toEqual([]);
+    expect(restarted.coordinator.getProjection(sid).pendingQueue.map((q) => q.clientId)).toEqual(['q-1']);
+
+    // The user picks a Gemini model again and agrees; the send step applies that switch.
+    row.agentKind = 'agy';
+    await restarted.coordinator.retryLastError(sid);
+    await flush();
+    await flush();
+    expect(dispatched).toEqual(['first, edited']);
   });
 
   it.each(['WORKDIR_MISSING', 'LAZY_CREATE_FAILED'] as const)('keeps %s recoverable without leaving an active turn', async code => {

@@ -1,4 +1,5 @@
 import { useCallback, useRef, type CSSProperties } from 'react';
+import { Info } from 'lucide-react';
 import { useTranslation } from 'react-i18next';
 import { Button } from '@/components/ui/button';
 import type { ConfirmOptions } from '@/components/ui/confirm-dialog-provider';
@@ -85,6 +86,8 @@ export function AgySwitchPermissionPendingNotice({
       style={style}
       data-testid="agy-switch-permission-pending-notice"
       data-banner-kind="agy-switch-permission-pending"
+      // Waiting for the user, not a failure: the neutral mark the held-message banner uses.
+      icon={<Info size={16} className="text-[var(--text-secondary)]" />}
       message={t('newChat.chatInput.agentSwitch.permissionEntry.notice')}
       actions={(
         <Button size="sm" compact type="button" onClick={() => void review()}>
