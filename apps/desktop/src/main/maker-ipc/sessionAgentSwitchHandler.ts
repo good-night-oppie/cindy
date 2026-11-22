@@ -414,6 +414,13 @@ export interface SessionAgentSwitchResult {
 
 /** 登记的切换意图(下一条消息发送时刻执行;effort/fastMode 由 renderer 按目标引擎解析好带入)。 */
 export interface PendingAgentSwitchIntent {
+  /**
+   * Stamped by the registry when the intent is stored: the session's revision at that moment.
+   * Revisions only grow within a session (a clear counts too), so no two registrations share
+   * one, not even identical ones made before and after a withdrawal. An answer about "the
+   * pending switch" names the revision it was asked about.
+   */
+  revision?: number;
   /** Agent-requested complete selection, exposed by the runtime control query. */
   runtimeSource?: 'agent';
   /**
@@ -486,6 +493,12 @@ export interface PublicAgentSwitchIntent {
    * windows ignore it.
    */
   agyPermissionAgreement?: AgySwitchPermissionAgreement | null;
+  /**
+   * Antigravity only: which registration this is (see PendingAgentSwitchIntent.revision). A
+   * window sends it back with an agreement, so that the agreement lands on the registration the
+   * user was shown and on no other.
+   */
+  agyPermissionRevision?: number;
   /** The switch was staged by configuration, not picked by the user in this task. */
   configStaged?: true;
 }
@@ -518,6 +531,7 @@ export function projectPendingAgentSwitchIntent(
     ...((typeof intent.fastMode === 'boolean' || intent.fastMode === 'ultrafast') ? { fastMode: intent.fastMode } : {}),
     ...(intent.targetAgentDeviceId !== undefined ? { agentDeviceId: intent.targetAgentDeviceId } : {}),
     ...(intent.targetAgentKind === 'agy' ? { agyPermissionAgreement: intent.agyPermissionAgreement ?? null } : {}),
+    ...(intent.targetAgentKind === 'agy' && typeof intent.revision === 'number' ? { agyPermissionRevision: intent.revision } : {}),
     ...(intent.targetAgentKind === 'agy' && intent.configStaged === true ? { configStaged: true as const } : {}),
   };
 }
@@ -525,20 +539,29 @@ export function projectPendingAgentSwitchIntent(
 /**
  * Records the user's agreement to the permission rewrite of the switch into Antigravity that is
  * pending right now, and nothing else: no switch is registered, replaced or applied, and no
- * message is sent. The caller names the switch the user was asked about; when that switch has
- * since been withdrawn or replaced, nothing is recorded, so an answer to an old question cannot
- * authorize a newer switch. Resolves whether the agreement was recorded.
+ * message is sent. The caller names the registration the user was asked about by the revision
+ * the host stamped on it. A switch withdrawn and registered again is another registration even
+ * when every parameter is the same, so an answer to an old question cannot authorize a newer
+ * switch: when the revision is not the pending one's, nothing is recorded. The model and
+ * provider are compared too, as a second reading of the same thing. Resolves whether the
+ * agreement was recorded.
  */
 export function recordAgySwitchPermissionAgreement(
   deps: Pick<MakerSessionAgentSwitchHandlerDeps, 'pendingSwitches' | 'onPendingSwitchChanged'>,
   sessionId: string,
-  askedAbout: { model: unknown; providerId: unknown },
+  askedAbout: { revision: unknown; model: unknown; providerId: unknown },
   agreement: unknown,
 ): boolean {
   const parsed = parseAgySwitchPermissionAgreement(agreement);
   const pending = deps.pendingSwitches?.get?.(sessionId);
   if (!parsed || !pending || pending.targetAgentKind !== 'agy' || pending.model !== askedAbout.model
     || (pending.providerId ?? null) !== (typeof askedAbout.providerId === 'string' && askedAbout.providerId ? askedAbout.providerId : null)) {
+    return false;
+  }
+  // Checked where it is written. A registry that issues no revisions cannot tell registrations
+  // apart, so nothing is recorded through it.
+  if (typeof askedAbout.revision !== 'number' || pending.revision !== askedAbout.revision
+    || deps.pendingSwitches?.revision?.(sessionId) !== askedAbout.revision) {
     return false;
   }
   const updated: PendingAgentSwitchIntent = { ...pending, agyPermissionAgreement: parsed };
@@ -557,8 +580,8 @@ export function createPendingAgentSwitchRegistry(): PendingAgentSwitchRegistry {
   };
   return {
     set: (sessionId, intent) => {
+      intent.revision = bump(sessionId);
       pending.set(sessionId, intent);
-      bump(sessionId);
     },
     get: (sessionId) => pending.get(sessionId),
     clear: (sessionId) => {
@@ -1768,6 +1791,34 @@ export function applyPendingAgentSwitchIfIdle(
 }
 
 /**
+ * A switch into Antigravity that the host wanted to make on its own (putting back the model a
+ * schedule had replaced) and that was refused because it would change the task's permissions
+ * without the user's agreement. Refusing alone left nothing to agree to: every later send tried
+ * again and was refused again. The switch is registered as pending instead, with no agreement,
+ * so the task shows where to confirm it, every entry is refused the same way until then, and
+ * picking a model of the current engine withdraws it. A switch already pending is the user's
+ * newer choice and is left as it is. Resolves whether a pending switch now stands for it.
+ */
+export function holdAgySwitchForConfirmation(
+  deps: Pick<MakerSessionAgentSwitchHandlerDeps, 'pendingSwitches' | 'onPendingSwitchChanged'>,
+  sessionId: string,
+  route: { model: string; providerId: string | null; effort?: string | null; fastMode?: boolean | 'ultrafast' },
+): boolean {
+  if (!deps.pendingSwitches) return false;
+  if (deps.pendingSwitches.get(sessionId)) return true;
+  const intent: PendingAgentSwitchIntent = {
+    targetAgentKind: 'agy',
+    model: route.model,
+    providerId: route.providerId,
+    ...(route.effort ? { effort: route.effort } : {}),
+    ...((typeof route.fastMode === 'boolean' || route.fastMode === 'ultrafast') ? { fastMode: route.fastMode } : {}),
+  };
+  deps.pendingSwitches.set(sessionId, intent);
+  deps.onPendingSwitchChanged?.(sessionId, projectPendingAgentSwitchIntent(intent));
+  return true;
+}
+
+/**
  * The last check before a queued message is dispatched, after the pending switch (if any) was
  * applied. A message that was once held for an unconfirmed switch into Antigravity was written
  * for that engine; the switch it waited for is only in memory and is gone after a restart, when
@@ -1820,7 +1871,9 @@ export function registerMakerSessionAgentSwitchHandler(
         && (options as { agyPermissionAgreementOnly?: unknown }).agyPermissionAgreementOnly === true) {
         if (typeof sessionId !== 'string' || sessionId.length === 0) throwIpcError('INVALID_PARAMS', 'sessionId required');
         const recorded = !isDeviceLinkInvoke() && targetAgentKind === 'agy'
-          && recordAgySwitchPermissionAgreement(deps, sessionId, { model, providerId }, agyPermissionAgreement);
+          && recordAgySwitchPermissionAgreement(deps, sessionId, {
+            revision: (options as { agyPermissionRevision?: unknown }).agyPermissionRevision, model, providerId,
+          }, agyPermissionAgreement);
         return {
           switched: false, agentKind: 'agy' as const, model: typeof model === 'string' ? model : '', engineReady: true,
           deferred: recorded, agyPermissionAgreementRecorded: recorded,

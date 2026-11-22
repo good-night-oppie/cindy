@@ -1196,6 +1196,7 @@ import {
 import {
   applyPendingAgentSwitchIfIdle,
   assertMessageHeldForAgySwitchMayGo,
+  holdAgySwitchForConfirmation,
   createPendingAgentSwitchRegistry,
   isUserPendingAgentSwitchIntent,
   performSessionAgentSwitch,
@@ -11796,6 +11797,8 @@ export function registerMakerIpc(maker: Maker, options: RegisterMakerIpcOptions)
   const scheduledModelScope = createScheduledModelScope({
     createId,
     ownerEpoch: captureSessionRuntimeControlOwnerEpoch,
+    holdBaselineForConfirmation: (sessionId, baseline) => baseline.agentKind === 'agy'
+      && holdAgySwitchForConfirmation(agentSwitchDeps, sessionId, baseline),
     prepareBaseline: async (sessionId) => {
       await reconcileBotModelRoute(sessionId, true);
       // Reconciliation applies idle companion choices through the normal switch

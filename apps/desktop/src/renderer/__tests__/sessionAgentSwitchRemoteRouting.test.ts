@@ -135,8 +135,10 @@ describe('makerChatStore.mirrorAgentSwitchIntent', () => {
     expect(makerChatStore.getAgentSwitchIntent(s)).toMatchObject({ target: 'agy', agyPermissionAgreement: null });
     const rev = makerChatStore.getAgentSwitchIntentRev(s);
 
-    makerChatStore.mirrorAgentSwitchIntent(s, { ...pending, agyPermissionAgreement: { change: 'fromFullAccess', mode: 'auto' } });
+    // The host stamps the registration the agreement was written to; the window keeps it to send back.
+    makerChatStore.mirrorAgentSwitchIntent(s, { ...pending, agyPermissionAgreement: { change: 'fromFullAccess', mode: 'auto' }, agyPermissionRevision: 12 });
     expect(makerChatStore.getAgentSwitchIntent(s)?.agyPermissionAgreement).toEqual({ change: 'fromFullAccess', mode: 'auto' });
+    expect(makerChatStore.getAgentSwitchIntent(s)?.agyPermissionRevision).toBe(12);
     expect(makerChatStore.getAgentSwitchIntentRev(s)).toBe(rev);
 
     // A value this window cannot read is "nothing agreed", never an agreement.

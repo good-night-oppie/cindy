@@ -136,6 +136,8 @@ export interface AgySwitchPermissionPendingIntent {
   fastMode?: boolean | 'ultrafast';
   /** What the host has recorded as agreed; null when nothing; undefined when the host did not say. */
   agyPermissionAgreement?: { change: AgySwitchPermissionChange | null; mode: string } | null;
+  /** Which registration this is, as the host stamped it; an agreement is sent back with it. */
+  agyPermissionRevision?: number;
   configStaged?: true;
 }
 
@@ -206,14 +208,14 @@ ${input.copy.note}` : statement,
  */
 export async function agreeToPendingAgySwitchPermission(input: {
   sessionId: string;
-  intent: { target: string; model: string; providerId: string | null; effort?: string; fastMode?: boolean | 'ultrafast' } | null | undefined;
+  intent: AgySwitchPermissionPendingIntent | null | undefined;
   runningAgent: string | null | undefined;
   permissionMode: string | null | undefined;
   confirm: (options: ConfirmOptions) => Promise<boolean>;
   copy: AgySwitchPermissionAgreementCopy;
   t: Parameters<typeof agySwitchPermissionNotice>[3];
   registerWithHost: (
-    intent: { model: string; providerId: string | null; effort?: string; fastMode?: boolean | 'ultrafast' },
+    intent: AgySwitchPermissionPendingIntent,
     agreement: { change: AgySwitchPermissionChange | null; mode: string },
   ) => Promise<unknown>;
 }): Promise<boolean> {

@@ -211,8 +211,12 @@ export function ErrorBanner({
   // The action opens the confirmation here; elsewhere (a remote controller, a switch that is no
   // longer pending) it is the ordinary retry.
   const reviewsHeldPermission = heldForPermissionConfirmation && !deviceLinkDeviceId && agySwitchPending !== false;
+  // Held, but the switch it waited for is no longer pending: there is nothing to confirm and a
+  // resend would only be refused again, so no action is offered that does nothing (DD
+  // 7080449825). The banner says what to do, and can be closed; the message stays in the queue.
+  const heldSwitchGone = heldForPermissionConfirmation && !deviceLinkDeviceId && agySwitchPending === false;
   useEffect(() => {
-    if (!dismissOnEscape || !onCancel || heldForPermissionConfirmation) return;
+    if (!dismissOnEscape || !onCancel || (heldForPermissionConfirmation && !heldSwitchGone)) return;
     const onKeyDown = (event: KeyboardEvent) => {
       if (
         event.key !== 'Escape' ||
@@ -246,7 +250,7 @@ export function ErrorBanner({
     // 冒泡阶段让输入框的候选列表、语音取消等先消费按键。
     window.addEventListener('keydown', onKeyDown);
     return () => window.removeEventListener('keydown', onKeyDown);
-  }, [dismissOnEscape, onCancel, heldForPermissionConfirmation]);
+  }, [dismissOnEscape, onCancel, heldForPermissionConfirmation, heldSwitchGone]);
   const { confirm } = useConfirmDialog();
   const promptCodexSessionExpired = useCodexSessionExpiredPrompt({
     // 非共享凭证沿用原有确认/登录流程；共享凭证由横幅内联动作直接唤起 App。
@@ -484,7 +488,7 @@ export function ErrorBanner({
     // retry alongside settings, without claiming that cached credentials recovered.
     (isCodexLocalOAuthAuthMissing && !independentOpenAiAccount && !openAiConnectionRecoveredSinceError);
   const safeRetryText = !hideRetry && retryText ? retryText : null;
-  const retryAction = safeRetryText
+  const retryAction = heldSwitchGone ? undefined : safeRetryText
     ? () => onRetry(safeRetryText)
     : !hideRetry && !isRecoverable && !requiresAgentErrorConfigurationChange(error)
       ? onContinueAfterError : undefined;
@@ -833,7 +837,7 @@ export function ErrorBanner({
       }
       // Dismissing would leave the held message at the head of a paused queue with no way back
       // to the confirmation; the user ends this state by confirming or by cancelling the message.
-      onDismiss={heldForPermissionConfirmation ? undefined : onCancel}
+      onDismiss={heldForPermissionConfirmation && !heldSwitchGone ? undefined : onCancel}
       icon={
         openAiConnectionRecoveredSinceError ? (
           <Check size={16} className="text-[var(--text-secondary)]" />

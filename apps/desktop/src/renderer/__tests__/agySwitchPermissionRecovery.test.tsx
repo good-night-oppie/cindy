@@ -11,7 +11,7 @@ import { AgySwitchPermissionPendingNotice } from '@/components/chat/AgySwitchPer
 import { useAgySwitchPermissionRecovery } from '@/components/new-chat/useAgySwitchPermissionRecovery';
 
 const h = vi.hoisted(() => ({
-  intent: null as null | { target: string; model: string; providerId: string | null },
+  intent: null as null | { target: string; model: string; providerId: string | null; agyPermissionRevision?: number },
   registerWithHost: vi.fn(async (..._args: unknown[]) => ({})),
   toastError: vi.fn(),
 }));
@@ -45,7 +45,8 @@ const settle = () => act(async () => { await Promise.resolve(); });
 
 describe('a message the host held for an unconfirmed permission change', () => {
   beforeEach(() => {
-    h.intent = { target: 'agy', model: 'gemini-test', providerId: null };
+    // The host stamps each registration; every entry sends back the one it showed.
+    h.intent = { target: 'agy', model: 'gemini-test', providerId: null, agyPermissionRevision: 7 };
     h.registerWithHost.mockClear();
     h.toastError.mockClear();
     forgetAgySwitchPermissionAgreed('task-1');
@@ -101,7 +102,7 @@ describe('a message the host held for an unconfirmed permission change', () => {
     await waitFor(() => expect(onResend).toHaveBeenCalledTimes(1));
     expect(h.registerWithHost).toHaveBeenCalledExactlyOnceWith(
       'task-1', 'agy', 'gemini-test', null, undefined, undefined,
-      { agyPermissionAgreement: { change: 'fromFullAccess', mode: 'auto' }, agyPermissionAgreementOnly: true },
+      { agyPermissionAgreement: { change: 'fromFullAccess', mode: 'auto' }, agyPermissionAgreementOnly: true, agyPermissionRevision: 7 },
     );
     // The same held message reported again (the host refused once more) must not start a loop.
     shown.rerender(view({ error: HELD, mode: 'bypassPermissions', onResend }));
@@ -216,7 +217,9 @@ describe('the task\'s entry to confirm a pending switch\'s permission change', (
   const ENTRY_TITLE = 'newChat.chatInput.agentSwitch.permissionEntry.titleFromFullAccess';
   const AGREE = 'newChat.chatInput.agentSwitch.permissionConfirmation.confirm';
   const NOT_NOW = 'newChat.chatInput.agentSwitch.permissionConfirmation.cancel';
-  const waiting: AgySwitchPermissionPendingIntent = { target: 'agy', model: 'gemini-test', providerId: null, agyPermissionAgreement: null };
+  const waiting: AgySwitchPermissionPendingIntent = {
+    target: 'agy', model: 'gemini-test', providerId: null, agyPermissionAgreement: null, agyPermissionRevision: 3,
+  };
   type EntryProps = { intent: AgySwitchPermissionPendingIntent | null; mode: string; partner?: boolean };
   function Entry({ intent, mode, partner = false }: EntryProps) {
     const { confirm } = useConfirmDialog();
@@ -265,7 +268,7 @@ describe('the task\'s entry to confirm a pending switch\'s permission change', (
     fireEvent.click(await screen.findByRole('button', { name: AGREE }));
     await waitFor(() => expect(h.registerWithHost).toHaveBeenCalledExactlyOnceWith(
       'task-1', 'agy', 'gemini-test', null, undefined, undefined,
-      { agyPermissionAgreement: { change: 'fromFullAccess', mode: 'auto' }, agyPermissionAgreementOnly: true },
+      { agyPermissionAgreement: { change: 'fromFullAccess', mode: 'auto' }, agyPermissionAgreementOnly: true, agyPermissionRevision: 3 },
     ));
     expect(h.toastError).not.toHaveBeenCalled();
   });
@@ -276,10 +279,11 @@ describe('the task\'s entry to confirm a pending switch\'s permission change', (
     await screen.findByText(ENTRY_TITLE);
     // Another Gemini model is picked elsewhere while the dialog is open; the host will say so.
     h.registerWithHost.mockResolvedValueOnce({ agyPermissionAgreementRecorded: false });
-    shown.rerender(entry({ intent: { ...waiting, model: 'gemini-other' }, mode: 'bypassPermissions' }));
+    shown.rerender(entry({ intent: { ...waiting, model: 'gemini-other', agyPermissionRevision: 4 }, mode: 'bypassPermissions' }));
     fireEvent.click(screen.getByRole('button', { name: AGREE }));
     await waitFor(() => expect(h.registerWithHost).toHaveBeenCalledTimes(1));
     expect(h.registerWithHost.mock.calls[0]![2]).toBe('gemini-test');
+    expect(h.registerWithHost.mock.calls[0]![6]).toMatchObject({ agyPermissionRevision: 3 });
     await settle();
     expect(readAgySwitchPermissionAgreed('task-1')).toBeUndefined();
     expect(screen.getByText(NOTICE)).toBeTruthy();

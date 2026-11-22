@@ -335,19 +335,24 @@ it.each([['en', en], ['zh-CN', zhCN]] as const)('presents a held permission conf
 });
 
 // QQ's ruling on restarts: the pending switch does not survive a restart, the held message does.
-// With no switch pending there is nothing to review; the banner says to pick the model again and
-// keeps the ordinary retry (which the host refuses until then), and still cannot be closed.
+// With no switch pending there is nothing to review. DD 7080449825: a button that resends only
+// to be refused again looks like a button that does nothing, on a banner that cannot be closed.
+// So this state offers no resend, says what to do instead, and can be closed (the message stays
+// in the queue, and "Continue sending" brings the banner back).
 it.each([['en', en], ['zh-CN', zhCN]] as const)('tells the user to pick the model again when the switch a held message waited for is gone (%s)', async (lng, strings) => {
   const i18n = createInstance();
   await i18n.init({ lng, resources: { [lng]: { translation: strings } } });
   const onRetry = vi.fn();
+  const onCancel = vi.fn();
   render(<I18nextProvider i18n={i18n}><ErrorBanner
     error="AGENT_SWITCH_PERMISSION_UNCONFIRMED: The pending switch to Antigravity would change this task's permissions"
-    retryText="the held message" onRetry={onRetry} onCancel={vi.fn()} agySwitchPending={false} /></I18nextProvider>);
+    retryText="the held message" onRetry={onRetry} onCancel={onCancel} agySwitchPending={false} /></I18nextProvider>);
   expect(screen.getByText(strings.chat.errorBanner.agentSwitchPermissionSwitchGone)).toBeTruthy();
   expect(screen.queryByRole('button', { name: strings.chat.errorBanner.agentSwitchPermissionReview })).toBeNull();
-  expect(screen.queryByRole('button', { name: strings.chat.errorBanner.cancelTitle })).toBeNull();
-  expect(screen.getByRole('button', { name: strings.chat.errorBanner.retry })).toBeTruthy();
+  expect(screen.queryByRole('button', { name: strings.chat.errorBanner.retry })).toBeNull();
+  fireEvent.click(screen.getByRole('button', { name: strings.chat.errorBanner.cancelTitle }));
+  expect(onCancel).toHaveBeenCalledOnce();
+  expect(onRetry).not.toHaveBeenCalled();
 });
 
 // DD 7079095110: the host takes the agreement only from the computer the task runs on. A window

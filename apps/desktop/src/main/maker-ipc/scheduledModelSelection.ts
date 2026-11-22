@@ -4,6 +4,7 @@ import { resolveCompatibleSessionRuntimeEffort } from './sessionRuntimeControl';
 import { parseScheduledModelBaseline, type ScheduledModelBaseline } from '../../shared/scheduledModelBaseline';
 import { throwIpcError } from '../utils/ipcValidate';
 import { isIpcError } from '../../shared/ipc-errors';
+import { AgentSwitchPermissionUnconfirmedError } from './agentSwitchPermissionAgreement';
 
 /** A saved automation choice, applied only while its target's send lock is held. */
 export interface ScheduledModelSelection {
@@ -39,6 +40,13 @@ export function createScheduledModelScope(deps: {
   /** Caller holds the send lock; true means the saved companion route was
    * applied and the exact failed baseline was retired without restoring it. */
   recoverUnavailableBaseline?: (sessionId: string, expectedBaseline: string) => Promise<boolean>;
+  /**
+   * Putting the saved choice back would switch the task into Antigravity and change its
+   * permissions, which needs the user's agreement. True means the choice now stands as a pending
+   * switch the user can confirm or withdraw in the task; the baseline is then retired, because
+   * keeping it would make every later send try the same refused switch again.
+   */
+  holdBaselineForConfirmation?: (sessionId: string, baseline: ScheduledModelBaseline) => boolean;
 }) {
   const assertOwner = (owner: string | undefined) => {
     if (owner !== deps.ownerEpoch?.()) throw new Error('Account changed during scheduled model selection');
@@ -110,6 +118,11 @@ export function createScheduledModelScope(deps: {
           await deps.recoverUnavailableBaseline?.(sessionId, row!.baseline!)) {
           assertOwner(owner);
           return;
+        }
+        // Not sent either way: the caller refuses this message. What changes is what comes next.
+        if (error instanceof AgentSwitchPermissionUnconfirmedError && deps.holdBaselineForConfirmation?.(sessionId, baseline)) {
+          await deps.write(sessionId, null, row!.profileRevision, row!.baseline);
+          assertOwner(owner);
         }
         throw error;
       }

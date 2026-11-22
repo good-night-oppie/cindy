@@ -7,6 +7,8 @@ import { withSendToSessionLock } from '../sendToSessionLock.js';
 import { withSessionPermissionChange } from '../sessionPermissionChange.js';
 import {
   applyPendingAgentSwitchIfIdle,
+  createPendingAgentSwitchRegistry,
+  holdAgySwitchForConfirmation,
   performSessionAgentSwitch,
   registerMakerSessionAgentSwitchHandler,
   type AgentSwitchSessionRow,
@@ -16,6 +18,7 @@ import {
 import { agySwitchPermissionChange, permissionModeAfterSwitchToAgy } from '../../../shared/agentKindConversion';
 import { AgentSwitchPermissionUnconfirmedError, agySwitchPermissionIsUnconfirmed } from '../agentSwitchPermissionAgreement';
 import { runDeviceLinkInvokeContext } from '../../device-link/invoke-context.js';
+import { createScheduledModelScope, type ScheduledModelSelection } from '../scheduledModelSelection';
 import { IpcHarness } from './helpers/ipcHarness';
 
 const ownership = vi.hoisted(() => ({ current: null as unknown }));
@@ -81,7 +84,8 @@ function fixture(initialMode: string) {
     query: async () => [{ sessionId: id, agentKind: row.agentKind, permissionMode: row.permissionMode }],
   } };
 
-  const pending = new Map<string, PendingAgentSwitchIntent>();
+  // The registry the app uses: it stamps each registration with the session's revision.
+  const pendingSwitches = createPendingAgentSwitchRegistry();
   const guards: Array<{ guarded: boolean; agreement?: unknown }> = [];
   const switchDeps: MakerSessionAgentSwitchHandlerDeps = {
     confirmNativeHistoryFallback: vi.fn(async () => true),
@@ -109,7 +113,7 @@ function fixture(initialMode: string) {
     bootstrapSwitchedSession: vi.fn(launch),
     withCloseSuppressed: vi.fn((_sessionId, fn) => fn()),
     withSessionLock: withSendToSessionLock,
-    pendingSwitches: { set: (key, intent) => void pending.set(key, intent), get: key => pending.get(key), clear: key => void pending.delete(key) },
+    pendingSwitches,
     log: { info: vi.fn(), warn: vi.fn() },
   };
   const ipc = new IpcHarness();
@@ -171,9 +175,13 @@ function fixture(initialMode: string) {
      * The task's confirmation entry: an answer about the pending switch to `model`, and nothing else.
      * `from` is where the answer comes from.
      */
-    agreeOnly: (agreedFor: string, model = 'gemini-test', from: 'here' | 'remote' = 'here') => {
+    agreeOnly: async (agreedFor: string, model = 'gemini-test', from: 'here' | 'remote' = 'here', shownRevision?: number | null) => {
+      // By default the answer is about the registration the task's window shows right now.
+      const revision = shownRevision !== undefined ? shownRevision
+        : ((await ipc.invoke(MAKER_INVOKE.GET_SESSION_AGENT_SWITCH_INTENT, id)) as { agyPermissionRevision?: number } | null)?.agyPermissionRevision;
       const call = () => ipc.invoke(MAKER_INVOKE.SWITCH_SESSION_AGENT, id, 'agy', model, null, undefined, undefined, {
         agyPermissionAgreementOnly: true,
+        ...(typeof revision === 'number' ? { agyPermissionRevision: revision } : {}),
         agyPermissionAgreement: { change: agySwitchPermissionChange(agreedFor), mode: permissionModeAfterSwitchToAgy(agreedFor) },
       });
       return from === 'remote'
@@ -181,6 +189,11 @@ function fixture(initialMode: string) {
         : call();
     },
     pickOtherGeminiModel: () => ipc.invoke(MAKER_INVOKE.SWITCH_SESSION_AGENT, id, 'agy', 'gemini-other', null),
+    shownRevision: async () =>
+      ((await ipc.invoke(MAKER_INVOKE.GET_SESSION_AGENT_SWITCH_INTENT, id)) as { agyPermissionRevision?: number } | null)?.agyPermissionRevision,
+    /** As register.ts wires the schedule's restore: the refused switch becomes a pending one. */
+    hold: (route: Pick<ScheduledModelSelection, 'model' | 'providerId' | 'effort' | 'fastMode'>) =>
+      holdAgySwitchForConfirmation(switchDeps, id, route),
     pendingSwitch: () => ipc.invoke(MAKER_INVOKE.GET_SESSION_AGENT_SWITCH_INTENT, id),
     /** Picking a model of the engine the task runs on withdraws the pending switch. */
     withdrawSwitch: () => ipc.invoke(MAKER_INVOKE.SWITCH_SESSION_AGENT, id, 'claude-code', 'claude-test', null),
@@ -396,6 +409,92 @@ describe('switching a task into Antigravity from the model picker, with permissi
     }
     expect(h.row).toMatchObject({ agentKind: 'cc', permissionMode: 'bypassPermissions' });
     expect(h.log).toEqual([]);
+  });
+
+  // QQ after reading 8f6e1b2d: the answer was matched to the pending switch by target, model and
+  // provider. Withdraw the switch and register the very same one again, and a dialog opened
+  // before the withdrawal could still authorize the new registration. The host now stamps every
+  // registration with a revision that is never reused in a session, the window sends back the one
+  // it showed, and the host checks it where the agreement is written. All the confirmation
+  // entries (send, permission change, held message, the task's entry) answer through this option.
+  it('does not let an answer from before a withdrawal authorize the identical switch registered after it', async () => {
+    const h = fixture('bypassPermissions');
+    await h.pickGeminiModel(null);
+    const shownBefore = await h.shownRevision();
+    await h.withdrawSwitch();
+    await h.pickGeminiModel(null);
+    const shownNow = await h.shownRevision();
+    expect(shownBefore).toBeTypeOf('number');
+    expect(shownNow).not.toBe(shownBefore);
+
+    // The old dialog is answered now: same task, same engine, same model, same provider.
+    await expect(h.agreeOnly('bypassPermissions', 'gemini-test', 'here', shownBefore))
+      .resolves.toMatchObject({ agyPermissionAgreementRecorded: false });
+    // An answer that names no registration at all is no better.
+    await expect(h.agreeOnly('bypassPermissions', 'gemini-test', 'here', null))
+      .resolves.toMatchObject({ agyPermissionAgreementRecorded: false });
+    await expect(h.pendingSwitch()).resolves.toMatchObject({ agyPermissionAgreement: null, agyPermissionRevision: shownNow });
+    await expect(h.send()).rejects.toMatchObject({ code: 'AGENT_SWITCH_PERMISSION_UNCONFIRMED' });
+    expect(h.log).toEqual([]);
+
+    await expect(h.agreeOnly('bypassPermissions', 'gemini-test', 'here', shownNow))
+      .resolves.toMatchObject({ agyPermissionAgreementRecorded: true });
+    await h.send();
+    expect(h.log).toEqual(['switched agy auto', 'launch agy auto isolated']);
+  });
+
+  // DD 7080449825 (the rest of blocker 2): after a scheduled run with its own model, the next send
+  // puts the user's model back. When that is a switch into Antigravity which would change the
+  // task's permissions, the host refuses it, and it did so again on every later send, with no
+  // switch pending that anyone could confirm: the task was stuck. The refused restore now becomes
+  // a pending switch without agreement and the saved model is retired, so the existing entries
+  // apply: nothing is sent until the user confirms in the task, or withdraws the switch.
+  // The scope, the registry and both handlers are real; the store and the runtime are stand-ins.
+  it.each(['confirms', 'withdraws'] as const)('turns a refused restore of the model a schedule replaced into a pending switch, and sends nothing until the user %s', async (answer) => {
+    const h = fixture('bypassPermissions');
+    const usersModel: ScheduledModelSelection = { agentKind: 'agy', model: 'gemini-test', providerId: null, effort: null, fastMode: false };
+    let profile: ScheduledModelSelection = usersModel;
+    let baseline: string | null = null;
+    const restores: string[] = [];
+    const scope = createScheduledModelScope({
+      createId: () => 'scope-1',
+      read: async () => ({ profile: { ...profile, effort: profile.effort ?? '' }, baseline }),
+      write: async (_id, value) => { baseline = value ? JSON.stringify(value) : null; },
+      isBusy: () => false,
+      apply: async (_id, saved) => {
+        restores.push(saved.model);
+        await h.switchFromHost({ applyNow: true, configStaged: true, model: saved.model });
+      },
+      holdBaselineForConfirmation: (_id, saved) => saved.agentKind === 'agy' && h.hold(saved),
+    });
+    await scope.begin(h.id);
+    profile = { agentKind: 'claude-code', model: 'claude-test', providerId: null, effort: null, fastMode: false };
+    expect(baseline).not.toBeNull();
+    // The send step, in the order register.ts runs it.
+    const send = async () => { await scope.restore(h.id); await h.send(); };
+
+    await expect(send()).rejects.toMatchObject({ code: 'AGENT_SWITCH_PERMISSION_UNCONFIRMED' });
+    expect(baseline).toBeNull();
+    await expect(h.pendingSwitch()).resolves.toMatchObject({ targetAgentKind: 'agy', model: 'gemini-test', agyPermissionAgreement: null });
+    await expect(send()).rejects.toMatchObject({ code: 'AGENT_SWITCH_PERMISSION_UNCONFIRMED' });
+    expect(restores).toEqual(['gemini-test']);
+    expect(h.log).toEqual([]);
+    expect(h.row).toMatchObject({ agentKind: 'cc', permissionMode: 'bypassPermissions' });
+
+    if (answer === 'confirms') {
+      await expect(h.agreeOnly('bypassPermissions')).resolves.toMatchObject({ agyPermissionAgreementRecorded: true });
+      await send();
+      await send();
+      expect(h.log).toEqual(['switched agy auto', 'launch agy auto isolated']);
+    } else {
+      // Picking a model of the engine the task runs on: it stays there, with its permissions.
+      await h.withdrawSwitch();
+      await send();
+      expect(h.log).toEqual([]);
+      expect(h.row).toMatchObject({ agentKind: 'cc', permissionMode: 'bypassPermissions' });
+      await expect(h.pendingSwitch()).resolves.toBeNull();
+    }
+    expect(restores).toEqual(['gemini-test']);
   });
 
   it('records an agreement only for the stored mode it was given for, and not from a remote controller', async () => {

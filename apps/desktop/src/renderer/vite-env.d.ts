@@ -6786,6 +6786,8 @@ interface ElectronAPI {
          * with this model and provider): nothing is registered, replaced, applied or sent.
          */
         agyPermissionAgreementOnly?: boolean;
+        /** With agyPermissionAgreementOnly: the registration the user was asked about, as the host reported it. */
+        agyPermissionRevision?: number;
       },
       thinking?: boolean,
     ) => Promise<{

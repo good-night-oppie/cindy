@@ -8,11 +8,18 @@ import { makerApiFor } from '@/lib/makerTransport';
  */
 export function recordAgySwitchPermissionAgreementWithHost(
   sessionId: string,
-  askedAbout: { model: string; providerId: string | null; effort?: string; fastMode?: boolean | 'ultrafast' },
+  askedAbout: {
+    model: string; providerId: string | null; effort?: string; fastMode?: boolean | 'ultrafast';
+    /** The registration the user was shown, as the host reported it. Without it the host records nothing. */
+    agyPermissionRevision?: number;
+  },
   agreement: { change: 'fromFullAccess' | 'fromUnsupported' | null; mode: string },
 ): Promise<unknown> {
   return makerApiFor(sessionId).switchSessionAgent(
     sessionId, 'agy', askedAbout.model, askedAbout.providerId, askedAbout.effort, askedAbout.fastMode,
-    { agyPermissionAgreement: agreement, agyPermissionAgreementOnly: true },
+    {
+      agyPermissionAgreement: agreement, agyPermissionAgreementOnly: true,
+      ...(askedAbout.agyPermissionRevision !== undefined ? { agyPermissionRevision: askedAbout.agyPermissionRevision } : {}),
+    },
   );
 }

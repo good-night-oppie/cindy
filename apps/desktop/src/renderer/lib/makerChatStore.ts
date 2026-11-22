@@ -2604,6 +2604,8 @@ export interface AgentSwitchIntentRecord {
    * switch (null = none). Undefined until the host has said, and for hosts that do not say.
    */
   agyPermissionAgreement?: { change: 'fromFullAccess' | 'fromUnsupported' | null; mode: string } | null;
+  /** Antigravity only, from the host: which registration this is. Sent back with an agreement. */
+  agyPermissionRevision?: number;
   /** From the host: staged by configuration, not picked by the user in this task. */
   configStaged?: true;
 }
@@ -18941,7 +18943,7 @@ function normalizeAgentSwitchIntent(value: unknown): AgentSwitchIntentRecord | n
 /** What the host says about the permission agreement of a pending switch into Antigravity. */
 function normalizeAgyPermissionState(
   item: Record<string, unknown>,
-): Pick<AgentSwitchIntentRecord, 'agyPermissionAgreement' | 'configStaged'> {
+): Pick<AgentSwitchIntentRecord, 'agyPermissionAgreement' | 'agyPermissionRevision' | 'configStaged'> {
   if (item.targetAgentKind !== 'agy' || !('agyPermissionAgreement' in item)) return {};
   const raw = item.agyPermissionAgreement;
   const agreed = raw && typeof raw === 'object' && !Array.isArray(raw)
@@ -18952,11 +18954,16 @@ function normalizeAgyPermissionState(
     && (change === null || change === 'fromFullAccess' || change === 'fromUnsupported')) {
     agreement = { change, mode: agreed.mode };
   }
-  return { agyPermissionAgreement: agreement, ...(item.configStaged === true ? { configStaged: true as const } : {}) };
+  return {
+    agyPermissionAgreement: agreement,
+    ...(typeof item.agyPermissionRevision === 'number' ? { agyPermissionRevision: item.agyPermissionRevision } : {}),
+    ...(item.configStaged === true ? { configStaged: true as const } : {}),
+  };
 }
 
 function agyPermissionStateEquals(a: AgentSwitchIntentRecord, b: AgentSwitchIntentRecord): boolean {
   return a.configStaged === b.configStaged
+    && a.agyPermissionRevision === b.agyPermissionRevision
     && (a.agyPermissionAgreement === b.agyPermissionAgreement
       || (!!a.agyPermissionAgreement && !!b.agyPermissionAgreement
         && a.agyPermissionAgreement.change === b.agyPermissionAgreement.change
