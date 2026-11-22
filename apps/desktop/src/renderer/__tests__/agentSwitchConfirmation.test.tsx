@@ -8,6 +8,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { ConfirmDialogProvider, useConfirmDialog } from '@/components/ui/confirm-dialog-provider';
 import {
   AGENT_SWITCH_CONFIRMATION_OVERRIDE_KEY,
+  agySwitchPermissionNotice,
   confirmAgentSwitchRisk,
   relocationDescriptionKey,
 } from '@/components/new-chat/agentSwitchConfirmation';
@@ -100,6 +101,32 @@ describe('Agent switch confirmation', () => {
     fireEvent.click(screen.getByRole('button', { name: COPY.cancelText }));
     await waitFor(() => expect(screen.queryByText(COPY.title)).toBeNull());
     expect(onBrowse).not.toHaveBeenCalled();
+  });
+
+  // cindy#19 (QQ 7076801733): the notice must name the mode the row commit actually saves. Full
+  // access and a mode Antigravity lacks land on different modes, so they get different copy; a kept
+  // mode, or a task that is already Antigravity, gets none.
+  it.each([
+    ['bypassPermissions', 'claude-code', 'newChat.chatInput.agentSwitch.confirmation.antigravityFromFullAccess'],
+    ['acceptEdits', 'claude-code', 'newChat.chatInput.agentSwitch.confirmation.antigravityFromUnsupported'],
+    ['plan', 'codex', 'newChat.chatInput.agentSwitch.confirmation.antigravityFromUnsupported'],
+    ['auto', 'claude-code', undefined],
+    ['ask', 'pi', undefined],
+    ['bypassPermissions', 'agy', undefined],
+  ])('picks the Antigravity permission notice for a task in %s running %s', (mode, running, key) => {
+    expect(agySwitchPermissionNotice('agy', running, mode, k => k).permissionNotice).toBe(key);
+    expect(agySwitchPermissionNotice('codex', running, mode, k => k).permissionNotice).toBeUndefined();
+  });
+
+  it('confirming a switch that changes permissions proceeds', async () => {
+    const onBrowse = vi.fn();
+    renderHarness({ onBrowse, permissionNotice: 'Permissions change to Default permissions.' });
+
+    fireEvent.click(screen.getByRole('button', { name: 'Browse Target Agent' }));
+    await screen.findByText(/Permissions change to Default permissions/);
+    fireEvent.click(screen.getByRole('button', { name: COPY.confirmText }));
+    await waitFor(() => expect(onBrowse).toHaveBeenCalledTimes(1));
+    expect(localStorage.getItem(STORAGE_KEY)).toBeNull();
   });
 
   it('does not prompt again when an Agent switch intent already exists', async () => {

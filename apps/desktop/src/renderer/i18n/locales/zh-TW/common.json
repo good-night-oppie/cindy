@@ -14290,7 +14290,8 @@
           "confirm": "切換 Agent",
           "cancel": "保留當前 Agent",
           "dontShowAgain": "下次不再提醒",
-          "antigravityPermission": "切換生效後，這個任務的權限會改為「自動審核」。任務切到 Antigravity 時不會直接進入完全訪問，也不會沿用 Antigravity 沒有的權限檔位。切換後可以在任務裡再改。"
+          "antigravityFromFullAccess": "切換後，這個任務的權限會從「完全訪問」改為「自動審核」：Antigravity 傳來的審核要求由 Cindy 自動審核，不再問你。「完全訪問」不會帶到 Antigravity。切換後可以在任務的權限選單裡再改；各檔的具體範圍也寫在那裡。",
+          "antigravityFromUnsupported": "切換後，這個任務的權限會改為「預設權限」：Antigravity 傳來的審核要求由你決定。你現在用的權限檔位 Antigravity 沒有，這個檔位自帶的規則（例如計畫模式的限制）不會帶過去。切換後可以在任務的權限選單裡再改；各檔的具體範圍也寫在那裡。"
         }
       },
       "agentRelocation": {

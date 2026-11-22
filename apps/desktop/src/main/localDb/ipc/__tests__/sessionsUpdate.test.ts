@@ -1065,11 +1065,12 @@ describe('local-db:sessions:update handler wiring', () => {
 
   // cindy#19 (QQ 2026-11-22): a task used to enter Antigravity in whatever mode it had, so Full
   // access launched it without isolation and a mode it lacks made every start fail while the
-  // selector showed Default. The row commit (SQL) and the switch dialog (shared rule) are two
-  // copies of one rule; this pins the stored value, the broadcast and the announced value together.
+  // selector showed Default. Full access now lands on Auto-review and a mode Antigravity lacks on
+  // Default permissions. The row commit (SQL) and the switch dialog (shared rule) are two copies of
+  // one rule; this pins the stored value, the broadcast and the announced value together.
   it.each([
     ['ask', 'ask'], ['default', 'default'], ['auto', 'auto'],
-    ['acceptEdits', 'auto'], ['plan', 'auto'], ['bypassPermissions', 'auto'],
+    ['acceptEdits', 'ask'], ['plan', 'ask'], ['bypassPermissions', 'auto'],
   ])('enters Antigravity from %s as %s, in the same commit as the engine', async (from, expected) => {
     h.sqlite!.prepare('UPDATE sessions SET permission_mode = ? WHERE id = ?').run(from, 'cc-local');
     await applyAgentSwitchToSessionRow('cc-local', { agentKind: 'agy', model: 'gemini-test', providerId: null });

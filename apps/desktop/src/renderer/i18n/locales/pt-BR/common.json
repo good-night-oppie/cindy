@@ -14460,7 +14460,8 @@
           "confirm": "Trocar Agent",
           "cancel": "Manter Agent atual",
           "dontShowAgain": "Não me lembrar novamente",
-          "antigravityPermission": "Quando a troca entrar em vigor, as permissões desta tarefa mudam para “Revisão automática”. Uma tarefa não entra no Antigravity com Acesso total nem com um modo que o Antigravity não tem. Depois você pode alterar as permissões na tarefa."
+          "antigravityFromFullAccess": "Após a troca, as permissões desta tarefa mudam de “Acesso total” para “Revisão automática”: a Cindy revisa automaticamente as solicitações de aprovação que o Antigravity envia, sem perguntar a você. “Acesso total” não é levado para o Antigravity. Depois você pode alterar as permissões no menu de permissões da tarefa; ele também explica o que cada nível permite.",
+          "antigravityFromUnsupported": "Após a troca, as permissões desta tarefa mudam para “Permissões padrão”: você decide sobre as solicitações de aprovação que o Antigravity envia. O Antigravity não tem o seu nível de permissão atual, então as regras próprias desse nível (como os limites do modo Plano) não são levadas. Depois você pode alterar as permissões no menu de permissões da tarefa; ele também explica o que cada nível permite."
         }
       },
       "agentRelocation": {

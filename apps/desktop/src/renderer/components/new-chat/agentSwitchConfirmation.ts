@@ -1,4 +1,5 @@
 import type { ConfirmOptions } from '@/components/ui/confirm-dialog-provider';
+import { agySwitchPermissionChange } from '../../../shared/agentKindConversion';
 import { isProviderShareAgentDeviceId } from '../../../shared/providerShare';
 
 /**
@@ -34,6 +35,25 @@ export interface ConfirmAgentSwitchRiskParams {
    * the handoff risk only, so the dialog is shown without that option and ignores a saved skip.
    */
   permissionNotice?: string;
+}
+
+/**
+ * What the switch dialog says about permissions when a task enters Antigravity from another
+ * engine: nothing when the mode is kept, otherwise the copy for the change the row commit makes.
+ */
+export function agySwitchPermissionNotice(
+  targetAgent: string | null | undefined,
+  runningAgent: string | null | undefined,
+  permissionMode: string | null | undefined,
+  t: (key: 'newChat.chatInput.agentSwitch.confirmation.antigravityFromFullAccess'
+    | 'newChat.chatInput.agentSwitch.confirmation.antigravityFromUnsupported') => string,
+): { permissionNotice?: string } {
+  if (targetAgent !== 'agy' || runningAgent === 'agy') return {};
+  const change = agySwitchPermissionChange(permissionMode);
+  if (!change) return {};
+  return { permissionNotice: t(change === 'fromFullAccess'
+    ? 'newChat.chatInput.agentSwitch.confirmation.antigravityFromFullAccess'
+    : 'newChat.chatInput.agentSwitch.confirmation.antigravityFromUnsupported') };
 }
 
 /**

@@ -14290,7 +14290,8 @@
           "confirm": "切换 Agent",
           "cancel": "保留当前 Agent",
           "dontShowAgain": "下次不再提醒",
-          "antigravityPermission": "切换生效后，这个任务的权限会改为「自动审批」。任务切到 Antigravity 时不会直接进入完全访问，也不会沿用 Antigravity 没有的权限档位。切换后可以在任务里再改。"
+          "antigravityFromFullAccess": "切换后，这个任务的权限会从「完全访问」改为「自动审批」：Antigravity 发来的审批请求由 Cindy 自动审批，不再问你。「完全访问」不会带到 Antigravity。切换后可以在任务的权限菜单里再改；各档的具体范围也写在那里。",
+          "antigravityFromUnsupported": "切换后，这个任务的权限会改为「默认权限」：Antigravity 发来的审批请求由你决定。你现在用的权限档位 Antigravity 没有，这个档位自带的规则（比如计划模式的限制）不会带过去。切换后可以在任务的权限菜单里再改；各档的具体范围也写在那里。"
         }
       },
       "agentRelocation": {

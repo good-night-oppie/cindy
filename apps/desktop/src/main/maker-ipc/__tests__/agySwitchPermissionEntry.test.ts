@@ -146,7 +146,7 @@ function fixture(initialMode: string) {
 
 describe('switching a task into Antigravity from the model picker, with permission changes around it', () => {
   it.each([
-    ['bypassPermissions', 'auto'], ['acceptEdits', 'auto'], ['ask', 'ask'],
+    ['bypassPermissions', 'auto'], ['acceptEdits', 'ask'], ['plan', 'ask'], ['auto', 'auto'],
   ])('a task in %s starts Antigravity isolated in %s, and store, runtime and broadcast agree', async (from, expected) => {
     const h = fixture(from);
     await expect(h.pickGeminiModel()).resolves.toMatchObject({ deferred: true });

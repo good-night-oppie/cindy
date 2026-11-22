@@ -14344,7 +14344,8 @@
           "confirm": "Agent wechseln",
           "cancel": "Aktuellen Agent behalten",
           "dontShowAgain": "Nicht erneut erinnern",
-          "antigravityPermission": "Sobald der Wechsel wirksam wird, ändern sich die Berechtigungen dieser Aufgabe auf „Automatische Prüfung“. Eine Aufgabe wechselt nicht mit Vollzugriff oder mit einem Modus, den Antigravity nicht hat, zu Antigravity. Sie können die Berechtigungen danach in der Aufgabe ändern."
+          "antigravityFromFullAccess": "Nach dem Wechsel ändern sich die Berechtigungen dieser Aufgabe von „Vollzugriff“ auf „Automatische Prüfung“: Cindy prüft die Genehmigungsanfragen von Antigravity automatisch, ohne Sie zu fragen. „Vollzugriff“ wird nicht zu Antigravity übernommen. Sie können die Berechtigungen danach im Berechtigungsmenü der Aufgabe ändern; dort steht auch, was jede Stufe erlaubt.",
+          "antigravityFromUnsupported": "Nach dem Wechsel ändern sich die Berechtigungen dieser Aufgabe auf „Standardberechtigungen“: Sie entscheiden über die Genehmigungsanfragen von Antigravity. Antigravity hat Ihre aktuelle Berechtigungsstufe nicht, daher werden die eigenen Regeln dieser Stufe (etwa die Einschränkungen des Planmodus) nicht übernommen. Sie können die Berechtigungen danach im Berechtigungsmenü der Aufgabe ändern; dort steht auch, was jede Stufe erlaubt."
         }
       },
       "agentRelocation": {

@@ -165,6 +165,7 @@ import { captureComposerSendSnapshot, isComposerSendSnapshotCurrent } from './co
 import { useRemoteSessionConnection } from '@/features/cc-agent/hooks/useRemoteSessionConnection';
 
 import {
+  agySwitchPermissionNotice,
   confirmAgentSwitchRisk,
   isAgentSwitchEchoConfigConsistent,
   isAgentSwitchResponseFresh,
@@ -331,7 +332,7 @@ import { getAppShortcutCombos } from '@/lib/appShortcutStore';
 import { getNextPermissionMode } from '@/lib/permissionModeCycle';
 import { matchesKeyboardEvent } from '../../../shared/appShortcuts';
 import {
-  isLaunchableMakerAgentKind, isSessionSwitchTargetAgentKind, makerToDbAgentKind, permissionModeAfterSwitchToAgy,
+  isLaunchableMakerAgentKind, isSessionSwitchTargetAgentKind, makerToDbAgentKind,
 } from '../../../shared/agentKindConversion';
 import {
   getComposerSendShortcutPreference,
@@ -7447,10 +7448,7 @@ export function ChatInput({
           cancelText: t('newChat.chatInput.agentSwitch.confirmation.cancel'),
           dontShowAgainLabel: t('newChat.chatInput.agentSwitch.confirmation.dontShowAgain'),
         },
-        ...(targetAgent === 'agy' && runtimeAgentKind !== 'agy'
-          && permissionModeAfterSwitchToAgy(activePermissionMode) !== activePermissionMode
-          ? { permissionNotice: t('newChat.chatInput.agentSwitch.confirmation.antigravityPermission') }
-          : {}),
+        ...agySwitchPermissionNotice(targetAgent, runtimeAgentKind, activePermissionMode, t),
       }),
     [sessionId, runtimeAgentKind, agentSwitchIntent?.target, confirmDialog, t, activePermissionMode],
   );

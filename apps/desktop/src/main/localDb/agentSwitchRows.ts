@@ -4,7 +4,8 @@ import { messages, sessions } from './schema.js';
 import { messageRowid } from './retriedUserTurnSupersede.js';
 import { persistableSessionEffort, projectSessionRuntimeFields } from './mapper.js';
 import {
-  AGY_SWITCH_FALLBACK_PERMISSION_MODE, AGY_SWITCH_KEPT_PERMISSION_MODES, normalizeDbAgentKind, type DbAgentKind,
+  AGY_SWITCH_FROM_FULL_ACCESS_PERMISSION_MODE, AGY_SWITCH_FROM_UNSUPPORTED_PERMISSION_MODE,
+  AGY_SWITCH_KEPT_PERMISSION_MODES, normalizeDbAgentKind, type DbAgentKind,
 } from '../../shared/agentKindConversion.js';
 import { isProviderShareAgentDeviceId } from '../../shared/providerShare.js';
 import { throwIpcError } from '../utils/ipcValidate.js';
@@ -65,14 +66,17 @@ export async function applyAgentSwitchToSessionRowWithPorts<OwnerScope>(
   };
   if (patch.providerId !== undefined) setObj.providerId = patch.providerId;
   if (patch.agentDeviceId !== undefined) setObj.agentDeviceId = patch.agentDeviceId;
-  // Entering Antigravity from another engine: Full access and modes Antigravity does not have land
-  // on Auto-review, in the same statement as the engine and model, so the first launch and the
-  // interface read one value. The right-hand side reads the row as it was before this update; a
-  // row that is already Antigravity keeps the mode the user chose there.
+  // Entering Antigravity from another engine: Full access lands on Auto-review and a mode
+  // Antigravity does not have lands on Default permissions, in the same statement as the engine
+  // and model, so the first launch and the interface read one value. The right-hand side reads the
+  // row as it was before this update; a row that is already Antigravity keeps the mode chosen there.
   if (patch.agentKind === 'agy') {
-    setObj.permissionMode = sql`CASE WHEN ${sessions.agentKind} <> 'agy' AND ${sessions.permissionMode} NOT IN (${sql.join(
-      AGY_SWITCH_KEPT_PERMISSION_MODES.map(mode => sql`${mode}`), sql`, `,
-    )}) THEN ${AGY_SWITCH_FALLBACK_PERMISSION_MODE} ELSE ${sessions.permissionMode} END` as unknown as typeof setObj.permissionMode;
+    setObj.permissionMode = sql`CASE
+      WHEN ${sessions.agentKind} = 'agy' THEN ${sessions.permissionMode}
+      WHEN ${sessions.permissionMode} = 'bypassPermissions' THEN ${AGY_SWITCH_FROM_FULL_ACCESS_PERMISSION_MODE}
+      WHEN ${sessions.permissionMode} NOT IN (${sql.join(AGY_SWITCH_KEPT_PERMISSION_MODES.map(mode => sql`${mode}`), sql`, `)})
+        THEN ${AGY_SWITCH_FROM_UNSUPPORTED_PERMISSION_MODE}
+      ELSE ${sessions.permissionMode} END` as unknown as typeof setObj.permissionMode;
   }
   // effort 值域由 renderer 按目标引擎 capabilities 解析(schema 列是字面量联合,
   // 跨层传输后此处以 string 到达;非法值与直改 DB 同级,运行时由引擎侧收敛)。
