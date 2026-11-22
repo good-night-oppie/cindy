@@ -12987,7 +12987,7 @@
         },
         "turn": {
           "groupApprovalOwnerDm": "🔐 群聊裡的任務需要你授權。授權卡不會發到群裡，在這裡確認即可。",
-          "agentSwitchPermissionUnconfirmed": "⏸ 這則訊息沒有處理。這個任務正要切換到 Antigravity，切換會改變它的權限，這次改變還沒有確認。請先在電腦上的 Cindy 裡打開這個任務確認，然後把訊息再傳一次。",
+          "agentSwitchPermissionUnconfirmed": "⏸ 這則訊息沒有處理。這個任務正要切換到 Antigravity，切換會改變它的權限，要由管理這個任務的人先在電腦上的 Cindy 裡打開它確認。確認後，請把這則訊息再傳一次。",
           "agentStartFailed": "❌ 啟動 Agent 失敗：{{reason}}",
           "personalBotLabel": "{{channel}} 個人 bot",
           "error": "❌ 錯誤：{{message}}"
