@@ -49,6 +49,7 @@ import {
   resolvePermissionMode,
 } from '../shared/permissionModeControl';
 import { imText } from '../shared/imText';
+import { AGENT_SWITCH_PERMISSION_UNCONFIRMED } from '../../maker-ipc/agentSwitchPermissionAgreement.js';
 import { localizedReplyWords, matchesReplyWord, type ReplyWords } from '../shared/replyWords';
 import { ui } from './uiText';
 import { countQueuedWechatTasks, WechatTaskStore, type WechatActiveBinding, type WechatTask } from './taskStore';
@@ -2139,6 +2140,12 @@ export function wechatPreDispatchFailureText(reason: string, companion = false):
   }
   if (reason === 'missing_auth') {
     return imText('imBot.text.wechat.preDispatch.missingAuth');
+  }
+  // The task's pending switch into Antigravity waits for a confirmation on the computer. This
+  // message is committed as failed, not kept, so the reply asks for it to be sent again;
+  // "try again later" would never work on its own.
+  if (reason === AGENT_SWITCH_PERMISSION_UNCONFIRMED) {
+    return imText('imBot.text.shared.turn.agentSwitchPermissionUnconfirmed');
   }
   return imText('imBot.text.wechat.preDispatch.generic');
 }

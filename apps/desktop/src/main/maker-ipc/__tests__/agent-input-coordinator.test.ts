@@ -6203,6 +6203,49 @@ describe('AgentInputCoordinator send transaction', () => {
     );
   });
 
+  // cindy#19 (QQ's ruling, item c): the rule in the case below ("a new message means do not
+  // retry the old one") also threw away a head that had not failed at all: one held until the
+  // user confirms a switch into Antigravity. Answering "not now" and then typing something
+  // unrelated lost the first message without anyone having asked for that. A held head keeps
+  // its content, its place and its banner; the new message waits behind it; after the
+  // confirmation both go out, in order, once each. Other failed heads keep the rule below.
+  it('keeps a head held for a switch confirmation when the user sends another message, then sends both in order, once each', async () => {
+    const h = createHarness();
+    const sid = 'held-head-survives-new-input';
+    h.sendToAgent.mockResolvedValueOnce(hostSendFailure('AGENT_SWITCH_PERMISSION_UNCONFIRMED', 'confirm the change'));
+    h.coordinator.enqueue(sid, makeItem('q-1', 'first'));
+    await flush();
+    await flush();
+
+    h.coordinator.enqueue(sid, makeItem('q-2', 'unrelated'));
+    await flush();
+    await flush();
+    const held = latestProjection(h.projections);
+    expect(held.pendingQueue.map((q) => [q.clientId, q.text])).toEqual([['q-1', 'first'], ['q-2', 'unrelated']]);
+    expect(held.recovery).toEqual({ kind: 'queue-head', clientId: 'q-1' });
+    expect(held.error).toMatch(/^AGENT_SWITCH_PERMISSION_UNCONFIRMED: /);
+    expect(h.sendToAgent).toHaveBeenCalledTimes(1);
+    expect(h.onDiscardedQueuedMessage).not.toHaveBeenCalled();
+
+    // The user confirms; the task view retries the held message.
+    h.sendToAgent.mockImplementation(async () => { h.setRunning(true); return sendSuccess(); });
+    await h.coordinator.retryLastError(sid);
+    await flush();
+    expect(h.sendToAgent).toHaveBeenCalledTimes(2);
+    expect(h.sendToAgent.mock.calls[1]?.[1]).toMatchObject({ content: 'first' });
+    h.setRunning(false);
+    h.coordinator.onTurnEvent(sid, 'done');
+    await flush();
+    await flush();
+    expect(h.sendToAgent).toHaveBeenCalledTimes(3);
+    expect(h.sendToAgent.mock.calls[2]?.[1]).toMatchObject({ content: 'unrelated' });
+    h.setRunning(false);
+    h.coordinator.onTurnEvent(sid, 'done');
+    await flush();
+    expect(h.sendToAgent).toHaveBeenCalledTimes(3);
+    expect(h.onDiscardedQueuedMessage).not.toHaveBeenCalled();
+  });
+
   it('abandons a failed queue head on explicit user enqueue and dispatches the new message', async () => {
     const h = createHarness();
     const sid = 'send-rollback-user-input-unlocks';

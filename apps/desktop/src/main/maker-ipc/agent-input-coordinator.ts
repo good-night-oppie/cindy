@@ -2241,7 +2241,11 @@ export class AgentInputCoordinator {
         return this.getProjection(sessionId);
       }
       const abandoned = state.pendingQueue.find((q) => q.clientId === abandonedClientId);
-      if (abandoned) {
+      // A head held for the user's confirmation of a switch into Antigravity did not fail, and
+      // "not now" is not "discard": a new message does not replace it. It keeps its place and
+      // its banner, and the new message waits behind it. Removing it is the user's explicit act.
+      const heldForConfirmation = abandoned?.awaitsAgySwitchConfirmation === true;
+      if (abandoned && !heldForConfirmation) {
         state.pendingQueue = state.pendingQueue.filter((q) => q.clientId !== abandonedClientId);
         this.removePendingCompactWaitClientId(state, abandonedClientId);
         // 与 remove() 同口径:摘除消息时同步清其 edit lock,否则留下指向不存在
@@ -2254,10 +2258,12 @@ export class AgentInputCoordinator {
           clientId: abandonedClientId,
         });
       }
-      state.error = null;
-      clearErrorProjectionSignals(state);
-      state.stickyError = null;
-      state.recovery = null;
+      if (!heldForConfirmation) {
+        state.error = null;
+        clearErrorProjectionSignals(state);
+        state.stickyError = null;
+        state.recovery = null;
+      }
     }
     // 用户点「继续任务」表达的是恢复刚才中断/失败的 turn，必须先于此前
     // 已排队的新任务执行；普通 composer / Orca / scheduler 输入仍保持 FIFO。

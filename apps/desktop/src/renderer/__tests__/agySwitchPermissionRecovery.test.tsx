@@ -70,6 +70,30 @@ describe('a message the host held for an unconfirmed permission change', () => {
     expect(onResend).not.toHaveBeenCalled();
   });
 
+  // The whole path a user takes after "not now" (agreed with QQ after DD 7079095110): nothing is
+  // sent, the banner's action asks again, and agreeing there sends the same message exactly once.
+  it('after "not now", confirming from the banner records the agreement once and resends the message exactly once', async () => {
+    h.registerWithHost.mockResolvedValue({ agyPermissionAgreementRecorded: true });
+    const onResend = vi.fn();
+    const shown = render(view({ error: HELD, mode: 'bypassPermissions', onResend }));
+    fireEvent.click(await screen.findByRole('button', { name: DECLINE }));
+    await waitFor(() => expect(screen.queryByText(TITLE)).toBeNull());
+    expect(onResend).not.toHaveBeenCalled();
+    expect(h.registerWithHost).not.toHaveBeenCalled();
+
+    fireEvent.click(screen.getByRole('button', { name: 'Retry' }));
+    fireEvent.click(await screen.findByRole('button', { name: CONFIRM }));
+    await waitFor(() => expect(onResend).toHaveBeenCalledTimes(1));
+    expect(h.registerWithHost).toHaveBeenCalledTimes(1);
+    // The resend clears the error; whatever is reported afterwards, nothing more goes out.
+    shown.rerender(view({ error: null, mode: 'bypassPermissions', onResend }));
+    await settle();
+    shown.rerender(view({ error: HELD, mode: 'bypassPermissions', onResend }));
+    await settle();
+    expect(onResend).toHaveBeenCalledTimes(1);
+    expect(h.registerWithHost).toHaveBeenCalledTimes(1);
+  });
+
   it('on agreement tells the host what was agreed, then resends the held message once', async () => {
     const onResend = vi.fn();
     const shown = render(view({ error: HELD, mode: 'bypassPermissions', onResend }));

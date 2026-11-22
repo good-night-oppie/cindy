@@ -68,6 +68,12 @@ describe('WeChat UI text', () => {
     expect(__testing.wechatPreDispatchFailureText('missing_auth')).toBe(
       "The current Agent isn't authorized yet. Connect a model service in Cindy first.",
     );
+    // cindy#19 (QQ's ruling): WeChat answered a switch held for confirmation with "try again
+    // later", which never works on its own; the message is not kept, so it must be sent again.
+    const held = __testing.wechatPreDispatchFailureText('AGENT_SWITCH_PERMISSION_UNCONFIRMED');
+    expect(held).toContain('Antigravity');
+    expect(held).toContain('send this message again');
+    expect(held).not.toContain('AGENT_SWITCH');
     const prompt = __testing.formatWechatInteractionPrompt({
       kind: 'permission',
       requestId: 'r-en',
