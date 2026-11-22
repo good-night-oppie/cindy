@@ -10,6 +10,9 @@ import {
   AGENT_SWITCH_CONFIRMATION_OVERRIDE_KEY,
   agySwitchPermissionNotice,
   confirmAgentSwitchRisk,
+  confirmPendingAgySwitchPermission,
+  forgetAgySwitchPermissionAgreed,
+  noteAgySwitchPermissionAgreed,
   relocationDescriptionKey,
 } from '@/components/new-chat/agentSwitchConfirmation';
 
@@ -52,6 +55,35 @@ function Harness({
     >
       Browse Target Agent
     </button>
+  );
+}
+
+/** The composer's send button while a switch is pending: the message goes out only when the gate resolves true. */
+function SendHarness({ mode, intentTarget = 'agy', runningAgent = 'claude-code', onSent }: {
+  mode: string; intentTarget?: string | null; runningAgent?: string; onSent: () => void;
+}) {
+  const { confirm } = useConfirmDialog();
+  return (
+    <button
+      type="button"
+      onClick={() => {
+        void confirmPendingAgySwitchPermission({
+          sessionId: 'task-1', intentTarget, runningAgent, permissionMode: mode, confirm, copy: COPY, t: key => key,
+        }).then((send) => {
+          if (send) onSent();
+        });
+      }}
+    >
+      Send
+    </button>
+  );
+}
+
+function renderSend(props: Parameters<typeof SendHarness>[0]) {
+  return render(
+    <ConfirmDialogProvider>
+      <SendHarness {...props} />
+    </ConfirmDialogProvider>,
   );
 }
 
@@ -127,6 +159,67 @@ describe('Agent switch confirmation', () => {
     fireEvent.click(screen.getByRole('button', { name: COPY.confirmText }));
     await waitFor(() => expect(onBrowse).toHaveBeenCalledTimes(1));
     expect(localStorage.getItem(STORAGE_KEY)).toBeNull();
+  });
+
+  // cindy#19, DD review 7077385323 item 5: the switch is applied by the next send, and the
+  // permission menu stays usable in between. The dialog was shown once, when the Gemini model was
+  // picked, so a mode changed afterwards was rewritten at send time with no notice, or with a
+  // notice that named a different outcome. The send must restate the actual change and wait.
+  const FROM_FULL_ACCESS = 'newChat.chatInput.agentSwitch.confirmation.antigravityFromFullAccess';
+  const FROM_UNSUPPORTED = 'newChat.chatInput.agentSwitch.confirmation.antigravityFromUnsupported';
+  it.each([
+    ['agreed while in Default permissions, then picked Full access', 'ask', 'bypassPermissions', FROM_FULL_ACCESS],
+    ['agreed to leave Full access, then picked Accept edits', 'bypassPermissions', 'acceptEdits', FROM_UNSUPPORTED],
+    ['agreed to leave Accept edits, then picked Full access', 'acceptEdits', 'bypassPermissions', FROM_FULL_ACCESS],
+  ])('a send restates the permission change and waits: %s', async (_name, agreedIn, modeAtSend, notice) => {
+    forgetAgySwitchPermissionAgreed('task-1');
+    noteAgySwitchPermissionAgreed('task-1', agreedIn);
+    const onSent = vi.fn();
+    renderSend({ mode: modeAtSend, onSent });
+
+    fireEvent.click(screen.getByRole('button', { name: 'Send' }));
+    expect((await screen.findByText(new RegExp(notice.replace(/\./g, '\\.')))).textContent).toContain(COPY.description);
+    expect(screen.queryByRole('checkbox', { name: COPY.dontShowAgainLabel })).toBeNull();
+    fireEvent.click(screen.getByRole('button', { name: COPY.cancelText }));
+    await waitFor(() => expect(screen.queryByText(COPY.title)).toBeNull());
+    expect(onSent).not.toHaveBeenCalled();
+
+    // Cancelling agreed to nothing: the next send asks again, and agreeing lets later sends through.
+    fireEvent.click(screen.getByRole('button', { name: 'Send' }));
+    fireEvent.click(await screen.findByRole('button', { name: COPY.confirmText }));
+    await waitFor(() => expect(onSent).toHaveBeenCalledTimes(1));
+    fireEvent.click(screen.getByRole('button', { name: 'Send' }));
+    await waitFor(() => expect(onSent).toHaveBeenCalledTimes(2));
+    expect(screen.queryByText(COPY.title)).toBeNull();
+  });
+
+  it.each([
+    ['the outcome is the one agreed to', 'acceptEdits', 'plan', 'agy', 'claude-code'],
+    ['the user picked a mode Antigravity keeps', 'bypassPermissions', 'ask', 'agy', 'claude-code'],
+    ['the mode is unchanged since agreeing', 'bypassPermissions', 'bypassPermissions', 'agy', 'claude-code'],
+    ['the pending switch targets another engine', 'ask', 'bypassPermissions', 'codex', 'claude-code'],
+    ['the task already runs Antigravity', 'ask', 'bypassPermissions', 'agy', 'agy'],
+    ['no switch is pending', 'ask', 'bypassPermissions', null, 'claude-code'],
+  ])('a send goes straight out when %s', async (_name, agreedIn, modeAtSend, intentTarget, runningAgent) => {
+    forgetAgySwitchPermissionAgreed('task-1');
+    noteAgySwitchPermissionAgreed('task-1', agreedIn);
+    const onSent = vi.fn();
+    renderSend({ mode: modeAtSend, intentTarget, runningAgent, onSent });
+
+    fireEvent.click(screen.getByRole('button', { name: 'Send' }));
+    await waitFor(() => expect(onSent).toHaveBeenCalledTimes(1));
+    expect(screen.queryByText(COPY.title)).toBeNull();
+  });
+
+  it('asks before sending when nothing was agreed for this pending switch', async () => {
+    noteAgySwitchPermissionAgreed('task-1', 'bypassPermissions');
+    forgetAgySwitchPermissionAgreed('task-1');
+    const onSent = vi.fn();
+    renderSend({ mode: 'bypassPermissions', onSent });
+
+    fireEvent.click(screen.getByRole('button', { name: 'Send' }));
+    await screen.findByText(new RegExp(FROM_FULL_ACCESS.replace(/\./g, '\\.')));
+    expect(onSent).not.toHaveBeenCalled();
   });
 
   it('does not prompt again when an Agent switch intent already exists', async () => {

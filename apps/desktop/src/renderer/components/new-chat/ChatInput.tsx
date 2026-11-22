@@ -167,6 +167,9 @@ import { useRemoteSessionConnection } from '@/features/cc-agent/hooks/useRemoteS
 import {
   agySwitchPermissionNotice,
   confirmAgentSwitchRisk,
+  confirmPendingAgySwitchPermission,
+  forgetAgySwitchPermissionAgreed,
+  noteAgySwitchPermissionAgreed,
   isAgentSwitchEchoConfigConsistent,
   isAgentSwitchResponseFresh,
   relocationDescriptionKey,
@@ -5741,6 +5744,8 @@ export function ChatInput({
   const dispatchSendRef = useRef<(deliveryMode?: MessageDeliveryMode) => void | Promise<void>>(
     () => {},
   );
+  /** Assigned below, next to the switch dialog it reuses; a send that races the dialog is dropped. */
+  const confirmPendingAgySwitchPermissionRef = useRef<(sourceSessionId: string) => Promise<boolean>>(async () => true);
   const dispatchSend = useCallback(
     async (deliveryMode: MessageDeliveryMode = 'queue') => {
       if (!editor) return;
@@ -5750,6 +5755,10 @@ export function ChatInput({
       // React 的 disabled 状态可能尚未完成下一帧渲染；同步读协调器兜住点击、快捷键、
       // 语音发送等所有入口，确保 host 已登记切换意图后才允许 maker:send。
       if (sessionId && hasPendingAgentSendDispatch(sessionId)) return;
+      // A pending switch into Antigravity changes the task's permissions when this message applies
+      // it. If the mode was changed after the user agreed to the switch, what they agreed to no
+      // longer describes it: state the actual change first, and do not send unless they agree.
+      if (sessionId && !(await confirmPendingAgySwitchPermissionRef.current(sessionId))) return;
       const sourceSessionId = sessionId;
       const sourceRemoteGhosts = deviceLinkDeviceId ? composerGhostsRef.current : null;
       const sourceStorageKey = storageKey;
@@ -7428,7 +7437,36 @@ export function ChatInput({
       expectedRevision?: number,
     ) => void | boolean | Promise<void | boolean>;
   }>({ byProvider: () => {}, byModel: () => {} });
-  const confirmAgentBrowseSwitch = useCallback(
+  const agySwitchPermissionPromptOpenRef = useRef(false);
+  confirmPendingAgySwitchPermissionRef.current = async (sourceSessionId) => {
+    if (agySwitchPermissionPromptOpenRef.current) return false;
+    agySwitchPermissionPromptOpenRef.current = true;
+    try {
+      return await confirmPendingAgySwitchPermission({
+        sessionId: sourceSessionId,
+        intentTarget: agentSwitchIntent?.target,
+        runningAgent: runtimeAgentKind,
+        permissionMode: activePermissionModeRef.current,
+        confirm: confirmDialog,
+        copy: {
+          title: t('newChat.chatInput.agentSwitch.confirmation.title'),
+          description: t('newChat.chatInput.agentSwitch.confirmation.description'),
+          confirmText: t('newChat.chatInput.agentSwitch.confirmation.confirm'),
+          cancelText: t('newChat.chatInput.agentSwitch.confirmation.cancel'),
+          dontShowAgainLabel: t('newChat.chatInput.agentSwitch.confirmation.dontShowAgain'),
+        },
+        t,
+      });
+    } finally {
+      agySwitchPermissionPromptOpenRef.current = false;
+    }
+  };
+  const pendingAgySwitch = agentSwitchIntent?.target === 'agy';
+  useEffect(() => {
+    // What was agreed belongs to one pending switch; it must not vouch for a later one.
+    if (sessionId && !pendingAgySwitch) forgetAgySwitchPermissionAgreed(sessionId);
+  }, [sessionId, pendingAgySwitch]);
+  const confirmAgentBrowseSwitchRisk = useCallback(
     (targetAgent: 'claude-code' | 'codex' | 'pi' | 'agy' | null) =>
       confirmAgentSwitchRisk({
         // 不必再问的两种:回原引擎(same-engine no-op),或点的就是已经确认过的意图目标
@@ -7451,6 +7489,18 @@ export function ChatInput({
         ...agySwitchPermissionNotice(targetAgent, runtimeAgentKind, activePermissionMode, t),
       }),
     [sessionId, runtimeAgentKind, agentSwitchIntent?.target, confirmDialog, t, activePermissionMode],
+  );
+  const confirmAgentBrowseSwitch = useCallback(
+    async (targetAgent: 'claude-code' | 'codex' | 'pi' | 'agy' | null) => {
+      // Picking another Gemini model while the switch is already pending shows no dialog, so it
+      // must not replace what the user agreed to; the send gate compares against that.
+      const firstPickOfAntigravity = targetAgent === 'agy' && runtimeAgentKind !== 'agy' && !pendingAgySwitch;
+      const modeAtPick = activePermissionMode;
+      const proceed = await confirmAgentBrowseSwitchRisk(targetAgent);
+      if (proceed && firstPickOfAntigravity && sessionId) noteAgySwitchPermissionAgreed(sessionId, modeAtPick);
+      return proceed;
+    },
+    [confirmAgentBrowseSwitchRisk, runtimeAgentKind, pendingAgySwitch, activePermissionMode, sessionId],
   );
   const performAgentSwitch = useCallback(
     async (
