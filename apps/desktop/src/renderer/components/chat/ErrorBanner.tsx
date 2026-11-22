@@ -198,8 +198,11 @@ export function ErrorBanner({
 }: ErrorBannerProps) {
   const { t, i18n } = useTranslation();
   const bannerRef = useRef<HTMLDivElement>(null);
+  // A message the host holds until the user confirms a permission change: Escape closes the
+  // confirmation dialog, and must not also take away the only place to open it again.
+  const heldForPermissionConfirmation = isAgentSwitchPermissionUnconfirmedError(error);
   useEffect(() => {
-    if (!dismissOnEscape || !onCancel) return;
+    if (!dismissOnEscape || !onCancel || heldForPermissionConfirmation) return;
     const onKeyDown = (event: KeyboardEvent) => {
       if (
         event.key !== 'Escape' ||
@@ -233,7 +236,7 @@ export function ErrorBanner({
     // 冒泡阶段让输入框的候选列表、语音取消等先消费按键。
     window.addEventListener('keydown', onKeyDown);
     return () => window.removeEventListener('keydown', onKeyDown);
-  }, [dismissOnEscape, onCancel]);
+  }, [dismissOnEscape, onCancel, heldForPermissionConfirmation]);
   const { confirm } = useConfirmDialog();
   const promptCodexSessionExpired = useCodexSessionExpiredPrompt({
     // 非共享凭证沿用原有确认/登录流程；共享凭证由横幅内联动作直接唤起 App。
@@ -976,7 +979,7 @@ export function ErrorBanner({
               title={t('chat.errorBanner.retryTitle')}
             >
               <RotateCcw size={12} />
-              {t('chat.errorBanner.retry')}
+              {heldForPermissionConfirmation ? t('chat.errorBanner.agentSwitchPermissionReview') : t('chat.errorBanner.retry')}
             </Button>
           )}
           {(showHistoryRecovery || showInvalidEncryptedContentRecovery) && onForkStripEncrypted && (

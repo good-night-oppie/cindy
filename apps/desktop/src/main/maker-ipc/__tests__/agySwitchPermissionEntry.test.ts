@@ -7,6 +7,7 @@ import { withSendToSessionLock } from '../sendToSessionLock.js';
 import { withSessionPermissionChange } from '../sessionPermissionChange.js';
 import {
   applyPendingAgentSwitchIfIdle,
+  performSessionAgentSwitch,
   registerMakerSessionAgentSwitchHandler,
   type AgentSwitchSessionRow,
   type MakerSessionAgentSwitchHandlerDeps,
@@ -80,6 +81,7 @@ function fixture(initialMode: string) {
   } };
 
   const pending = new Map<string, PendingAgentSwitchIntent>();
+  const guards: Array<{ guarded: boolean; agreement?: unknown }> = [];
   const switchDeps: MakerSessionAgentSwitchHandlerDeps = {
     confirmNativeHistoryFallback: vi.fn(async () => true),
     getSessionRow: vi.fn(async () => ({ ...row, ...(state.staleModeAtEarlyRead ? { permissionMode: state.staleModeAtEarlyRead } : {}) })),
@@ -87,6 +89,7 @@ function fixture(initialMode: string) {
     closeSession: async () => { state.live = null; },
     listMessagesForHandoff: vi.fn(async () => [{ role: 'user', content: 'hello', createdAt: 1 }]),
     applyAgentSwitchToDb: vi.fn(async (_id, patch) => {
+      guards.push(patch.agyPermissionGuard ? { guarded: true, agreement: patch.agyPermissionGuard.agreement } : { guarded: false });
       // As the row commit does inside its statement (pinned to the real SQL in sessionsUpdate.test.ts).
       if (patch.agyPermissionGuard && row.agentKind !== 'agy'
         && agySwitchPermissionIsUnconfirmed(row.permissionMode, patch.agyPermissionGuard.agreement)) {
@@ -141,7 +144,11 @@ function fixture(initialMode: string) {
   expect(setMode, 'SET_PERMISSION_MODE source extraction must register its handler').toBeTypeOf('function');
 
   return {
-    id, row, log, broadcasts, state, maker,
+    id, row, log, broadcasts, state, maker, guards,
+    /** A switch that does not come from the user's pick: applied at once, or staged by configuration or the agent. */
+    switchFromHost: (extra: Record<string, unknown>) => performSessionAgentSwitch(switchDeps, {
+      sessionId: id, targetAgentKind: 'agy', model: 'gemini-test', providerId: null, ...extra,
+    }),
     /** The picker's entry: registers the switch, which the next send applies. */
     /**
      * As the composer does: the switch carries what its dialog told the user about the mode the
@@ -251,6 +258,47 @@ describe('switching a task into Antigravity from the model picker, with permissi
     expect(h.row).toMatchObject({ agentKind: 'cc', permissionMode: 'bypassPermissions' });
     expect(h.log).toEqual([]);
     await expect(h.pendingSwitch()).resolves.toMatchObject({ targetAgentKind: 'agy' });
+  });
+
+  // QQ's ruling: any path that makes the same unconfirmed rewrite is checked by the host, not only
+  // the user's pending pick. An agent's own request, an automation's model and an automatic
+  // fallback have nobody to ask, so on a task whose mode would be rewritten they are refused and
+  // the task is left as it was. The one exception is a partner's conversation following the
+  // partner's settings, whose rewrite is the policy decided for cindy#18.
+  it.each([
+    ['requested by the agent itself, as a pending switch', { runtimeSource: 'agent' }, 'pending'],
+    ['staged by configuration on an ordinary task, as a pending switch', { configStaged: true }, 'pending'],
+    ['applied at once by an automation or a fallback', { applyNow: true }, 'now'],
+    ['applied at once and staged by configuration on an ordinary task', { applyNow: true, configStaged: true }, 'now'],
+  ] as const)('refuses a switch %s when it would rewrite Full access', async (_name, extra, timing) => {
+    const h = fixture('bypassPermissions');
+    const attempt = timing === 'now' ? h.switchFromHost(extra) : h.switchFromHost(extra).then(() => h.send());
+    await expect(attempt).rejects.toBeInstanceOf(AgentSwitchPermissionUnconfirmedError);
+    expect(h.row).toMatchObject({ agentKind: 'cc', permissionMode: 'bypassPermissions' });
+    expect(h.state.live).toBeNull();
+  });
+
+  it('lets the same switches through on a task whose mode Antigravity keeps', async () => {
+    const h = fixture('auto');
+    await h.switchFromHost({ applyNow: true, configStaged: true });
+    expect(h.row).toMatchObject({ agentKind: 'agy', permissionMode: 'auto' });
+    expect(h.guards).toEqual([{ guarded: true, agreement: undefined }]);
+  });
+
+  it('leaves a partner conversation that follows the partner\'s settings to the partner policy', async () => {
+    const h = fixture('bypassPermissions');
+    h.row.source = 'bot';
+    await h.switchFromHost({ applyNow: true, configStaged: true });
+    expect(h.row).toMatchObject({ agentKind: 'agy', permissionMode: 'auto' });
+    expect(h.guards).toEqual([{ guarded: false }]);
+  });
+
+  it('still checks the user\'s own pick in a partner conversation', async () => {
+    const h = fixture('bypassPermissions');
+    h.row.source = 'bot';
+    await h.pickGeminiModel(null);
+    await expect(h.send()).rejects.toBeInstanceOf(AgentSwitchPermissionUnconfirmedError);
+    expect(h.row).toMatchObject({ agentKind: 'cc', permissionMode: 'bypassPermissions' });
   });
 
   it('keeps what was agreed when another Gemini model is picked while the switch is pending', async () => {

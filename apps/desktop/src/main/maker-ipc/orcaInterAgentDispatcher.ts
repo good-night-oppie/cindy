@@ -14,6 +14,7 @@ import type {
 } from '../../shared/agentInputQueue.js';
 import { createLogger } from '../logger.js';
 import { createHostSendFailure } from '../maker-host/send-outcome.js';
+import { AgentSwitchPermissionUnconfirmedError } from './agentSwitchPermissionAgreement.js';
 import type {
   CollabDispatchFailureOutcome,
   CollabDispatchQueuedOutcome,
@@ -746,7 +747,10 @@ export function createOrcaInterAgentDispatcher<TSessionMeta>(
       return await sendToInternal();
     } catch (err) {
       return failureResult({
-        ...createHostSendFailure(deps.isSessionRunningError(err) ? 'SESSION_RUNNING' : 'SEND_FAILED', err instanceof Error ? err.message : String(err)),
+        // The target's pending switch waits for its user: say so, so the sender keeps its message
+        // and does not read it as a broken target.
+        ...createHostSendFailure(deps.isSessionRunningError(err) ? 'SESSION_RUNNING'
+          : err instanceof AgentSwitchPermissionUnconfirmedError ? err.code : 'SEND_FAILED', err instanceof Error ? err.message : String(err)),
         source: params.meta.source,
         context: params.meta.context,
       });

@@ -12,6 +12,7 @@ import {
   type OrcaInterAgentDispatcherDeps,
   type OrcaInterAgentDispatcher,
 } from '../orcaInterAgentDispatcher.js';
+import { AgentSwitchPermissionUnconfirmedError } from '../agentSwitchPermissionAgreement';
 import { AgentInputCoordinator, type AgentInputSendOpts } from '../agent-input-coordinator.js';
 import { createOrcaWorkerReportQueue } from '../orcaWorkerReportQueue.js';
 import { AUTO_BRIDGE_BATCH_MAX_CHARS, AUTO_BRIDGE_BATCH_MAX_ITEMS } from '../orcaAutoBridgeBatch.js';
@@ -199,6 +200,22 @@ describe('sender-chosen steering into an active turn', () => {
     expect(h.liveSession.send).not.toHaveBeenCalled();
     expect(firstQueuedItem(h.queuedItems)).toMatchObject({ clientId: 'durable-report', durableDelivery: true,
       orcaReportDelivery: { workerId: 'worker-1' } });
+  });
+  // cindy#19: a Lead's message is delivered straight to the target's live session, applying the
+  // target's pending switch on the way, with no composer and no queue. When the host refuses that
+  // switch because its permission rewrite was not agreed to, the message has not been accepted
+  // anywhere: the sender must get a failure that says so (it still holds its own message), and
+  // nothing may reach the old engine or be queued behind the user's back.
+  it('returns an explicit failure to the sender when the target\'s pending switch needs a permission confirmation', async () => {
+    const apply = vi.fn(async () => { throw new AgentSwitchPermissionUnconfirmedError(); });
+    const h = createHarness({ applyPendingAgentSwitch: apply, hasPendingAgentSwitch: () => true });
+    const result = await h.dispatcher.dispatchOrEnqueueOrcaInterAgentMessage({ ...report, source: 'lead' });
+    expect(result).toMatchObject({
+      ok: false, dispatchOutcome: { kind: 'host-send', accepted: false, code: 'AGENT_SWITCH_PERMISSION_UNCONFIRMED' },
+    });
+    expect(apply).toHaveBeenCalledExactlyOnceWith('target-session');
+    expect(h.liveSession.send).not.toHaveBeenCalled();
+    expect(h.deps.enqueueQueuedMessage).not.toHaveBeenCalled();
   });
   it('keeps a healthy report direct without entering the route bootstrap path', async () => {
     const apply = vi.fn(async () => { throw new Error('must not bootstrap'); });

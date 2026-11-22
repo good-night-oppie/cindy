@@ -6017,6 +6017,34 @@ describe('AgentInputCoordinator send transaction', () => {
     }
   });
 
+  // cindy#19 (QQ's ruling after DD 7077886823): the host refuses a queued message whose pending
+  // switch into Antigravity would rewrite the task's permissions without the user's agreement.
+  // A message already in the queue must stay recoverable: at the head, with the queue paused, not
+  // dropped, not sent on the old engine and not retried in the background; one resend after the
+  // user confirms. The desktop composer, a phone and a bound schedule all enqueue here.
+  it('holds a message whose pending switch needs a permission confirmation, and resends it once on retry', async () => {
+    const h = createHarness();
+    const sid = 'held-for-permission-confirmation';
+    h.sendToAgent.mockResolvedValueOnce(hostSendFailure('AGENT_SWITCH_PERMISSION_UNCONFIRMED', 'confirm the change'));
+
+    h.coordinator.enqueue(sid, makeItem('q-1', 'first'));
+    await flush();
+    h.coordinator.enqueue(sid, makeItem('q-2', 'second'));
+    await flush();
+
+    const held = latestProjection(h.projections);
+    expect(held.pendingQueue.map((q) => q.clientId)).toEqual(['q-1', 'q-2']);
+    expect(held.recovery).toEqual({ kind: 'queue-head', clientId: 'q-1' });
+    expect(held.error).toMatch(/^AGENT_SWITCH_PERMISSION_UNCONFIRMED: /);
+    expect(mocks.createMessage).not.toHaveBeenCalled();
+    expect(h.sendToAgent).toHaveBeenCalledTimes(1);
+
+    await h.coordinator.retryLastError(sid);
+    await flush();
+    expect(h.sendToAgent).toHaveBeenCalledTimes(2);
+    expect(h.sendToAgent.mock.calls[1]?.[1]).toMatchObject({ clientId: 'q-1' });
+  });
+
   it.each(['WORKDIR_MISSING', 'LAZY_CREATE_FAILED'] as const)('keeps %s recoverable without leaving an active turn', async code => {
     const h = createHarness();
     const sid = 'host-preflight-failure';

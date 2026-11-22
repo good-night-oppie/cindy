@@ -710,8 +710,7 @@ export async function performSessionAgentSwitch(
     confirmedContextWindow?: unknown;
     /** Local composer: what the user agreed this switch into Antigravity does to the permission mode. */
     agyPermissionAgreement?: unknown;
-    /** Applying a user's pending switch into Antigravity: the row commit re-checks the agreement. */
-    agyPermissionGuard?: { agreement: AgySwitchPermissionAgreement | undefined };
+
     /**
      * 选择的 Agent 位置(远程 Agent):undefined = 保持任务当前位置(内部调用与不认识该字段的
      * 旧控制端都走这里，不做推断)，null = 任务所在电脑，字符串 = 同账号另一台电脑。
@@ -1262,7 +1261,10 @@ export async function performSessionAgentSwitch(
         sdkSessionId: relocatedNativeId ?? parked?.sdkSessionId ?? null,
         ...(typeof params.effort === 'string' && params.effort ? { effort: params.effort } : {}),
         ...((typeof params.fastMode === 'boolean' || params.fastMode === 'ultrafast') ? { fastMode: params.fastMode } : {}),
-        ...(params.agyPermissionGuard && toDbKind === 'agy' ? { agyPermissionGuard: params.agyPermissionGuard } : {}),
+        // Every way into Antigravity from another engine commits only a permission rewrite that
+        // was agreed to; only a user's pending switch carries an agreement.
+        ...(toDbKind === 'agy' && fromDbKind !== 'agy' && agySwitchPermissionIsGuarded(row, params)
+          ? { agyPermissionGuard: { agreement: parseAgySwitchPermissionAgreement(params.agyPermissionAgreement) } } : {}),
         // 组选回的当前位置在另一台电脑时也带上位置：提交按它判断窗口该查哪台的目录，不能拿本机目录。
         ...(agentDeviceChanges || (orcaGroupReturnRebuild && targetAgentDeviceId)
           ? { agentDeviceId: targetAgentDeviceId }
@@ -1495,6 +1497,19 @@ export async function performSessionAgentSwitch(
  *    已进入 commit point 后若失败,则只重试其原子恢复尾段。
  */
 /** 墓碑写失败: 一律阻止发送并保留可重试状态 —— 不适用跨引擎的 fail-continue(PR #5155 review P2)。 */
+/**
+ * Whether a switch into Antigravity may rewrite this task's permission mode only with the user's
+ * agreement. It may, for every task and every source of the switch (the user's pick, an agent's
+ * request, an automation's model, an automatic fallback), with one exception: a partner's
+ * conversation whose engine follows the partner's settings. There the rewrite is the partner
+ * policy decided for cindy#18 (QQ 7076775057), and no dialog exists to agree in.
+ */
+function agySwitchPermissionIsGuarded(
+  row: Pick<AgentSwitchSessionRow, 'source'>, switching: { configStaged?: boolean },
+): boolean {
+  return !(switching.configStaged === true && row.source === 'bot');
+}
+
 export class UserRouteSelectionMarkerError extends Error {
   readonly cause: unknown;
 
@@ -1635,12 +1650,12 @@ export function applyPendingAgentSwitchIfIdle(
       // about (changed from another window, a device, IM, or while this message waited in the
       // queue). Nothing is applied and nothing is sent; the switch stays pending. A switch staged
       // by configuration or requested by the agent has no dialog to agree in and is not checked.
-      const checksAgyPermission = intent.targetAgentKind === 'agy' && !intent.configStaged && intent.runtimeSource !== 'agent';
-      if (checksAgyPermission) {
+      if (intent.targetAgentKind === 'agy') {
         // An early answer, before the running engine is closed. The row commit decides again
         // inside its own statement; this read alone could be overtaken by a concurrent change.
         const row = await deps.getSessionRow(sessionId);
         if (row && row.agentKind !== 'agy' && typeof row.permissionMode === 'string'
+          && agySwitchPermissionIsGuarded(row, intent)
           && agySwitchPermissionIsUnconfirmed(row.permissionMode, intent.agyPermissionAgreement)) {
           throw new AgentSwitchPermissionUnconfirmedError();
         }
@@ -1659,7 +1674,7 @@ export function applyPendingAgentSwitchIfIdle(
         fastMode: intent.fastMode,
         thinking: intent.thinking,
         agentDeviceId: intent.targetAgentDeviceId,
-        ...(checksAgyPermission ? { agyPermissionGuard: { agreement: intent.agyPermissionAgreement } } : {}),
+        ...(intent.agyPermissionAgreement ? { agyPermissionAgreement: intent.agyPermissionAgreement } : {}),
         // 普通 maker send 随后会按 DB 真源 lazy-create,无需在 apply 内多 spawn 一次;
         // Goal / IM / scheduler 三条直发路径没有该 lazy-create 事务,必须先把新引擎
         // bootstrap 好再拿 live session 发送,否则会继续持有已关闭的旧 session。

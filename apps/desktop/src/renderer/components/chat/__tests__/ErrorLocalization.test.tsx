@@ -306,3 +306,23 @@ describe.each(SUPPORTED_LOCALES)('error presentation in %s', locale => {
     expect(screen.queryByText(/Switch this task/)).toBeNull();
   });
 });
+
+// cindy#19 (QQ's ruling after DD 7077886823): the host holds a message until the user confirms the
+// permission change of a pending switch into Antigravity. This is a state to act on, not a failure
+// to decode: the banner says so in the user's language, its action reopens the confirmation, and
+// Escape (which closes that confirmation) must not also remove the banner, the only way back to it.
+it.each([['en', en], ['zh-CN', zhCN]] as const)('presents a held permission confirmation as an action to take (%s)', async (lng, strings) => {
+  const i18n = createInstance();
+  await i18n.init({ lng, resources: { [lng]: { translation: strings } } });
+  const onRetry = vi.fn();
+  const onCancel = vi.fn();
+  render(<I18nextProvider i18n={i18n}><ErrorBanner
+    error="AGENT_SWITCH_PERMISSION_UNCONFIRMED: The pending switch to Antigravity would change this task's permissions"
+    retryText="the held message" onRetry={onRetry} onCancel={onCancel} dismissOnEscape /></I18nextProvider>);
+  expect(screen.getByText(strings.chat.errorBanner.agentSwitchPermissionUnconfirmed)).toBeTruthy();
+  expect(screen.queryByText(/AGENT_SWITCH_PERMISSION_UNCONFIRMED/)).toBeNull();
+  fireEvent.keyDown(window, { key: 'Escape' });
+  expect(onCancel).not.toHaveBeenCalled();
+  fireEvent.click(screen.getByRole('button', { name: strings.chat.errorBanner.agentSwitchPermissionReview }));
+  expect(onRetry).toHaveBeenCalledExactlyOnceWith('the held message');
+});
