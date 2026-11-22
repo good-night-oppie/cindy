@@ -107,6 +107,22 @@ describe('makerChatStore.mirrorAgentSwitchIntent', () => {
     expect(makerChatStore.getSnapshot(s).agentKind).toBe('claude-code');
   });
 
+  // cindy#19: the picker can register a switch to Antigravity, but the mirror accepted three
+  // engines only. The host's copy (read back when the task is opened, and echoed after it is
+  // registered) was treated as "no switch pending": the composer showed the old engine and asked
+  // nothing, while the next message still switched. Seen on Win11 after a window reload.
+  it('keeps a pending switch to Antigravity that the host reports, and does not let its echo clear the local one', async () => {
+    const { makerChatStore } = await import('@/lib/makerChatStore');
+    const reopened = sid();
+    makerChatStore.mirrorAgentSwitchIntent(reopened, { targetAgentKind: 'agy', model: 'gemini-test', providerId: null });
+    expect(makerChatStore.getAgentSwitchIntent(reopened)).toEqual({ target: 'agy', model: 'gemini-test', providerId: null });
+
+    const registeredHere = sid();
+    makerChatStore.noteAgentSwitchIntent(registeredHere, 'agy', { model: 'gemini-test', providerId: null });
+    makerChatStore.mirrorAgentSwitchIntent(registeredHere, { targetAgentKind: 'agy', model: 'gemini-test', providerId: null });
+    expect(makerChatStore.getAgentSwitchIntent(registeredHere)?.target).toBe('agy');
+  });
+
   it('幂等:同值回声不重建快照(不与本端乐观登记打架)', async () => {
     const { makerChatStore } = await import('@/lib/makerChatStore');
     const s = sid();

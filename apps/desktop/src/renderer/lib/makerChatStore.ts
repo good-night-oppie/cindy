@@ -18901,10 +18901,13 @@ function normalizeAgentSwitchIntent(value: unknown): AgentSwitchIntentRecord | n
   // 轮 42 P1(codex-connector):pi 遗漏 —— main 的 performSessionAgentSwitch 与
   // AgentSwitchIntentRecord.target 都支持 'pi', 这里收窄成 cc/codex 会把
   // 等待下轮的 Pi switch 意图归一化成 null, pending 状态在 renderer 丢失。
+  // Antigravity too (cindy#19): the model picker registers it, and dropping it here left the
+  // composer unaware of a switch the next message still applied, after a reload or its own echo.
   if (
     item.targetAgentKind !== 'claude-code'
     && item.targetAgentKind !== 'codex'
     && item.targetAgentKind !== 'pi'
+    && item.targetAgentKind !== 'agy'
   ) return null;
   if (typeof item.model !== 'string' || item.model.length === 0) return null;
   // providerId 缺失按 null(与 main projectPendingAgentSwitchIntent 的 `?? null` 对齐);
