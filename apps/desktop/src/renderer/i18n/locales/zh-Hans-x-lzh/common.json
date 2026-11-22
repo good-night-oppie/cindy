@@ -14292,6 +14292,18 @@
           "dontShowAgain": "后不复提醒",
           "antigravityFromFullAccess": "既易之后，此任务之权柄由「完全访问」改为「自审」：Antigravity 所请之审，由 Cindy 自审，不复问君。「完全访问」不随入 Antigravity。易后可于任务之权柄菜单复改；各档所许，亦载于彼。",
           "antigravityFromUnsupported": "既易之后，此任务之权柄改为「预设权柄」：Antigravity 所请之审，由君决之。君今所用之档，Antigravity 无之，其档自有之规（如计划模式之限）不随而入。易后可于任务之权柄菜单复改；各档所许，亦载于彼。"
+        },
+        "sendConfirmation": {
+          "titleFromFullAccess": "以「自审」发之乎？",
+          "titleFromUnsupported": "以「预设权柄」发之乎？",
+          "cancel": "姑且不发",
+          "confirm": "确认并发"
+        },
+        "permissionConfirmation": {
+          "titleFromFullAccess": "改为「完全访问」乎？",
+          "titleFromUnsupported": "改为此权柄乎？",
+          "cancel": "姑且不改",
+          "confirm": "确认更改"
         }
       },
       "agentRelocation": {

@@ -14462,6 +14462,18 @@
           "dontShowAgain": "Não me lembrar novamente",
           "antigravityFromFullAccess": "Após a troca, as permissões desta tarefa mudam de “Acesso total” para “Revisão automática”: a Cindy revisa automaticamente as solicitações de aprovação que o Antigravity envia, sem perguntar a você. “Acesso total” não é levado para o Antigravity. Depois você pode alterar as permissões no menu de permissões da tarefa; ele também explica o que cada nível permite.",
           "antigravityFromUnsupported": "Após a troca, as permissões desta tarefa mudam para “Permissões padrão”: você decide sobre as solicitações de aprovação que o Antigravity envia. O Antigravity não tem o seu nível de permissão atual, então as regras próprias desse nível (como os limites do modo Plano) não são levadas. Depois você pode alterar as permissões no menu de permissões da tarefa; ele também explica o que cada nível permite."
+        },
+        "sendConfirmation": {
+          "titleFromFullAccess": "Enviar com “Revisão automática”?",
+          "titleFromUnsupported": "Enviar com “Permissões padrão”?",
+          "cancel": "Não enviar ainda",
+          "confirm": "Confirmar e enviar"
+        },
+        "permissionConfirmation": {
+          "titleFromFullAccess": "Mudar para “Acesso total”?",
+          "titleFromUnsupported": "Mudar para este nível de permissão?",
+          "cancel": "Não mudar ainda",
+          "confirm": "Confirmar mudança"
         }
       },
       "agentRelocation": {

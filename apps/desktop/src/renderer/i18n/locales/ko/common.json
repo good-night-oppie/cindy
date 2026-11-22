@@ -14292,6 +14292,18 @@
           "dontShowAgain": "다음부터 표시하지 않기",
           "antigravityFromFullAccess": "전환 후 이 작업의 권한이 '전체 접근'에서 '자동 리뷰'로 바뀝니다. Antigravity가 보내는 승인 요청은 Cindy가 자동으로 검토하며, 사용자에게 묻지 않습니다. '전체 접근'은 Antigravity로 이어지지 않습니다. 전환 후 작업의 권한 메뉴에서 다시 바꿀 수 있으며, 각 단계가 허용하는 범위도 거기에 나와 있습니다.",
           "antigravityFromUnsupported": "전환 후 이 작업의 권한이 '기본 권한'으로 바뀝니다. Antigravity가 보내는 승인 요청은 사용자가 결정합니다. 지금 쓰는 권한 단계는 Antigravity에 없어서, 그 단계 고유의 규칙(예: 계획 모드의 제한)은 이어지지 않습니다. 전환 후 작업의 권한 메뉴에서 다시 바꿀 수 있으며, 각 단계가 허용하는 범위도 거기에 나와 있습니다."
+        },
+        "sendConfirmation": {
+          "titleFromFullAccess": "'자동 리뷰'로 보낼까요?",
+          "titleFromUnsupported": "'기본 권한'으로 보낼까요?",
+          "cancel": "아직 보내지 않기",
+          "confirm": "확인하고 보내기"
+        },
+        "permissionConfirmation": {
+          "titleFromFullAccess": "'전체 접근'으로 바꿀까요?",
+          "titleFromUnsupported": "이 권한 단계로 바꿀까요?",
+          "cancel": "아직 바꾸지 않기",
+          "confirm": "변경 확인"
         }
       },
       "agentRelocation": {

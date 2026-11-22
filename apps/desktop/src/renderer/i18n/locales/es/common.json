@@ -14462,6 +14462,18 @@
           "dontShowAgain": "No volver a recordármelo",
           "antigravityFromFullAccess": "Tras el cambio, los permisos de esta tarea pasan de «Acceso completo» a «Revisión automática»: Cindy revisa automáticamente las solicitudes de aprobación que envía Antigravity, sin preguntarte. «Acceso completo» no se traslada a Antigravity. Después puedes cambiar los permisos en el menú de permisos de la tarea; allí también se explica qué permite cada nivel.",
           "antigravityFromUnsupported": "Tras el cambio, los permisos de esta tarea pasan a «Permisos predeterminados»: tú decides sobre las solicitudes de aprobación que envía Antigravity. Antigravity no tiene tu nivel de permisos actual, así que las reglas propias de ese nivel (como los límites del modo Plan) no se trasladan. Después puedes cambiar los permisos en el menú de permisos de la tarea; allí también se explica qué permite cada nivel."
+        },
+        "sendConfirmation": {
+          "titleFromFullAccess": "¿Enviar con «Revisión automática»?",
+          "titleFromUnsupported": "¿Enviar con «Permisos predeterminados»?",
+          "cancel": "No enviar todavía",
+          "confirm": "Confirmar y enviar"
+        },
+        "permissionConfirmation": {
+          "titleFromFullAccess": "¿Cambiar a «Acceso completo»?",
+          "titleFromUnsupported": "¿Cambiar a este nivel de permisos?",
+          "cancel": "No cambiar todavía",
+          "confirm": "Confirmar cambio"
         }
       },
       "agentRelocation": {

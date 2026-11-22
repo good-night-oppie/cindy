@@ -58,7 +58,13 @@ function Harness({
   );
 }
 
-/** The composer's send button while a switch is pending: the message goes out only when the gate resolves true. */
+const GATE_COPY = {
+  title: { fromFullAccess: 'Send with Auto-review?', fromUnsupported: 'Send with Default permissions?' },
+  confirmText: 'Confirm and send',
+  cancelText: 'Don’t send yet',
+};
+
+/** The composer while a switch is pending: the send, or the permission change, goes on only when the gate resolves true. */
 function SendHarness({ mode, intentTarget = 'agy', runningAgent = 'claude-code', onSent }: {
   mode: string; intentTarget?: string | null; runningAgent?: string; onSent: () => void;
 }) {
@@ -68,7 +74,7 @@ function SendHarness({ mode, intentTarget = 'agy', runningAgent = 'claude-code',
       type="button"
       onClick={() => {
         void confirmPendingAgySwitchPermission({
-          sessionId: 'task-1', intentTarget, runningAgent, permissionMode: mode, confirm, copy: COPY, t: key => key,
+          sessionId: 'task-1', intentTarget, runningAgent, permissionMode: mode, confirm, copy: GATE_COPY, t: key => key,
         }).then((send) => {
           if (send) onSent();
         });
@@ -161,64 +167,72 @@ describe('Agent switch confirmation', () => {
     expect(localStorage.getItem(STORAGE_KEY)).toBeNull();
   });
 
-  // cindy#19, DD review 7077385323 item 5: the switch is applied by the next send, and the
-  // permission menu stays usable in between. The dialog was shown once, when the Gemini model was
-  // picked, so a mode changed afterwards was rewritten at send time with no notice, or with a
-  // notice that named a different outcome. The send must restate the actual change and wait.
+  // cindy#19, DD reviews 7077385323 item 5 and 7077886823. The switch is applied by a later send
+  // (the composer's, or a queued or IM message the host dispatches), and the permission menu stays
+  // usable in between. The dialog was shown once, when the Gemini model was picked, so a mode
+  // changed afterwards was rewritten with no notice, or with a notice that named another outcome.
+  // The same gate runs when the mode is changed and before a send; these drive it as each does.
   const FROM_FULL_ACCESS = 'newChat.chatInput.agentSwitch.confirmation.antigravityFromFullAccess';
   const FROM_UNSUPPORTED = 'newChat.chatInput.agentSwitch.confirmation.antigravityFromUnsupported';
+  const FULL_ACCESS_CASE = [FROM_FULL_ACCESS, GATE_COPY.title.fromFullAccess] as const;
+  const UNSUPPORTED_CASE = [FROM_UNSUPPORTED, GATE_COPY.title.fromUnsupported] as const;
   it.each([
-    ['agreed while in Default permissions, then picked Full access', 'ask', 'bypassPermissions', FROM_FULL_ACCESS],
-    ['agreed to leave Full access, then picked Accept edits', 'bypassPermissions', 'acceptEdits', FROM_UNSUPPORTED],
-    ['agreed to leave Accept edits, then picked Full access', 'acceptEdits', 'bypassPermissions', FROM_FULL_ACCESS],
-  ])('a send restates the permission change and waits: %s', async (_name, agreedIn, modeAtSend, notice) => {
+    ['agreed while in Default permissions, then Full access', 'ask', 'bypassPermissions', ...FULL_ACCESS_CASE],
+    ['agreed to leave Full access, then Accept edits', 'bypassPermissions', 'acceptEdits', ...UNSUPPORTED_CASE],
+    ['agreed to leave Accept edits, then Full access', 'acceptEdits', 'bypassPermissions', ...FULL_ACCESS_CASE],
+    // Same resulting mode as what was agreed, but that agreement announced no rewrite at all.
+    ['agreed while in Auto-review, then Full access', 'auto', 'bypassPermissions', ...FULL_ACCESS_CASE],
+    ['agreed while in Default permissions, then Accept edits', 'ask', 'acceptEdits', ...UNSUPPORTED_CASE],
+  ])('restates the permission change and waits: %s', async (_name, agreedIn, modeNow, notice, title) => {
     forgetAgySwitchPermissionAgreed('task-1');
     noteAgySwitchPermissionAgreed('task-1', agreedIn);
     const onSent = vi.fn();
-    renderSend({ mode: modeAtSend, onSent });
+    renderSend({ mode: modeNow, onSent });
 
     fireEvent.click(screen.getByRole('button', { name: 'Send' }));
-    expect((await screen.findByText(new RegExp(notice.replace(/\./g, '\\.')))).textContent).toContain(COPY.description);
-    expect(screen.queryByRole('checkbox', { name: COPY.dontShowAgainLabel })).toBeNull();
-    fireEvent.click(screen.getByRole('button', { name: COPY.cancelText }));
-    await waitFor(() => expect(screen.queryByText(COPY.title)).toBeNull());
+    expect(await screen.findByText(title)).toBeTruthy();
+    expect(screen.getByText(notice)).toBeTruthy();
+    expect(screen.queryByText(COPY.title)).toBeNull();
+    expect(screen.queryByRole('checkbox')).toBeNull();
+    fireEvent.click(screen.getByRole('button', { name: GATE_COPY.cancelText }));
+    await waitFor(() => expect(screen.queryByText(title)).toBeNull());
     expect(onSent).not.toHaveBeenCalled();
 
-    // Cancelling agreed to nothing: the next send asks again, and agreeing lets later sends through.
+    // Declining agreed to nothing: the next attempt asks again, and agreeing lets later ones through.
     fireEvent.click(screen.getByRole('button', { name: 'Send' }));
-    fireEvent.click(await screen.findByRole('button', { name: COPY.confirmText }));
+    fireEvent.click(await screen.findByRole('button', { name: GATE_COPY.confirmText }));
     await waitFor(() => expect(onSent).toHaveBeenCalledTimes(1));
     fireEvent.click(screen.getByRole('button', { name: 'Send' }));
     await waitFor(() => expect(onSent).toHaveBeenCalledTimes(2));
-    expect(screen.queryByText(COPY.title)).toBeNull();
+    expect(screen.queryByText(title)).toBeNull();
   });
 
   it.each([
-    ['the outcome is the one agreed to', 'acceptEdits', 'plan', 'agy', 'claude-code'],
+    ['the rewrite is the one agreed to', 'acceptEdits', 'plan', 'agy', 'claude-code'],
     ['the user picked a mode Antigravity keeps', 'bypassPermissions', 'ask', 'agy', 'claude-code'],
     ['the mode is unchanged since agreeing', 'bypassPermissions', 'bypassPermissions', 'agy', 'claude-code'],
     ['the pending switch targets another engine', 'ask', 'bypassPermissions', 'codex', 'claude-code'],
     ['the task already runs Antigravity', 'ask', 'bypassPermissions', 'agy', 'agy'],
     ['no switch is pending', 'ask', 'bypassPermissions', null, 'claude-code'],
-  ])('a send goes straight out when %s', async (_name, agreedIn, modeAtSend, intentTarget, runningAgent) => {
+  ])('goes straight through when %s', async (_name, agreedIn, modeNow, intentTarget, runningAgent) => {
     forgetAgySwitchPermissionAgreed('task-1');
     noteAgySwitchPermissionAgreed('task-1', agreedIn);
     const onSent = vi.fn();
-    renderSend({ mode: modeAtSend, intentTarget, runningAgent, onSent });
+    renderSend({ mode: modeNow, intentTarget, runningAgent, onSent });
 
     fireEvent.click(screen.getByRole('button', { name: 'Send' }));
     await waitFor(() => expect(onSent).toHaveBeenCalledTimes(1));
-    expect(screen.queryByText(COPY.title)).toBeNull();
+    expect(screen.queryByRole('button', { name: GATE_COPY.confirmText })).toBeNull();
   });
 
-  it('asks before sending when nothing was agreed for this pending switch', async () => {
+  it('asks when nothing was agreed for this pending switch', async () => {
     noteAgySwitchPermissionAgreed('task-1', 'bypassPermissions');
     forgetAgySwitchPermissionAgreed('task-1');
     const onSent = vi.fn();
     renderSend({ mode: 'bypassPermissions', onSent });
 
     fireEvent.click(screen.getByRole('button', { name: 'Send' }));
-    await screen.findByText(new RegExp(FROM_FULL_ACCESS.replace(/\./g, '\\.')));
+    expect(await screen.findByText(GATE_COPY.title.fromFullAccess)).toBeTruthy();
     expect(onSent).not.toHaveBeenCalled();
   });
 

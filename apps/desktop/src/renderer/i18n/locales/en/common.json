@@ -14346,6 +14346,18 @@
           "dontShowAgain": "Don’t remind me again",
           "antigravityFromFullAccess": "After the switch, this task's permissions change from Full access to Auto-review: Cindy automatically reviews the approval requests Antigravity sends, without asking you. Full access isn't carried over to Antigravity. You can change permissions in the task's permission menu afterwards; it also explains what each level allows.",
           "antigravityFromUnsupported": "After the switch, this task's permissions change to Default permissions: you decide on the approval requests Antigravity sends. Antigravity doesn't have your current permission level, so that level's own rules (such as Plan mode's limits) aren't carried over. You can change permissions in the task's permission menu afterwards; it also explains what each level allows."
+        },
+        "sendConfirmation": {
+          "titleFromFullAccess": "Send with Auto-review?",
+          "titleFromUnsupported": "Send with Default permissions?",
+          "cancel": "Don't send yet",
+          "confirm": "Confirm and send"
+        },
+        "permissionConfirmation": {
+          "titleFromFullAccess": "Change to Full access?",
+          "titleFromUnsupported": "Change to this permission level?",
+          "cancel": "Don't change yet",
+          "confirm": "Confirm change"
         }
       },
       "agentRelocation": {

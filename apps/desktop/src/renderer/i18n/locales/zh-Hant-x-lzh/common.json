@@ -14292,6 +14292,18 @@
           "dontShowAgain": "後不復提醒",
           "antigravityFromFullAccess": "既易之後，此任務之權柄由「完全存取」改為「自審」：Antigravity 所請之審，由 Cindy 自審，不復問君。「完全存取」不隨入 Antigravity。易後可於任務之權柄選單復改；各檔所許，亦載於彼。",
           "antigravityFromUnsupported": "既易之後，此任務之權柄改為「預設權柄」：Antigravity 所請之審，由君決之。君今所用之檔，Antigravity 無之，其檔自有之規（如計畫模式之限）不隨而入。易後可於任務之權柄選單復改；各檔所許，亦載於彼。"
+        },
+        "sendConfirmation": {
+          "titleFromFullAccess": "以「自審」發之乎？",
+          "titleFromUnsupported": "以「預設權柄」發之乎？",
+          "cancel": "姑且不發",
+          "confirm": "確認並發"
+        },
+        "permissionConfirmation": {
+          "titleFromFullAccess": "改為「完全存取」乎？",
+          "titleFromUnsupported": "改為此權柄乎？",
+          "cancel": "姑且不改",
+          "confirm": "確認更改"
         }
       },
       "agentRelocation": {

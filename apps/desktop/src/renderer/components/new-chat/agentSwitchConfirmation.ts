@@ -56,37 +56,54 @@ export function agySwitchPermissionNotice(
     : 'newChat.chatInput.agentSwitch.confirmation.antigravityFromUnsupported') };
 }
 
+type AgySwitchPermissionChange = NonNullable<ReturnType<typeof agySwitchPermissionChange>>;
+
 /**
- * The permission mode the user last agreed a pending switch into Antigravity would leave the task
- * in, per task. The switch is applied by the next send, so the mode can change in between; what
- * was agreed then no longer describes what the switch will do. Renderer memory only: a lost entry
- * means the user is asked again, never that a change goes unannounced.
+ * What the user last agreed a pending switch into Antigravity would do to the task's permissions,
+ * per task: which change they were told about (none, when the mode is kept) and the mode it ends
+ * in. The switch is applied by a later send, and the mode can change in between; what was agreed
+ * then no longer describes what the switch will do. Both parts are compared: Auto-review kept as
+ * it is and Full access rewritten to Auto-review end in the same mode, but only one was announced.
+ * Renderer memory only: a lost entry means the user is asked again, never that a change goes unannounced.
  */
-const agreedAgySwitchModes = new Map<string, string>();
+const agreedAgySwitchPermissions = new Map<string, { change: AgySwitchPermissionChange | null; mode: string }>();
 
 /** Record what the switch dialog (or its absence, when the mode is kept) told the user. */
 export function noteAgySwitchPermissionAgreed(sessionId: string, permissionMode: string | null | undefined): void {
-  agreedAgySwitchModes.set(sessionId, permissionModeAfterSwitchToAgy(permissionMode));
+  agreedAgySwitchPermissions.set(sessionId, {
+    change: agySwitchPermissionChange(permissionMode), mode: permissionModeAfterSwitchToAgy(permissionMode),
+  });
 }
 
 /** The pending switch is gone (applied, withdrawn, or retargeted to another engine). */
 export function forgetAgySwitchPermissionAgreed(sessionId: string): void {
-  agreedAgySwitchModes.delete(sessionId);
+  agreedAgySwitchPermissions.delete(sessionId);
 }
 
 /**
- * Whether sending now would change the task's permissions to something the user has not agreed
- * to. A mode Antigravity keeps as it is needs no agreement: the user picked it themselves.
+ * Whether the switch would rewrite this permission mode in a way the user has not agreed to. A
+ * mode Antigravity keeps as it is needs no agreement: the user picked it themselves.
  */
 export function agySwitchPermissionNeedsAgreement(sessionId: string, permissionMode: string | null | undefined): boolean {
-  if (!agySwitchPermissionChange(permissionMode)) return false;
-  return agreedAgySwitchModes.get(sessionId) !== permissionModeAfterSwitchToAgy(permissionMode);
+  const change = agySwitchPermissionChange(permissionMode);
+  if (!change) return false;
+  const agreed = agreedAgySwitchPermissions.get(sessionId);
+  return agreed?.change !== change || agreed.mode !== permissionModeAfterSwitchToAgy(permissionMode);
+}
+
+/** Title per change, and the two buttons, of a dialog that asks again about a pending switch. */
+export interface AgySwitchPermissionAgreementCopy {
+  title: Record<AgySwitchPermissionChange, string>;
+  confirmText: string;
+  cancelText: string;
 }
 
 /**
- * The gate a send passes while a switch into Antigravity is pending: when the permission mode was
- * changed after the user agreed to the switch, state the change that will actually happen and send
- * only if they agree. Resolves false when the message must not be sent.
+ * The gate passed while a switch into Antigravity is pending, by a send and by a permission
+ * change: when the switch would rewrite `permissionMode` in a way the user has not agreed to,
+ * state the change that will actually happen and go on only if they agree. Resolves false when the
+ * message must not be sent, or the permission must not be changed. The first pick of a Gemini
+ * model keeps the switch dialog's own copy; this one names what the user is about to do.
  */
 export async function confirmPendingAgySwitchPermission(input: {
   sessionId: string;
@@ -94,16 +111,18 @@ export async function confirmPendingAgySwitchPermission(input: {
   runningAgent: string | null | undefined;
   permissionMode: string | null | undefined;
   confirm: (options: ConfirmOptions) => Promise<boolean>;
-  copy: AgentSwitchConfirmationCopy;
+  copy: AgySwitchPermissionAgreementCopy;
   t: Parameters<typeof agySwitchPermissionNotice>[3];
 }): Promise<boolean> {
   if (input.intentTarget !== 'agy' || input.runningAgent === 'agy') return true;
   if (!agySwitchPermissionNeedsAgreement(input.sessionId, input.permissionMode)) return true;
-  const agreed = await confirmAgentSwitchRisk({
-    hasSwitchIntent: false,
-    confirm: input.confirm,
-    copy: input.copy,
-    ...agySwitchPermissionNotice('agy', input.runningAgent, input.permissionMode, input.t),
+  const change = agySwitchPermissionChange(input.permissionMode)!;
+  const agreed = await input.confirm({
+    title: input.copy.title[change],
+    description: agySwitchPermissionNotice('agy', input.runningAgent, input.permissionMode, input.t).permissionNotice,
+    textClassName: 'select-none',
+    confirmText: input.copy.confirmText,
+    cancelText: input.copy.cancelText,
   });
   if (agreed) noteAgySwitchPermissionAgreed(input.sessionId, input.permissionMode);
   return agreed;

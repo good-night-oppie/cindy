@@ -158,6 +158,21 @@ describe('switching a task into Antigravity from the model picker, with permissi
     expect(h.lastBroadcastMode()).toBe(expected);
   });
 
+  // DD review 7077886823, blocker 2: a queued, IM or scheduled message is dispatched by the host,
+  // not by the composer. The host has nobody to ask: it applies the pending switch to whatever mode
+  // is stored at that moment. This pins that contract, which is why a mode the switch would rewrite
+  // has to be agreed to before it is stored (the composer's permission menu does that).
+  it.each([
+    ['bypassPermissions', 'auto'], ['acceptEdits', 'ask'],
+  ])('a host-dispatched message rewrites a mode stored after the switch was registered: %s lands on %s', async (stored, expected) => {
+    const h = fixture('ask');
+    await h.pickGeminiModel();
+    await h.setPermission(stored);
+    await h.send();
+    expect(h.log).toEqual([`saved ${stored}`, `switched agy ${expected}`, `launch agy ${expected} isolated`]);
+    expect([h.row.permissionMode, h.state.live?.stablePermissionModeState.mode, h.lastBroadcastMode()]).toEqual([expected, expected, expected]);
+  });
+
   it('send first: a tighter mode picked while Antigravity is starting waits, then reaches the running process', async () => {
     const h = fixture('bypassPermissions');
     await h.pickGeminiModel();

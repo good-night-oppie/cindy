@@ -5744,8 +5744,11 @@ export function ChatInput({
   const dispatchSendRef = useRef<(deliveryMode?: MessageDeliveryMode) => void | Promise<void>>(
     () => {},
   );
-  /** Assigned below, next to the switch dialog it reuses; a send that races the dialog is dropped. */
+  /** Assigned below, next to the switch dialog; a send or change that races the open dialog is dropped. */
   const confirmPendingAgySwitchPermissionRef = useRef<(sourceSessionId: string) => Promise<boolean>>(async () => true);
+  const confirmPermissionChangeDuringAgySwitchRef = useRef<
+    (sourceSessionId: string, newMode: PermissionMode) => Promise<boolean>
+  >(async () => true);
   const dispatchSend = useCallback(
     async (deliveryMode: MessageDeliveryMode = 'queue') => {
       if (!editor) return;
@@ -5755,9 +5758,11 @@ export function ChatInput({
       // React 的 disabled 状态可能尚未完成下一帧渲染；同步读协调器兜住点击、快捷键、
       // 语音发送等所有入口，确保 host 已登记切换意图后才允许 maker:send。
       if (sessionId && hasPendingAgentSendDispatch(sessionId)) return;
+      // A send already on its way owns this draft; asking here would confirm a send that is then dropped.
+      if (dispatchSendInFlightKeysRef.current.has(storageKey ?? sessionId ?? '__draft__')) return;
       // A pending switch into Antigravity changes the task's permissions when this message applies
-      // it. If the mode was changed after the user agreed to the switch, what they agreed to no
-      // longer describes it: state the actual change first, and do not send unless they agree.
+      // it. A change of mode is agreed to when it is made; this covers a lost record (window
+      // reload, a switch registered elsewhere): state the actual change, and send only on agreement.
       if (sessionId && !(await confirmPendingAgySwitchPermissionRef.current(sessionId))) return;
       const sourceSessionId = sessionId;
       const sourceRemoteGhosts = deviceLinkDeviceId ? composerGhostsRef.current : null;
@@ -7438,7 +7443,9 @@ export function ChatInput({
     ) => void | boolean | Promise<void | boolean>;
   }>({ byProvider: () => {}, byModel: () => {} });
   const agySwitchPermissionPromptOpenRef = useRef(false);
-  confirmPendingAgySwitchPermissionRef.current = async (sourceSessionId) => {
+  const confirmAgySwitchPermissionWhilePending = async (
+    sourceSessionId: string, permissionMode: PermissionMode, about: 'sendConfirmation' | 'permissionConfirmation',
+  ) => {
     if (agySwitchPermissionPromptOpenRef.current) return false;
     agySwitchPermissionPromptOpenRef.current = true;
     try {
@@ -7446,14 +7453,15 @@ export function ChatInput({
         sessionId: sourceSessionId,
         intentTarget: agentSwitchIntent?.target,
         runningAgent: runtimeAgentKind,
-        permissionMode: activePermissionModeRef.current,
+        permissionMode,
         confirm: confirmDialog,
         copy: {
-          title: t('newChat.chatInput.agentSwitch.confirmation.title'),
-          description: t('newChat.chatInput.agentSwitch.confirmation.description'),
-          confirmText: t('newChat.chatInput.agentSwitch.confirmation.confirm'),
-          cancelText: t('newChat.chatInput.agentSwitch.confirmation.cancel'),
-          dontShowAgainLabel: t('newChat.chatInput.agentSwitch.confirmation.dontShowAgain'),
+          title: {
+            fromFullAccess: t(`newChat.chatInput.agentSwitch.${about}.titleFromFullAccess`),
+            fromUnsupported: t(`newChat.chatInput.agentSwitch.${about}.titleFromUnsupported`),
+          },
+          confirmText: t(`newChat.chatInput.agentSwitch.${about}.confirm`),
+          cancelText: t(`newChat.chatInput.agentSwitch.${about}.cancel`),
         },
         t,
       });
@@ -7461,6 +7469,13 @@ export function ChatInput({
       agySwitchPermissionPromptOpenRef.current = false;
     }
   };
+  confirmPendingAgySwitchPermissionRef.current = sourceSessionId =>
+    confirmAgySwitchPermissionWhilePending(sourceSessionId, activePermissionModeRef.current, 'sendConfirmation');
+  // A queued message, an IM message or another entry applies the pending switch without passing
+  // the composer, with whatever mode is stored then. So a mode the switch would rewrite is agreed
+  // to before it is stored: the store never holds a rewrite the user was not told about here.
+  confirmPermissionChangeDuringAgySwitchRef.current = (sourceSessionId, newMode) =>
+    confirmAgySwitchPermissionWhilePending(sourceSessionId, newMode, 'permissionConfirmation');
   const pendingAgySwitch = agentSwitchIntent?.target === 'agy';
   useEffect(() => {
     // What was agreed belongs to one pending switch; it must not vouch for a later one.
@@ -9359,6 +9374,7 @@ export function ChatInput({
         });
         if (!confirmed) return;
       }
+      if (sessionId && !(await confirmPermissionChangeDuringAgySwitchRef.current(sessionId, newMode))) return;
       try {
         if (sessionId) {
           if (getSessionDeviceId(sessionId)) {
