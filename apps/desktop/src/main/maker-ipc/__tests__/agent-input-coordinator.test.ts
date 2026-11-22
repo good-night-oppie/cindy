@@ -6246,6 +6246,50 @@ describe('AgentInputCoordinator send transaction', () => {
     expect(h.onDiscardedQueuedMessage).not.toHaveBeenCalled();
   });
 
+  // cindy#19, found while answering JJ on 7081611824: a held message whose switch is no longer
+  // pending shows a banner that can be closed. Closing it cleared the error and kept the queue
+  // waiting on that message, with nothing on screen to start it again: it sat there as "queued".
+  // Closing now pauses the queue, which the task shows with "Continue sending"; the message
+  // keeps its place, a later message waits behind it, and continuing meets the same send step.
+  it('pauses the queue when the banner of a held message is closed, and holds or sends it again on Continue sending', async () => {
+    const h = createHarness();
+    const sid = 'held-banner-closed';
+    h.sendToAgent.mockResolvedValue(hostSendFailure('AGENT_SWITCH_PERMISSION_UNCONFIRMED', 'confirm the change'));
+    h.coordinator.enqueue(sid, makeItem('q-1', 'first'));
+    await flush();
+    await flush();
+
+    h.coordinator.clearError(sid);
+    const closed = h.coordinator.getProjection(sid);
+    expect(closed.error).toBeNull();
+    expect(closed.recovery).toBeNull();
+    expect(closed.queuePaused).toBe(true);
+    expect(closed.pendingQueue.map((q) => [q.clientId, q.text])).toEqual([['q-1', 'first']]);
+    h.coordinator.enqueue(sid, makeItem('q-2', 'unrelated'));
+    await flush();
+    expect(h.coordinator.getProjection(sid).pendingQueue.map((q) => q.clientId)).toEqual(['q-1', 'q-2']);
+    expect(h.sendToAgent).toHaveBeenCalledTimes(1);
+
+    // Continue sending while nothing has changed: held again, with its banner back.
+    h.coordinator.resume(sid);
+    await flush();
+    await flush();
+    const heldAgain = h.coordinator.getProjection(sid);
+    expect(heldAgain.error).toMatch(/^AGENT_SWITCH_PERMISSION_UNCONFIRMED: /);
+    expect(heldAgain.pendingQueue.map((q) => q.clientId)).toEqual(['q-1', 'q-2']);
+    expect(h.sendToAgent).toHaveBeenCalledTimes(2);
+
+    // Closed again; this time the user has picked the engine and agreed before continuing.
+    h.coordinator.clearError(sid);
+    h.sendToAgent.mockImplementation(async () => { h.setRunning(true); return sendSuccess(); });
+    h.coordinator.resume(sid);
+    await flush();
+    await flush();
+    expect(h.sendToAgent).toHaveBeenCalledTimes(3);
+    expect(h.sendToAgent.mock.calls[2]?.[1]).toMatchObject({ content: 'first' });
+    expect(h.onDiscardedQueuedMessage).not.toHaveBeenCalled();
+  });
+
   // cindy#19 (QQ's ruling on heartbeats), the task's side of the hand-over tested in
   // runnerQueuedDispatch.test.ts: while a heartbeat is held for the confirmation, the task shows
   // the held state; when the scheduler withdraws it after its wait, the item and its banner go,

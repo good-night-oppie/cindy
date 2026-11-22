@@ -3837,8 +3837,17 @@ export class AgentInputCoordinator {
     // 已清并回滚额度)。
     state.autoResumePending = null;
     state.autoResumeAttemptToken = null;
+    const heldHeadClientId = state.recovery?.kind === 'queue-head' ? state.recovery.clientId : null;
     if (state.recovery?.kind !== 'queue-head') {
       state.recovery = null;
+    } else if (state.pendingQueue.some(item => item.clientId === heldHeadClientId && item.awaitsAgySwitchConfirmation === true)) {
+      // Closing the banner of a message held for a switch into Antigravity. Leaving the recovery
+      // in place with no error shown would stop the queue with nothing on screen to start it
+      // again. The message stays where it is and the queue is paused instead, which the task
+      // shows with "Continue sending"; the send step holds the message again if it still must.
+      state.recovery = null;
+      state.queuePaused = true;
+      state.queuePausedByRestore = false;
     }
     this.emit(sessionId);
     if (shouldDrainTail) this.scheduleDrain(sessionId, 'clear-active-turn-error');
