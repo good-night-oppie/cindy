@@ -14300,6 +14300,7 @@
           "cancel": "まだ送信しない",
           "confirm": "確認して送信"
         },
+        "permissionAgreementNotRecorded": "この確認は記録されなかったため、まだ何も変わっていません。もう一度お試しください。",
         "permissionEntry": {
           "notice": "Antigravity に切り替えるとこのタスクの権限が変わり、その変更にはあなたの確認がまだ必要です。「内容を確認」を選んでください。ここでの確認は変更への同意だけで、メッセージは送信されません。",
           "titleFromFullAccess": "「自動レビュー」への変更に同意しますか？",

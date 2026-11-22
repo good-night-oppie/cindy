@@ -262,8 +262,12 @@ describe('a message the host held for an unconfirmed permission change', () => {
     const onResend = vi.fn();
     render(view({ error: HELD, mode: 'bypassPermissions', onResend }));
     fireEvent.click(await screen.findByRole('button', { name: CONFIRM }));
-    await waitFor(() => expect(h.toastError).toHaveBeenCalledExactlyOnceWith('newChat.chatInput.agentSwitch.failed'));
+    await waitFor(() => expect(h.toastError).toHaveBeenCalledExactlyOnceWith('newChat.chatInput.agentSwitch.permissionAgreementNotRecorded'));
     expect(onResend).not.toHaveBeenCalled();
+    // Trying again asks again: the answer that was not recorded is not remembered here either.
+    expect(readAgySwitchPermissionAgreed('task-1')).toBeUndefined();
+    fireEvent.click(screen.getByRole('button', { name: 'Retry' }));
+    expect(await screen.findByText(TITLE)).toBeTruthy();
   });
 
   // DD 7082445534, item 3: the host answering "that switch is no longer the pending one" is not
@@ -303,7 +307,7 @@ describe('a message the host held for an unconfirmed permission change', () => {
     const onResend = vi.fn();
     render(view({ error: HELD, mode: 'bypassPermissions', onResend }));
     fireEvent.click(await screen.findByRole('button', { name: CONFIRM }));
-    await waitFor(() => expect(h.toastError).toHaveBeenCalledExactlyOnceWith('newChat.chatInput.agentSwitch.failed'));
+    await waitFor(() => expect(h.toastError).toHaveBeenCalledExactlyOnceWith('newChat.chatInput.agentSwitch.permissionAgreementNotRecorded'));
     expect(onResend).not.toHaveBeenCalled();
     expect(readAgySwitchPermissionAgreed('task-1')).toBeUndefined();
   });

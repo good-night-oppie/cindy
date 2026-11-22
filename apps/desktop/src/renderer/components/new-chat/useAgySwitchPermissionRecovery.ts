@@ -80,7 +80,7 @@ export function useAgySwitchPermissionRecovery(input: {
       if (agreed) retry();
     } catch {
       // The host did not record the agreement: the message stays held and the banner stays.
-      toast.error(t('newChat.chatInput.agentSwitch.failed'));
+      toast.error(t('newChat.chatInput.agentSwitch.permissionAgreementNotRecorded'));
     } finally {
       asking.current = false;
     }

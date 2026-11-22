@@ -14470,6 +14470,7 @@
           "cancel": "Não enviar para já",
           "confirm": "Confirmar e enviar"
         },
+        "permissionAgreementNotRecorded": "Esta confirmação não foi registada, por isso ainda nada mudou. Tente novamente.",
         "permissionEntry": {
           "notice": "A mudança para o Antigravity vai alterar as permissões desta tarefa, e essa alteração ainda precisa da sua confirmação. Selecione «Rever e confirmar»; confirmar aqui apenas aceita a alteração e não envia nenhuma mensagem.",
           "titleFromFullAccess": "Aceitar a mudança para «Revisão automática»?",

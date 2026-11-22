@@ -14300,6 +14300,7 @@
           "cancel": "暫不傳送",
           "confirm": "確認並傳送"
         },
+        "permissionAgreementNotRecorded": "這次確認沒有記下，什麼都還沒改。請再試一次。",
         "permissionEntry": {
           "notice": "切換到 Antigravity 會改變這個任務的權限，這次改變還需要你確認。點「查看並確認」；這裡的確認只是同意這次改變，不會傳送訊息。",
           "titleFromFullAccess": "同意改成「自動審核」？",

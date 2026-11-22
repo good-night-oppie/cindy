@@ -14354,6 +14354,7 @@
           "cancel": "Don't send yet",
           "confirm": "Confirm and send"
         },
+        "permissionAgreementNotRecorded": "This confirmation wasn't recorded, so nothing has changed yet. Try again.",
         "permissionEntry": {
           "notice": "Switching to Antigravity will change this task's permissions, and that change still needs your confirmation. Select Review and confirm; confirming here only agrees to the change and doesn't send any message.",
           "titleFromFullAccess": "Agree to change to Auto-review?",

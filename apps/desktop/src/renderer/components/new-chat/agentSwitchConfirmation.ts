@@ -296,7 +296,15 @@ export async function agreeToPendingAgySwitchPermission(input: {
     const agreement = pending ? readAgySwitchPermissionAgreed(input.sessionId) : undefined;
     // Nothing to tell the host when the mode is kept as it is: it lets that through on its own.
     if (!pending || !agreement || agreement.change === null || !agySwitchPermissionChange(input.permissionMode)) return true;
-    const answer = await input.registerWithHost(pending, agreement);
+    let answer: unknown;
+    try {
+      answer = await input.registerWithHost(pending, agreement);
+    } catch (error) {
+      // Not recorded, so not remembered here either: trying again opens the question again,
+      // the same way from every entry.
+      forgetAgySwitchPermissionAgreed(input.sessionId);
+      throw error;
+    }
     if (!(answer && typeof answer === 'object'
       && (answer as { agyPermissionAgreementRecorded?: unknown }).agyPermissionAgreementRecorded === false)) {
       return true;

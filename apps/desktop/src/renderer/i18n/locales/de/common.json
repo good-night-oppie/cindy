@@ -14354,6 +14354,7 @@
           "cancel": "Noch nicht senden",
           "confirm": "Bestätigen und senden"
         },
+        "permissionAgreementNotRecorded": "Diese Bestätigung wurde nicht gespeichert, es hat sich also noch nichts geändert. Versuche es noch einmal.",
         "permissionEntry": {
           "notice": "Der Wechsel zu Antigravity ändert die Berechtigungen dieser Aufgabe, und diese Änderung musst du noch bestätigen. Wähle „Prüfen und bestätigen“; mit der Bestätigung hier stimmst du nur der Änderung zu, es wird keine Nachricht gesendet.",
           "titleFromFullAccess": "Änderung zu „Automatische Prüfung“ zustimmen?",

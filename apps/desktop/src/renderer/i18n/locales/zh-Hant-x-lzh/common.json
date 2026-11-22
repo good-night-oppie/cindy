@@ -14300,6 +14300,7 @@
           "cancel": "姑且不發",
           "confirm": "確認並發"
         },
+        "permissionAgreementNotRecorded": "此番確認未錄，諸事未改。請再試之。",
         "permissionEntry": {
           "notice": "易至 Antigravity，此任務之權柄將變，此變尚待君確認。點「覽而確認」；此處確認，唯許此變，不發訊也。",
           "titleFromFullAccess": "許改為「自審」乎？",

@@ -7487,7 +7487,7 @@ export function ChatInput({
     } catch (err) {
       // If the host has no record of the agreement, the mode is not stored and the message not queued.
       log.warn('agy switch permission agreement was not recorded by the host:', err);
-      toast.error(t('newChat.chatInput.agentSwitch.failed'));
+      toast.error(t('newChat.chatInput.agentSwitch.permissionAgreementNotRecorded'));
       return false;
     } finally {
       agySwitchPermissionPromptOpenRef.current = false;

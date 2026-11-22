@@ -14470,6 +14470,7 @@
           "cancel": "Ne pas envoyer pour le moment",
           "confirm": "Confirmer et envoyer"
         },
+        "permissionAgreementNotRecorded": "Cette confirmation n'a pas été enregistrée, rien n'a donc encore changé. Réessayez.",
         "permissionEntry": {
           "notice": "Le passage à Antigravity modifiera les autorisations de cette tâche, et cette modification attend encore votre confirmation. Sélectionnez « Vérifier et confirmer » ; confirmer ici accepte uniquement la modification et n'envoie aucun message.",
           "titleFromFullAccess": "Accepter le passage à « Revue auto » ?",

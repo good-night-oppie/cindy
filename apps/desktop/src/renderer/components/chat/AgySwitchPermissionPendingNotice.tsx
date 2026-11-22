@@ -76,7 +76,7 @@ export function AgySwitchPermissionPendingNotice({
         askAfresh: true,
       });
     } catch {
-      toast.error(t('newChat.chatInput.agentSwitch.failed'));
+      toast.error(t('newChat.chatInput.agentSwitch.permissionAgreementNotRecorded'));
     } finally {
       asking.current = false;
     }
