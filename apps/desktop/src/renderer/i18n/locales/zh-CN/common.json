@@ -14921,7 +14921,7 @@
       "gatewayQuotaExhausted": "Cindy AI 余额不足，请充值后继续",
       "viewBalance": "查看余额",
       "viewBalanceTitle": "打开「用量和计费」查看余额并充值",
-      "agentSwitchPermissionUnconfirmed": "这条消息还没有发出。切换到 Antigravity 时这个任务的权限会改变，而这次改变你还没有确认。点「查看并确认」处理；确认前不会切换，也不会发送。",
+      "agentSwitchPermissionUnconfirmed": "这条消息还没有发出。切换到 Antigravity 会改变这个任务的权限，这次改变还需要你确认。点「查看并确认」；你确认后才会切换并发送这条消息。",
       "agentSwitchPermissionReview": "查看并确认",
       "credentialSwitchBusy": "其他 Codex 任务仍在运行，暂时无法应用本任务选择的供应商（共享的 Codex 进程需要重启）。等这些任务结束后再点「重试」。",
       "accountBoundaryPending": "Cindy 正在切换账号状态，暂时无法开始这个任务。稍等片刻后点「重试」；如果一直出现，请重启 Cindy。",

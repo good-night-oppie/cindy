@@ -14949,7 +14949,7 @@
       "gatewayQuotaExhausted": "Dein Cindy AI-Guthaben ist aufgebraucht. Lade Guthaben auf, um fortzufahren.",
       "viewBalance": "Guthaben anzeigen",
       "viewBalanceTitle": "Öffne „Nutzung und Abrechnung“, um dein Guthaben zu prüfen und aufzuladen",
-      "agentSwitchPermissionUnconfirmed": "Diese Nachricht wurde noch nicht gesendet. Beim Wechsel zu Antigravity ändern sich die Berechtigungen dieser Aufgabe, und Sie haben diese Änderung noch nicht bestätigt. Wählen Sie „Prüfen und bestätigen“, um fortzufahren; bis dahin wird weder gewechselt noch gesendet.",
+      "agentSwitchPermissionUnconfirmed": "Diese Nachricht wurde noch nicht gesendet. Der Wechsel zu Antigravity ändert die Berechtigungen dieser Aufgabe, und diese Änderung musst du noch bestätigen. Wähle „Prüfen und bestätigen“; Cindy wechselt und sendet diese Nachricht erst, nachdem du bestätigt hast.",
       "agentSwitchPermissionReview": "Prüfen und bestätigen",
       "credentialSwitchBusy": "Eine andere Codex-Aufgabe läuft noch. Daher kann der Anbieter für diese Sitzung noch nicht angewendet werden (der gemeinsam genutzte Codex-Prozess muss neu gestartet werden). Versuch es erneut, sobald diese Aufgaben abgeschlossen sind.",
       "accountBoundaryPending": "Cindy stellt den Kontostatus noch um. Daher kann diese Aufgabe noch nicht starten. Warte kurz und klicke dann auf „Erneut versuchen“. Falls das weiterhin passiert, starte Cindy neu.",

@@ -15082,7 +15082,7 @@
       "gatewayQuotaExhausted": "Se agotó tu saldo de Cindy AI. Agrega fondos para continuar.",
       "viewBalance": "Ver saldo",
       "viewBalanceTitle": "Abre Uso y facturación para consultar tu saldo y agregar fondos",
-      "agentSwitchPermissionUnconfirmed": "Este mensaje aún no se ha enviado. Al cambiar a Antigravity cambiarán los permisos de esta tarea, y todavía no has confirmado ese cambio. Selecciona «Revisar y confirmar» para continuar; hasta entonces no se cambia ni se envía nada.",
+      "agentSwitchPermissionUnconfirmed": "Este mensaje aún no se ha enviado. Cambiar a Antigravity cambiará los permisos de esta tarea, y ese cambio todavía necesita tu confirmación. Selecciona «Revisar y confirmar»; Cindy solo cambia y envía este mensaje después de que confirmes.",
       "agentSwitchPermissionReview": "Revisar y confirmar",
       "credentialSwitchBusy": "Otra tarea de Codex sigue en ejecución, por lo que aún no se puede aplicar el proveedor de esta sesión (el proceso compartido de Codex necesita reiniciarse). Reintenta cuando terminen esas tareas.",
       "accountBoundaryPending": "Cindy aún está cambiando el estado de la cuenta, por lo que esta tarea todavía no puede iniciarse. Espera un momento y presiona Reintentar. Si el problema persiste, reinicia Cindy.",
