@@ -694,9 +694,9 @@ export function agySandboxDenialModelNote(denial: AgySandboxDenial): string {
  */
 export const AGY_SANDBOX_USER_COPY_DRAFT = {
   blocked: {
-    "zh-CN": "Antigravity 想{action}任务文件夹外的「{path}」，已被拦下。在这个权限档位下，Antigravity 碰不到任务文件夹以外的这个文件。如果确实需要它，可以把它复制到任务文件夹里，再让 Antigravity 继续。",
-    "en": "Antigravity tried to {action} “{path}”, which is outside this task's folder, and was blocked. At this permission level, Antigravity can't reach this file outside the task folder. If it really needs the file, copy it into the task folder and ask Antigravity to continue.",
-    action: { read: { 'zh-CN': '读取', en: 'read' }, write: { 'zh-CN': '修改', en: 'change' }, unknown: { 'zh-CN': '使用', en: 'use' } },
+    "zh-CN": "Antigravity 想{action}任务文件夹外的「{path}」，已被拦下。在这个权限档位下，Antigravity 不能使用任务文件夹外的这个文件。如果确实需要它，可以把它复制到任务文件夹里，再让 Antigravity 继续。",
+    "en": "Antigravity tried to {action} “{path}”, which is outside this task's folder, and was blocked. At this permission level, Antigravity can't use this file outside the task folder. If it really needs the file, copy it into the task folder and ask Antigravity to continue.",
+    action: { read: { 'zh-CN': '读取', en: 'read' }, write: { 'zh-CN': '修改', en: 'change' }, unknown: { 'zh-CN': '访问', en: 'access' } },
   },
   unavailable: {
     'zh-CN': '这台电脑上开不了 Antigravity 的文件隔离（{reason}）。为了不让它碰到任务文件夹以外的文件，这次没有启动 Antigravity。可以换用其他引擎，或请管理员安装并允许 bubblewrap 和 pasta 后再试。',

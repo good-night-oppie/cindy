@@ -14064,10 +14064,10 @@
       "autoFallback": "Auto-review is temporarily unavailable. Switched to Default permissions and will ask when needed.",
       "modes": {
         "agy": {
-          "isolated": "You decide on the approval requests Antigravity sends. It can read and change this task folder and its own settings, read the system files it needs, and reach the internet. Other files in your home folder stay hidden from it. It can read the Google sign-in Antigravity uses, but can't change it. Cindy tools run on your computer and may ask you to allow other files.",
+          "isolated": "You decide on the approval requests Antigravity sends. It can read and change this task folder and its own settings and history, read the system files it needs, and reach the internet. Other files in your home folder are not placed in its isolated environment. If Antigravity is signed in on this computer and its sign-in file is in its usual place (not a link), it can read that file, but not change it, to connect to your Google account. Otherwise it can't read the sign-in and won't connect to your account. Cindy tools run on your computer and may ask you to allow other files.",
           "host": "You decide on the approval requests Antigravity sends. This computer has no system-level file isolation for it: it can reach any file your account can. Cindy can't stop what it does without sending a request. Read requests outside this task's folder carefully before you allow them.",
           "full": "No Cindy file isolation: Antigravity can read and change any file your account can, including outside this task's folder, and run network commands. Its approval requests are allowed without asking you.",
-          "autoIsolated": "Cindy automatically reviews the approval requests Antigravity sends, which may take extra time. It can read and change this task folder and its own settings, read the system files it needs, and reach the internet. Other files in your home folder stay hidden from it. It can read the Google sign-in Antigravity uses, but can't change it. Cindy tools run on your computer and may ask you to allow other files.",
+          "autoIsolated": "Cindy automatically reviews the approval requests Antigravity sends, which may take extra time. It can read and change this task folder and its own settings and history, read the system files it needs, and reach the internet. Other files in your home folder are not placed in its isolated environment. If Antigravity is signed in on this computer and its sign-in file is in its usual place (not a link), it can read that file, but not change it, to connect to your Google account. Otherwise it can't read the sign-in and won't connect to your account. Cindy tools run on your computer and may ask you to allow other files.",
           "autoHost": "Cindy automatically reviews the approval requests Antigravity sends, which may take extra time. This computer has no system-level file isolation for it: it can reach any file your account can. Cindy can't stop what it does without sending a request."
         },
         "claude-code": {
@@ -14700,11 +14700,11 @@
     "verificationFailed": "Cindy couldn’t confirm whether the ChatGPT sign-in has recovered. Check again."
   },
   "chat": {
-    "agyBlocked": "Antigravity tried to {{action}} “{{path}}”, which is outside this task's folder, and was blocked. At this permission level, Antigravity can't reach this file outside the task folder. If it really needs the file, copy it into the task folder and ask Antigravity to continue.",
+    "agyBlocked": "Antigravity tried to {{action}} “{{path}}”, which is outside this task's folder, and was blocked. At this permission level, Antigravity can't use this file outside the task folder. If it really needs the file, copy it into the task folder and ask Antigravity to continue.",
     "agyFileActions": {
       "read": "read",
       "write": "change",
-      "unknown": "use"
+      "unknown": "access"
     },
     "agyIdleExit": "Antigravity stopped while this task was idle. Send a message here to resume.",
     "pluginModelRoute": {
