@@ -372,6 +372,12 @@ export interface MakerSessionAgentSwitchHandlerDeps {
     intent: PublicAgentSwitchIntent | null,
   ): void;
   /**
+   * The agreement recorded on the pending switch changed; the switch itself did not. Told to the
+   * same windows as onPendingSwitchChanged, but it is not a selection: nothing that follows a
+   * user's choice of route may run from it. Falls back to onPendingSwitchChanged when absent.
+   */
+  onPendingSwitchAgreementChanged?(sessionId: string, intent: PublicAgentSwitchIntent): void;
+  /**
    * 用户选择的路由落地(应用成功)后回调 —— 供 IM 侧给任务打「脱离跟随」标记:
    * 「单独改过」按选择行为判定, 同值重选也永久脱离跟随(greptile P1 补充, PR #5155)。
    * 系统配置对齐(configStaged)与 Agent 自选不触发。**失败会抛错**: 墓碑写不进去时
@@ -558,7 +564,7 @@ export function projectPendingAgentSwitchIntent(
  * agreement was recorded.
  */
 export function recordAgySwitchPermissionAgreement(
-  deps: Pick<MakerSessionAgentSwitchHandlerDeps, 'pendingSwitches' | 'onPendingSwitchChanged'>,
+  deps: Pick<MakerSessionAgentSwitchHandlerDeps, 'pendingSwitches' | 'onPendingSwitchChanged' | 'onPendingSwitchAgreementChanged'>,
   sessionId: string,
   askedAbout: { revision: unknown; model: unknown; providerId: unknown },
   agreement: unknown,
@@ -575,9 +581,15 @@ export function recordAgySwitchPermissionAgreement(
     || deps.pendingSwitches?.revision?.(sessionId) !== askedAbout.revision) {
     return false;
   }
-  const updated: PendingAgentSwitchIntent = { ...pending, agyPermissionAgreement: parsed };
-  deps.pendingSwitches!.set(sessionId, updated);
-  deps.onPendingSwitchChanged?.(sessionId, projectPendingAgentSwitchIntent(updated));
+  // Written on the pending switch itself, not on a copy stored in its place. It stays the same
+  // registration: its revision does not move, so a withdrawal that read the revision before this
+  // still clears it, and a switch being applied still recognises its own intent when it finishes.
+  // Where the switch came from (configuration, an agent, the user) and everything else it carries
+  // are untouched for the same reason.
+  pending.agyPermissionAgreement = parsed;
+  const report = projectPendingAgentSwitchIntent(pending)!;
+  if (deps.onPendingSwitchAgreementChanged) deps.onPendingSwitchAgreementChanged(sessionId, report);
+  else deps.onPendingSwitchChanged?.(sessionId, report);
   return true;
 }
 
@@ -1898,18 +1910,25 @@ export function registerMakerSessionAgentSwitchHandler(
         ? (options as { agyPermissionAgreement?: unknown }).agyPermissionAgreement : undefined;
       // An answer to "may this pending switch change the permissions": it is attached to that
       // switch if it is still the pending one, and does nothing else (see the function). A remote
-      // controller's answer is not taken, as above.
+      // controller's answer is not taken; this path decides that for itself, from what was sent.
+      // It runs under the task's send lock like every other change to the pending switch, so it
+      // cannot land in the middle of a withdrawal or of the switch being applied (DD 7082445534).
       if (options && typeof options === 'object' && !Array.isArray(options)
         && (options as { agyPermissionAgreementOnly?: unknown }).agyPermissionAgreementOnly === true) {
         if (typeof sessionId !== 'string' || sessionId.length === 0) throwIpcError('INVALID_PARAMS', 'sessionId required');
-        const recorded = !isDeviceLinkInvoke() && targetAgentKind === 'agy'
-          && recordAgySwitchPermissionAgreement(deps, sessionId, {
-            revision: (options as { agyPermissionRevision?: unknown }).agyPermissionRevision, model, providerId,
-          }, agyPermissionAgreement);
-        return {
-          switched: false, agentKind: 'agy' as const, model: typeof model === 'string' ? model : '', engineReady: true,
-          deferred: recorded, agyPermissionAgreementRecorded: recorded,
+        const answer = options as { agyPermissionAgreement?: unknown; agyPermissionRevision?: unknown };
+        const fromThisComputer = !isDeviceLinkInvoke();
+        const record = async () => {
+          const recorded = fromThisComputer && targetAgentKind === 'agy'
+            && recordAgySwitchPermissionAgreement(deps, sessionId, {
+              revision: answer.agyPermissionRevision, model, providerId,
+            }, answer.agyPermissionAgreement);
+          return {
+            switched: false, agentKind: 'agy' as const, model: typeof model === 'string' ? model : '', engineReady: true,
+            deferred: recorded, agyPermissionAgreementRecorded: recorded,
+          };
         };
+        return deps.withSessionLock ? deps.withSessionLock(sessionId, record) : record();
       }
       const agentDeviceId =
         options && typeof options === 'object' && !Array.isArray(options) && 'agentDeviceId' in options

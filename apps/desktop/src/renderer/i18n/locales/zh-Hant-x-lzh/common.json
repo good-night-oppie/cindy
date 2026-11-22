@@ -14922,7 +14922,7 @@
       "agentSwitchPermissionUnconfirmed": "此訊尚未發出。易至 Antigravity，此任務之權柄將變，此變尚待君確認。點「覽而確認」；君確認之後，方易而發此訊。",
       "agentSwitchPermissionUnconfirmedRemote": "此訊尚未發出。易至 Antigravity，此任務之權柄將變，此變須於任務所在之電腦確認，確認之後方易而發之。彼處確認之後，若此訊猶未發，點「再試」。",
       "agentSwitchPermissionUnconfirmedRemoteNamed": "此訊尚未發出。易至 Antigravity，此任務之權柄將變，此變須於任務所在之電腦「{{device}}」確認，確認之後方易而發之。彼處確認之後，若此訊猶未發，點「再試」。",
-      "agentSwitchPermissionSwitchGone": "此訊尚未發出。其待任務易至 Antigravity，而彼易已失其效。欲易，則復擇 Antigravity 之模型而確認；不欲易，則刪此訊而復發之。",
+      "agentSwitchPermissionSwitchGone": "此訊尚未發出。其待任務易至 Antigravity，而彼易已失其效。欲易，則復擇 Antigravity 之模型，於彈窗點「易 Agent」，此訊隨後即發；不欲易，則點此訊旁之「方候」，擇「罷遣」，而後復發之。",
       "agentSwitchPermissionReview": "覽而確認",
       "credentialSwitchBusy": "Codex 方行於他差事，暫不能依此差事所擇之模型來源而易（須重啟共用之 Codex 後臺程序）。俟其畢，點「再試」即可。",
       "accountBoundaryPending": "Cindy 方易名籍之態，暫不能始此差事。稍候片刻，點「再試」；若屢見之，請重啟 Cindy。",

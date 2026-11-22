@@ -11487,6 +11487,11 @@ export function registerMakerIpc(maker: Maker, options: RegisterMakerIpcOptions)
       if (intent) recordUserSessionRuntimeMutation(sessionId);
       broadcastSessionPatched(sessionId, { agentSwitchIntent: intent });
     },
+    // Only what the windows show changes. Not recordUserSessionRuntimeMutation: agreeing to a
+    // permission change is not choosing a route, and must not detach a task from what it follows.
+    onPendingSwitchAgreementChanged: (sessionId, intent) => {
+      broadcastSessionPatched(sessionId, { agentSwitchIntent: intent });
+    },
     // Same effect as any other selection of the user's that lands: the saved model is retired.
     onScheduledRestoreWithdrawn: async (sessionId) => { await updateScheduledPreference(sessionId, null); },
     // 用户选择落地 → 给 IM 任务打「脱离跟随」标记(同值重选也永久脱离, PR #5155)。
