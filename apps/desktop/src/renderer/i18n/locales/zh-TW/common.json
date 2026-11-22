@@ -14307,6 +14307,7 @@
           "note": "確認後不會傳送訊息。"
         },
         "permissionConfirmation": {
+          "bodyFromFullAccess": "切換後，你剛選的「完全訪問」會改為「自動審核」：Antigravity 傳來的審核要求由 Cindy 自動審核，不再問你。「完全訪問」不會帶到 Antigravity。切換後可以在任務的權限選單裡再改；各檔的具體範圍也寫在那裡。",
           "bodyFromUnsupported": "切換後，這個任務的權限會改為「預設權限」：Antigravity 傳來的審核要求由你決定。你剛選的這個檔位 Antigravity 沒有，它自帶的規則（例如計畫模式的限制）不會帶過去。切換後可以在任務的權限選單裡再改；各檔的具體範圍也寫在那裡。",
           "title": "改成「{{mode}}」？",
           "cancel": "暫不更改",

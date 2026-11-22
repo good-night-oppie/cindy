@@ -12,7 +12,10 @@ import { AgySwitchPermissionPendingNotice } from '@/components/chat/AgySwitchPer
 import { useAgySwitchPermissionRecovery } from '@/components/new-chat/useAgySwitchPermissionRecovery';
 
 const h = vi.hoisted(() => ({
-  intent: null as null | { target: string; model: string; providerId: string | null; agyPermissionRevision?: number },
+  intent: null as null | {
+    target: string; model: string; providerId: string | null; agyPermissionRevision?: number;
+    agyPermissionAgreement?: { change: 'fromFullAccess' | 'fromUnsupported' | null; mode: string } | null;
+  },
   registerWithHost: vi.fn(async (..._args: unknown[]) => ({})),
   /** Stands for what the host reports as agreed; part of what the view renders of the switch. */
   hostAgreed: '',
@@ -176,6 +179,46 @@ describe('a message the host held for an unconfirmed permission change', () => {
     shown.rerender(view({ error: null, mode: 'bypassPermissions', onResend }));
     await settle();
     expect(onResend).toHaveBeenCalledTimes(1);
+  });
+
+  // QQ's ruling on DD 7082445534, point e: when the host already has a valid agreement for this
+  // registration and this very change, another window does not ask again. The answer was given on
+  // this computer; asking twice adds nothing, and the host checks its own record when it applies
+  // the switch whatever a window believes. An agreement for another change is not that answer.
+  it('does not ask again in a window that did not ask, when the host already has the agreement for this change', async () => {
+    h.intent = { target: 'agy', model: 'gemini-test', providerId: null, agyPermissionRevision: 7,
+      agyPermissionAgreement: { change: 'fromFullAccess', mode: 'auto' } };
+    const onResend = vi.fn();
+    render(view({ error: HELD, mode: 'bypassPermissions', onResend }));
+    await waitFor(() => expect(onResend).toHaveBeenCalledTimes(1));
+    expect(screen.queryByText(TITLE)).toBeNull();
+    // Nothing new to tell the host: it is the host's own record that was used.
+    expect(h.registerWithHost).not.toHaveBeenCalled();
+  });
+
+  it('asks when what the host has is for another change than the one that would happen now', async () => {
+    h.intent = { target: 'agy', model: 'gemini-test', providerId: null, agyPermissionRevision: 7,
+      agyPermissionAgreement: { change: 'fromUnsupported', mode: 'ask' } };
+    const onResend = vi.fn();
+    render(view({ error: HELD, mode: 'bypassPermissions', onResend }));
+    expect(await screen.findByText(TITLE)).toBeTruthy();
+    expect(onResend).not.toHaveBeenCalled();
+  });
+
+  it('asks from the banner even when the host has an agreement: that action is the question', async () => {
+    h.intent = { target: 'agy', model: 'gemini-test', providerId: null, agyPermissionRevision: 7,
+      agyPermissionAgreement: { change: 'fromFullAccess', mode: 'auto' } };
+    const onResend = vi.fn();
+    const shown = render(view({ error: HELD, mode: 'bypassPermissions', onResend }));
+    await waitFor(() => expect(onResend).toHaveBeenCalledTimes(1));
+    // The host held it again all the same (its record had changed); the user opens the question.
+    shown.rerender(view({ error: null, mode: 'bypassPermissions', onResend }));
+    await settle();
+    shown.rerender(view({ error: HELD, mode: 'bypassPermissions', onResend }));
+    await settle();
+    expect(onResend).toHaveBeenCalledTimes(1);
+    fireEvent.click(screen.getByRole('button', { name: 'Retry' }));
+    expect(await screen.findByText(TITLE)).toBeTruthy();
   });
 
   it('resends once without asking when the user has since agreed in the permission menu', async () => {

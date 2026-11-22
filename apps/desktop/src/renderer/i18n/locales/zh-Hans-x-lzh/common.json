@@ -14307,6 +14307,7 @@
           "note": "确认之后，不发讯也。"
         },
         "permissionConfirmation": {
+          "bodyFromFullAccess": "既易之后，君方所择之「完全访问」改为「自审」：Antigravity 所请之审，由 Cindy 自审，不复问君。「完全访问」不随入 Antigravity。易后可于任务之权柄菜单复改；各档所许，亦载于彼。",
           "bodyFromUnsupported": "既易之后，此任务之权柄改为「预设权柄」：Antigravity 所请之审，由君决之。君方所择之档，Antigravity 无之，其自有之规（如计划模式之限）不随而入。易后可于任务之权柄菜单复改；各档所许，亦载于彼。",
           "title": "改为「{{mode}}」乎？",
           "cancel": "姑且不改",

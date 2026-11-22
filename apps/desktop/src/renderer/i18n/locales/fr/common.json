@@ -14477,6 +14477,7 @@
           "note": "La confirmation n'envoie aucun message."
         },
         "permissionConfirmation": {
+          "bodyFromFullAccess": "Après le changement, l'« Accès complet » que vous venez de choisir passe à « Revue auto » : Cindy examine automatiquement les demandes d'approbation envoyées par Antigravity, sans vous solliciter. « Accès complet » n'est pas repris dans Antigravity. Vous pourrez ensuite modifier les autorisations dans le menu des autorisations de la tâche ; il explique aussi ce que permet chaque niveau.",
           "bodyFromUnsupported": "Après le changement, les autorisations de cette tâche passent à « Autorisations par défaut » : vous décidez des demandes d'approbation envoyées par Antigravity. Antigravity n'a pas le niveau que vous venez de choisir ; ses règles propres (comme les limites du mode Plan) ne sont donc pas reprises. Vous pourrez ensuite modifier les autorisations dans le menu des autorisations de la tâche ; il explique aussi ce que permet chaque niveau.",
           "title": "Passer à « {{mode}} » ?",
           "cancel": "Ne pas modifier pour le moment",

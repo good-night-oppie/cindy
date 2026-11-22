@@ -14361,6 +14361,7 @@
           "note": "Confirming doesn't send any message."
         },
         "permissionConfirmation": {
+          "bodyFromFullAccess": "After the switch, the Full access you just picked changes to Auto-review: Cindy automatically reviews the approval requests Antigravity sends, without asking you. Full access isn't carried over to Antigravity. You can change permissions in the task's permission menu afterwards; it also explains what each level allows.",
           "bodyFromUnsupported": "After the switch, this task's permissions change to Default permissions: you decide on the approval requests Antigravity sends. Antigravity doesn't have the level you just picked, so its own rules (such as Plan mode's limits) aren't carried over. You can change permissions in the task's permission menu afterwards; it also explains what each level allows.",
           "title": "Change to {{mode}}?",
           "cancel": "Don't change yet",

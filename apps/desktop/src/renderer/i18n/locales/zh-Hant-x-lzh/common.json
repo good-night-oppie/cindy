@@ -14307,6 +14307,7 @@
           "note": "確認之後，不發訊也。"
         },
         "permissionConfirmation": {
+          "bodyFromFullAccess": "既易之後，君方所擇之「完全存取」改為「自審」：Antigravity 所請之審，由 Cindy 自審，不復問君。「完全存取」不隨入 Antigravity。易後可於任務之權柄選單復改；各檔所許，亦載於彼。",
           "bodyFromUnsupported": "既易之後，此任務之權柄改為「預設權柄」：Antigravity 所請之審，由君決之。君方所擇之檔，Antigravity 無之，其自有之規（如計畫模式之限）不隨而入。易後可於任務之權柄選單復改；各檔所許，亦載於彼。",
           "title": "改為「{{mode}}」乎？",
           "cancel": "姑且不改",

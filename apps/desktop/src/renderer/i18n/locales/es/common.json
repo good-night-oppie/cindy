@@ -14477,6 +14477,7 @@
           "note": "Al confirmar no se envía ningún mensaje."
         },
         "permissionConfirmation": {
+          "bodyFromFullAccess": "Tras el cambio, el «Acceso completo» que acabas de elegir pasa a «Revisión automática»: Cindy revisa automáticamente las solicitudes de aprobación que envía Antigravity, sin preguntarte. «Acceso completo» no se traslada a Antigravity. Después puedes cambiar los permisos en el menú de permisos de la tarea; allí también se explica qué permite cada nivel.",
           "bodyFromUnsupported": "Tras el cambio, los permisos de esta tarea pasan a «Permisos predeterminados»: tú decides sobre las solicitudes de aprobación que envía Antigravity. Antigravity no tiene el nivel que acabas de elegir, así que sus reglas propias (como los límites del modo Plan) no se trasladan. Después puedes cambiar los permisos en el menú de permisos de la tarea; allí también se explica qué permite cada nivel.",
           "title": "¿Cambiar a «{{mode}}»?",
           "cancel": "No cambiar todavía",

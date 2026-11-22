@@ -14307,6 +14307,7 @@
           "note": "确认后不会发送消息。"
         },
         "permissionConfirmation": {
+          "bodyFromFullAccess": "切换后，你刚选的「完全访问」会改为「自动审批」：Antigravity 发来的审批请求由 Cindy 自动审批，不再问你。「完全访问」不会带到 Antigravity。切换后可以在任务的权限菜单里再改；各档的具体范围也写在那里。",
           "bodyFromUnsupported": "切换后，这个任务的权限会改为「默认权限」：Antigravity 发来的审批请求由你决定。你刚选的这个档位 Antigravity 没有，它自带的规则（比如计划模式的限制）不会带过去。切换后可以在任务的权限菜单里再改；各档的具体范围也写在那里。",
           "title": "改成「{{mode}}」？",
           "cancel": "暂不更改",

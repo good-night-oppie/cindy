@@ -636,6 +636,34 @@ describe('switching a task into Antigravity from the model picker, with permissi
     await expect(h.agreeOnly('bypassPermissions', 'gemini-test', 'here', revision, 'antigravity')).resolves.toMatchObject({ agyPermissionAgreementRecorded: true });
   });
 
+  // QQ's ruling on point e, the host's side. An agreement recorded from one window of this
+  // computer stands for the task: a message sent from another window, which asked nothing and
+  // sends no agreement of its own, is applied by the host's own record, once. The record is for
+  // one change: once the stored mode makes it another change, the same send is refused again,
+  // and a remote controller can add nothing to it.
+  it('applies a send from a window that asked nothing on the agreement another window recorded, and refuses again once it no longer fits', async () => {
+    const reused = fixture('bypassPermissions');
+    await reused.pickGeminiModel(null);
+    await expect(reused.agreeOnly('bypassPermissions')).resolves.toMatchObject({ agyPermissionAgreementRecorded: true });
+    // The other window: registers nothing, agrees to nothing, just sends.
+    await reused.send();
+    await reused.send();
+    expect(reused.log).toEqual(['switched agy auto', 'launch agy auto isolated']);
+
+    const expired = fixture('bypassPermissions');
+    await expired.pickGeminiModel(null);
+    await expect(expired.agreeOnly('bypassPermissions')).resolves.toMatchObject({ agyPermissionAgreementRecorded: true });
+    await expired.setPermission('acceptEdits');
+    await expect(expired.send()).rejects.toMatchObject({ code: 'AGENT_SWITCH_PERMISSION_UNCONFIRMED' });
+    await expect(expired.agreeOnly('acceptEdits', 'gemini-test', 'remote', await expired.shownRevision()))
+      .resolves.toMatchObject({ agyPermissionAgreementRecorded: false });
+    await expect(expired.send()).rejects.toMatchObject({ code: 'AGENT_SWITCH_PERMISSION_UNCONFIRMED' });
+    expect(expired.log).toEqual(['saved acceptEdits']);
+    await expect(expired.agreeOnly('acceptEdits')).resolves.toMatchObject({ agyPermissionAgreementRecorded: true });
+    await expired.send();
+    expect(expired.log).toEqual(['saved acceptEdits', 'switched agy ask', 'launch agy ask isolated']);
+  });
+
   it('records an agreement only for the stored mode it was given for, and not from a remote controller', async () => {
     const h = fixture('bypassPermissions');
     await h.pickGeminiModel(null);

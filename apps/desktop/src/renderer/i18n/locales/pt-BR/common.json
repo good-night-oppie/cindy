@@ -14477,6 +14477,7 @@
           "note": "Confirmar não envia nenhuma mensagem."
         },
         "permissionConfirmation": {
+          "bodyFromFullAccess": "Após a troca, o “Acesso total” que você acabou de escolher muda para “Revisão automática”: a Cindy revisa automaticamente as solicitações de aprovação que o Antigravity envia, sem perguntar a você. “Acesso total” não é levado para o Antigravity. Depois você pode alterar as permissões no menu de permissões da tarefa; ele também explica o que cada nível permite.",
           "bodyFromUnsupported": "Após a troca, as permissões desta tarefa mudam para “Permissões padrão”: você decide sobre as solicitações de aprovação que o Antigravity envia. O Antigravity não tem o nível que você acabou de escolher, então as regras próprias dele (como os limites do modo Plano) não são levadas. Depois você pode alterar as permissões no menu de permissões da tarefa; ele também explica o que cada nível permite.",
           "title": "Mudar para “{{mode}}”?",
           "cancel": "Não mudar ainda",

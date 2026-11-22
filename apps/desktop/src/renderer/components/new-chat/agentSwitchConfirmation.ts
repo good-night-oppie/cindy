@@ -186,9 +186,20 @@ export async function confirmPendingAgySwitchPermission(input: {
   confirm: (options: ConfirmOptions) => Promise<boolean>;
   copy: AgySwitchPermissionAgreementCopy;
   t: Parameters<typeof agySwitchPermissionNotice>[3];
+  /**
+   * What the task's host reports as agreed for the pending switch. When it already covers this
+   * very change (the same kind, ending in the same mode), the user gave that answer on this
+   * computer, in another window perhaps, and is not asked again (QQ's ruling after DD
+   * 7082445534, point e). It only spares the question: the host checks its own record when it
+   * applies the switch, and nothing a window remembers or is told can stand in for that.
+   */
+  hostAgreement?: { change: AgySwitchPermissionChange | null; mode: string } | null;
 }): Promise<boolean> {
   if (input.intentTarget !== 'agy' || input.runningAgent === 'agy') return true;
   if (!agySwitchPermissionNeedsAgreement(input.sessionId, input.permissionMode)) return true;
+  if (input.hostAgreement
+    && input.hostAgreement.change === agySwitchPermissionChange(input.permissionMode)
+    && input.hostAgreement.mode === permissionModeAfterSwitchToAgy(input.permissionMode)) return true;
   // One question at a time for a task. The task's entry, the held-message banner and the
   // composer each ask this; a second one opened behind the first would ask the same thing twice.
   if (isAgySwitchPermissionDialogOpen(input.confirm, input.sessionId)) return false;
@@ -263,6 +274,11 @@ export async function agreeToPendingAgySwitchPermission(input: {
     intent: AgySwitchPermissionPendingIntent,
     agreement: { change: AgySwitchPermissionChange | null; mode: string },
   ) => Promise<unknown>;
+  /**
+   * Ask even if the host is known to have an agreement: for an entry whose whole point is the
+   * question (the held message's "Review and confirm", the task's own entry).
+   */
+  askAfresh?: boolean;
   /** What is pending for the task now, read when the host says the switch asked about is gone. */
   currentIntent?: () => AgySwitchPermissionPendingIntent | null | undefined;
 }): Promise<boolean> {
@@ -271,6 +287,9 @@ export async function agreeToPendingAgySwitchPermission(input: {
     const agreed = await confirmPendingAgySwitchPermission({
       sessionId: input.sessionId, intentTarget: intent?.target, runningAgent: input.runningAgent,
       permissionMode: input.permissionMode, confirm: input.confirm, copy: input.copy, t: input.t,
+      // Not for an answer the caller asks to hear afresh, and not after the host has just said
+      // that what this window knew of the switch was out of date.
+      hostAgreement: input.askAfresh || asked > 0 ? undefined : intent?.agyPermissionAgreement,
     });
     if (!agreed) return false;
     const pending = intent?.target === 'agy' && input.runningAgent !== 'agy' ? intent : null;

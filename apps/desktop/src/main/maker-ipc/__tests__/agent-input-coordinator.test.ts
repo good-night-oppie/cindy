@@ -6246,6 +6246,48 @@ describe('AgentInputCoordinator send transaction', () => {
     expect(h.onDiscardedQueuedMessage).not.toHaveBeenCalled();
   });
 
+  // cindy#19 (QQ's ruling on "Interject"). The queue menu's Interject hands a queued message to
+  // the turn that is running, on the engine it runs on, without the send step that applies a
+  // pending switch or refuses for want of the user's agreement. A turn can be running on the old
+  // engine while a held message sits in the queue (after a restart, a message arriving from IM
+  // starts one). Interjecting the held message then delivered it to the engine it was never meant
+  // for. It is refused: nothing reaches the engine, the message keeps its place, and it goes out
+  // once through the ordinary send step. A message that was never held is interjected as before.
+  it('does not interject a message held for a switch into Antigravity into the running turn, and still sends it once later', async () => {
+    const h = createHarness();
+    const sid = 'held-message-interject';
+    h.sendToAgent.mockResolvedValueOnce(hostSendFailure('AGENT_SWITCH_PERMISSION_UNCONFIRMED', 'confirm the change'));
+    h.coordinator.enqueue(sid, makeItem('q-1', 'held'));
+    await flush();
+    await flush();
+    h.coordinator.clearError(sid);
+    h.coordinator.enqueue(sid, makeItem('q-2', 'plain'));
+    await flush();
+    // A turn is running on the engine the task still has.
+    h.setRunning(true);
+
+    const held = h.coordinator.getProjection(sid).pendingQueue.find((q) => q.clientId === 'q-1')!;
+    await expect(h.coordinator.steer(sid, makeItem(held.clientId, held.text), { removeFromQueue: true })).resolves.toBe(false);
+    expect(h.steerToAgent).not.toHaveBeenCalled();
+    expect(h.coordinator.getProjection(sid).pendingQueue.map((q) => q.clientId)).toEqual(['q-1', 'q-2']);
+    expect(h.sendToAgent).toHaveBeenCalledTimes(1);
+
+    await expect(h.coordinator.steer(sid, makeItem('q-2', 'plain'), { removeFromQueue: true })).resolves.toBe(true);
+    expect(h.steerToAgent).toHaveBeenCalledTimes(1);
+    expect(h.coordinator.getProjection(sid).pendingQueue.map((q) => q.clientId)).toEqual(['q-1']);
+
+    // The turn ends; the user has confirmed and continues: the held message goes out, once.
+    h.setRunning(false);
+    h.coordinator.onTurnEvent(sid, 'done');
+    await flush();
+    h.sendToAgent.mockImplementation(async () => { h.setRunning(true); return sendSuccess(); });
+    h.coordinator.resume(sid);
+    await flush();
+    await flush();
+    expect(h.sendToAgent).toHaveBeenCalledTimes(2);
+    expect(h.sendToAgent.mock.calls[1]?.[1]).toMatchObject({ content: 'held' });
+  });
+
   // cindy#19, found while answering JJ on 7081611824: a held message whose switch is no longer
   // pending shows a banner that can be closed. Closing it cleared the error and kept the queue
   // waiting on that message, with nothing on screen to start it again: it sat there as "queued".

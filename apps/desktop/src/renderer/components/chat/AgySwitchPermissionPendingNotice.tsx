@@ -73,6 +73,7 @@ export function AgySwitchPermissionPendingNotice({
           recordAgySwitchPermissionAgreementWithHost(asked.sessionId, pending, agreement),
         // Rendered from the host's report, so it is what is pending now.
         currentIntent: () => latest.current.intent,
+        askAfresh: true,
       });
     } catch {
       toast.error(t('newChat.chatInput.agentSwitch.failed'));

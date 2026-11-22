@@ -2699,6 +2699,11 @@ export class AgentInputCoordinator {
     // relationship check. Read the host-owned row first: UI projections omit
     // the receipt, and queue-to-steer must not silence an existing user turn.
     if (item.botTaskCoordination) return false;
+    // "Interject" hands a queued message to the turn that is running, on the engine it runs on,
+    // without the send step that would apply a pending switch or refuse for want of the user's
+    // agreement. A message held for a switch into Antigravity was not written for that engine:
+    // it is not steered. It stays where it is in the queue, with its entry to confirm.
+    if (item.awaitsAgySwitchConfirmation === true) return false;
     if (state.steeringQueueClientIds.includes(item.clientId)) {
       log.info('steer ignored: duplicate in-flight clientId (control-side resend)', {
         sessionId,

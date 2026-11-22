@@ -14361,6 +14361,7 @@
           "note": "Mit der Bestätigung wird keine Nachricht gesendet."
         },
         "permissionConfirmation": {
+          "bodyFromFullAccess": "Nach dem Wechsel ändert sich der „Vollzugriff“, den Sie gerade gewählt haben, auf „Automatische Prüfung“: Cindy prüft die Genehmigungsanfragen von Antigravity automatisch, ohne Sie zu fragen. „Vollzugriff“ wird nicht zu Antigravity übernommen. Sie können die Berechtigungen danach im Berechtigungsmenü der Aufgabe ändern; dort steht auch, was jede Stufe erlaubt.",
           "bodyFromUnsupported": "Nach dem Wechsel ändern sich die Berechtigungen dieser Aufgabe auf „Standardberechtigungen“: Sie entscheiden über die Genehmigungsanfragen von Antigravity. Antigravity hat die Stufe, die Sie gerade gewählt haben, nicht, daher werden ihre eigenen Regeln (etwa die Einschränkungen des Planmodus) nicht übernommen. Sie können die Berechtigungen danach im Berechtigungsmenü der Aufgabe ändern; dort steht auch, was jede Stufe erlaubt.",
           "title": "Zu „{{mode}}“ wechseln?",
           "cancel": "Noch nicht ändern",

@@ -75,6 +75,7 @@ export function useAgySwitchPermissionRecovery(input: {
         t,
         registerWithHost: (intent, agreement) => recordAgySwitchPermissionAgreementWithHost(sessionId, intent, agreement),
         currentIntent: () => makerChatStore.getAgentSwitchIntent(sessionId),
+        askAfresh,
       });
       if (agreed) retry();
     } catch {
