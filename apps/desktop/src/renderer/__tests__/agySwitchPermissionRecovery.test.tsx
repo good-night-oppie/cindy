@@ -1,5 +1,8 @@
 /** @vitest-environment jsdom */
 
+import { readFileSync } from 'node:fs';
+import { resolve } from 'node:path';
+import * as ts from 'typescript';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { act, cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react';
 import { ConfirmDialogProvider, useConfirmDialog } from '@/components/ui/confirm-dialog-provider';
@@ -90,6 +93,54 @@ describe('what a window tells the host when the host already has the right agree
     const sent = h.registerWithHost.mock.calls[0]![6] as Record<string, unknown>;
     expect(sent).toMatchObject({ agyPermissionAgreementOnly: true, agyPermissionRevision: 7 });
     expect('agyPermissionAgreementForSend' in sent).toBe(wakes);
+  });
+
+  // QQ, 2026-11-22: both purposes are valid arguments, so the type checker cannot show that the
+  // composer picks the right one at each of its two entries. The composer's own code, run from
+  // source (as botPermissionSwitch.test.ts runs its permission callback): the function behind
+  // both dialogs and the two references the send path and the permission menu call. Everything
+  // below it is real: the dialog decision, the request builder, the purpose; the dialog is
+  // answered "yes" and the host is the stand-in that receives the request.
+  it('composer: agreeing in order to send asks the host to let a held message go, and the permission menu’s "Confirm change" does not', async () => {
+    const source = readFileSync(resolve(__dirname, '../components/new-chat/ChatInput.tsx'), 'utf8').replace(/\r\n/g, '\n');
+    const from = source.indexOf('  const confirmAgySwitchPermissionWhilePending = async (');
+    const to = source.indexOf("  const pendingAgySwitch = agentSwitchIntent?.target === 'agy';", from);
+    if (from < 0 || to < from) throw new Error('the composer code for the two confirmations was not found');
+    const compiled = ts.transpileModule(source.slice(from, to), { compilerOptions: { target: ts.ScriptTarget.ES2022 } }).outputText;
+    const intent = { target: 'agy', model: 'gemini-test', providerId: null, agyPermissionRevision: 7 };
+    h.intent = intent;
+    const sendRef = { current: async (_id: string): Promise<boolean> => false };
+    const permissionRef = { current: async (_id: string, _mode: string): Promise<boolean> => false };
+    const env = {
+      deviceLinkDeviceId: null, agySwitchPermissionPromptOpenRef: { current: false },
+      agreeToPendingAgySwitchPermission, recordAgySwitchPermissionAgreementWithHost, agySwitchAgreementPurposeOfComposerDialog,
+      agentSwitchIntent: intent, runtimeAgentKind: 'claude-code', confirmDialog: vi.fn(async () => true),
+      agyPermissionChangeTitle: () => 'title', activeAgentCapabilities: undefined, t: (key: string) => key,
+      makerChatStore: { getAgentSwitchIntent: () => h.intent }, log: { warn: vi.fn() }, toast: { error: h.toastError },
+      activePermissionModeRef: { current: 'bypassPermissions' },
+      confirmPendingAgySwitchPermissionRef: sendRef, confirmPermissionChangeDuringAgySwitchRef: permissionRef,
+    };
+    new Function(...Object.keys(env), compiled)(...Object.values(env));
+    const requests = () => h.registerWithHost.mock.calls.map((call) => call[6] as Record<string, unknown>);
+    h.registerWithHost.mockClear();
+    h.registerWithHost.mockResolvedValue({ agyPermissionAgreementRecorded: true });
+
+    // The permission menu: the task is in a mode Antigravity keeps and the user picks Full access.
+    forgetAgySwitchPermissionAgreed('task-1');
+    await expect(permissionRef.current('task-1', 'bypassPermissions')).resolves.toBe(true);
+    expect(requests()).toEqual([
+      { agyPermissionAgreement: { change: 'fromFullAccess', mode: 'auto' }, agyPermissionAgreementOnly: true, agyPermissionRevision: 7 },
+    ]);
+
+    // A send, in the mode the task is in.
+    h.registerWithHost.mockClear();
+    forgetAgySwitchPermissionAgreed('task-1');
+    await expect(sendRef.current('task-1')).resolves.toBe(true);
+    expect(requests()).toEqual([
+      { agyPermissionAgreement: { change: 'fromFullAccess', mode: 'auto' }, agyPermissionAgreementOnly: true, agyPermissionAgreementForSend: true, agyPermissionRevision: 7 },
+    ]);
+    expect(env.confirmDialog).toHaveBeenCalledTimes(2);
+    expect(h.toastError).not.toHaveBeenCalled();
   });
 
   it('gives a task view one key per state of the pending switch it has to act on again', () => {
