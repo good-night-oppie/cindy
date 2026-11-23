@@ -287,6 +287,7 @@ export function startCompanionCloud(input: {
   /** Writes started by this account stop as soon as it is no longer current. */
   const fence = {
     assertCurrent: () => { if (!live()) throw new Error('OWNER_CHANGED'); },
+    selfDeviceId: input.selfDeviceId,
     signal: aborts.signal,
   };
   // Install guard: which bots this installation runs ('mine'), another install on this device
@@ -1086,7 +1087,14 @@ export function startCompanionCloud(input: {
       const self = input.selfDeviceId;
       if (!self || !live()) return { ok: false, code: 'NOT_ENABLED' };
       const choices = await runtime.homeChoices(botId);
-      if (choices.homeDeviceId === targetDeviceId) return { ok: true };
+      if (choices.homeDeviceId === targetDeviceId) {
+        // A device selection does not authorize taking over from a different installation.
+        if (targetDeviceId === self && runtime.isShadowed(botId)) {
+          const profileFailure = runtime.profileFailure(botId);
+          return { ok: false, code: 'FAILED', ...(profileFailure ? { profileFailure } : {}) };
+        }
+        return { ok: true };
+      }
       if (choices.mode === 'unavailable') return { ok: false, code: choices.reason === 'HOME_OUTDATED' ? 'HOME_OUTDATED' : 'FAILED' };
       const chosen = choices.targets.find(target => target.deviceId === targetDeviceId);
       if (!chosen) return { ok: false, code: 'TARGET_UNAVAILABLE' };

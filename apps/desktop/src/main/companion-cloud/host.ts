@@ -197,7 +197,7 @@ function createMaterializer(input: {
         assertCurrent: fence.assertCurrent, ...(input.log ? { log: input.log } : {}) });
     },
     applyWorkbench: async (botId, value, fence, options) => {
-      const self = input.selfDeviceId?.();
+      const self = fence.selfDeviceId ?? input.selfDeviceId?.();
       if (!self) throw new Error('DEVICE_UNKNOWN');
       fence.assertCurrent();
       await mergeCompanionWorkbench(ownerScopedUserDataPath(), botId, self, value, options);
