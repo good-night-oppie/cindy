@@ -6270,12 +6270,14 @@ describe('AgentInputCoordinator send transaction', () => {
   // what the banner asked: (1) the banner was closed, which pauses the queue, and the user then
   // picked the engine again and agreed; (2) the user said "not now" in the first dialog, then
   // agreed while sending another message, which now waits behind the held one. In both the host
-  // had the agreement and nothing started the queue again. The host now wakes the held head when
-  // the switch is agreed to. A queue the user stopped is left alone.
+  // had the agreement and nothing started the queue again. The host wakes the held head when
+  // the user agrees on its banner. Once the banner was closed there is no banner to agree on:
+  // an answer that still arrives (from a dialog another window had open) lifts nothing, and
+  // "Continue sending" is the way on (QQ on 72e7b16a, 2026-11-23).
   it.each([
-    ['its banner was closed', true],
-    ['it is still held, with another message waiting behind it', false],
-  ])('sends a held message, then the one behind it, once each when the switch is agreed to after %s', async (_name, closeBanner) => {
+    ['its banner was closed: by Continue sending, not by a late answer', true],
+    ['it is still held, with another message waiting behind it: by the answer on its banner', false],
+  ])('sends a held message, then the one behind it, once each, when %s', async (_name, closeBanner) => {
     const h = createHarness();
     const sid = `held-woken-${closeBanner}`;
     h.sendToAgent.mockResolvedValueOnce(hostSendFailure('AGENT_SWITCH_PERMISSION_UNCONFIRMED', 'confirm the change'));
@@ -6289,9 +6291,18 @@ describe('AgentInputCoordinator send transaction', () => {
     expect(h.coordinator.getProjection(sid).pendingQueue.map((q) => q.clientId)).toEqual(['q-1', 'q-2']);
 
     h.sendToAgent.mockImplementation(async () => { h.setRunning(true); return sendSuccess(); });
-    expect(h.coordinator.wakeHeldForAgySwitch(sid, holdAtHead(h.coordinator, sid))).toBe(true);
-    // The window that asked also retries once the answer is recorded; the two make one send.
-    await h.coordinator.retryLastError(sid, holdAtHead(h.coordinator, sid));
+    if (closeBanner) {
+      expect(h.coordinator.wakeHeldForAgySwitch(sid, holdAtHead(h.coordinator, sid))).toBe(false);
+      await h.coordinator.retryLastError(sid, holdAtHead(h.coordinator, sid));
+      await flush();
+      expect(h.sendToAgent).toHaveBeenCalledTimes(1);
+      expect(h.coordinator.getProjection(sid).queuePaused).toBe(true);
+      h.coordinator.resume(sid);
+    } else {
+      expect(h.coordinator.wakeHeldForAgySwitch(sid, holdAtHead(h.coordinator, sid))).toBe(true);
+      // The window that asked also retries once the answer is recorded; the two make one send.
+      await h.coordinator.retryLastError(sid, holdAtHead(h.coordinator, sid));
+    }
     await flush();
     await flush();
     expect(h.sendToAgent).toHaveBeenCalledTimes(2);
@@ -6862,26 +6873,55 @@ describe('AgentInputCoordinator send transaction', () => {
       }
     });
 
-    // QQ's A1: an answer is not used once the user has pressed Stop after the question opened.
-    it('the user stops the queue while the question is open: the answer is recorded and sends nothing, then or later; Continue sending sends the message once', async () => {
-      const sid = 'stopped-while-question-open';
+    // QQ's A1 and its review of 72e7b16a. Two windows show the task. One has the question about
+    // the held message open. In the other the user closes the banner, stops the queue, or goes
+    // back in the task's history. The question is over: its answer, arriving late, and the retry
+    // that follows it send nothing and change nothing of the queue, its pause or its banner. The
+    // permission agreement is still recorded. "Continue sending" then sends the message, once.
+    it.each([
+      ['closes the banner', (h: ReturnType<typeof createHarness>, sid: string) => { h.coordinator.clearError(sid); }],
+      ['stops the queue', (h: ReturnType<typeof createHarness>, sid: string) => { h.coordinator.stop(sid, { keepQueue: true, pauseQueue: true }); }],
+      ['goes back in the task\u2019s history', (h: ReturnType<typeof createHarness>, sid: string) => { h.coordinator.pausePendingQueueForRewind(sid); }],
+    ])('the user %s in another window while the question is open: the late answer and its retry send nothing and disturb nothing; Continue sending sends the message once', async (name, inTheOtherWindow) => {
+      const sid = `question-over-${name.length}`;
       const { host, about } = await twoQueuedFirstHeld(sid);
       const { h } = host;
-      h.coordinator.stop(sid, { keepQueue: true, pauseQueue: true });
+      inTheOtherWindow(h, sid);
       await host.settle();
-      expect(h.coordinator.getProjection(sid).queuePaused).toBe(true);
+      const before = h.coordinator.getProjection(sid);
+      expect(before.queuePaused).toBe(true);
+      expect(before.pendingQueue.map((q) => q.clientId)).toEqual(['q-1', 'q-2']);
+      // Nothing asked earlier names the held message any more.
+      expect(before.pendingQueue[0]?.agySwitchHoldId).toEqual(expect.any(String));
+      expect(before.pendingQueue[0]?.agySwitchHoldId).not.toBe(about);
+      const tried = h.sendToAgent.mock.calls.length;
 
       expect(await host.confirmToSend(undefined, about)).toMatchObject({ agyPermissionAgreementRecorded: true });
       await host.retry(about);
       await host.settle();
+      expect(host.pendingSwitches.get(sid)?.agyPermissionAgreement).toEqual({ change: 'fromFullAccess', mode: 'auto' });
       expect(host.pendingSwitches.get(sid)?.agyPermissionAgreementForSend).toBeUndefined();
+      expect(h.sendToAgent).toHaveBeenCalledTimes(tried);
+      expect(host.dispatched).toEqual([]);
+      const after = h.coordinator.getProjection(sid);
+      expect(after.queuePaused).toBe(true);
+      expect(after.recovery).toEqual(before.recovery);
+      expect(after.error).toBe(before.error);
+      expect(after.pendingQueue).toEqual(before.pendingQueue);
+
+      // Even an answer that names the hold the message is in now lifts no pause: a dialog cannot
+      // have been opened on a banner that is not showing or a queue that is stopped.
+      await host.confirmToSend(undefined, before.pendingQueue[0]?.agySwitchHoldId);
+      await host.retry(before.pendingQueue[0]?.agySwitchHoldId);
+      await host.settle();
       expect(host.dispatched).toEqual([]);
       expect(h.coordinator.getProjection(sid).queuePaused).toBe(true);
-      expect(h.coordinator.getProjection(sid).pendingQueue.map((q) => q.clientId)).toEqual(['q-1', 'q-2']);
 
       h.coordinator.resume(sid);
       await host.settle();
       expect(host.dispatched).toEqual(['first']);
+      await host.turnEnds();
+      expect(host.dispatched).toEqual(['first', 'second']);
     });
 
     it('an answer whose message was removed, with nothing queued behind it, does not hold a message sent afterwards', async () => {
@@ -7106,10 +7146,14 @@ describe('AgentInputCoordinator send transaction', () => {
     expect(snapshot[0]?.awaitsAgySwitchConfirmation).toBe(true);
 
     // DD 7085158660, item 6: the pause that followed the closed banner was remembered by the held
-    // message's id, which the merge replaced, so agreeing woke nothing and the queue stayed
-    // stopped. The pause is the queue's: the merged message goes out, once, then the other.
+    // message's id, which the merge replaced, and the queue stayed stopped. The pause is the
+    // queue's. With the banner closed no answer lifts it; "Continue sending" does: the merged
+    // message goes out, once, then the other.
     h.sendToAgent.mockImplementation(async () => { h.setRunning(true); return sendSuccess(); });
-    expect(h.coordinator.wakeHeldForAgySwitch(sid, holdAtHead(h.coordinator, sid))).toBe(true);
+    expect(h.coordinator.wakeHeldForAgySwitch(sid, holdAtHead(h.coordinator, sid))).toBe(false);
+    await flush();
+    expect(h.sendToAgent).toHaveBeenCalledTimes(1);
+    h.coordinator.resume(sid);
     await flush();
     await flush();
     expect(h.sendToAgent).toHaveBeenCalledTimes(2);

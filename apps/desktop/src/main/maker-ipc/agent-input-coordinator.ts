@@ -2043,6 +2043,7 @@ export class AgentInputCoordinator {
   pausePendingQueueForRewind(sessionId: string): AgentInputProjection {
     const state = this.getState(sessionId);
     this.blockAutomaticOrcaReports(state);
+    this.endAgySwitchQuestions(state);
     state.queuePaused = state.pendingQueue.length > 0 || state.pendingCompacts.length > 0;
     state.heldSwitchPause = false;
     state.queuePausedByRestore = false;
@@ -3430,6 +3431,7 @@ export class AgentInputCoordinator {
       state.pendingQueue.length > 0
       || (this.deps.loadQueueSnapshot && !this.restoredQueueSessions.has(sessionId))
     ));
+    this.endAgySwitchQuestions(state);
     state.queuePaused = shouldPause;
     state.heldSwitchPause = false;
     // Ordinary Stop remains explicit. Restart, like crash recovery, may be
@@ -3584,7 +3586,9 @@ export class AgentInputCoordinator {
     if (opts?.agySwitchHeldMessage !== undefined) {
       const head = state.pendingQueue[0];
       const stillThatOne = recovery?.kind === 'queue-head' && !!head && head.clientId === recovery.clientId
-        && head.awaitsAgySwitchConfirmation === true && head.agySwitchHoldId === opts.agySwitchHeldMessage;
+        && head.awaitsAgySwitchConfirmation === true && head.agySwitchHoldId === opts.agySwitchHeldMessage
+        // A queue the user paused is started by "Continue sending" only.
+        && !state.queuePaused;
       if (!stillThatOne) return { projection: this.getProjection(sessionId), outcome: 'superseded' };
     }
     if (!recovery) return { projection: this.getProjection(sessionId), outcome: 'superseded' };
@@ -3944,6 +3948,7 @@ export class AgentInputCoordinator {
       state.queuePaused = true;
       state.queuePausedByRestore = false;
       state.heldSwitchPause = true;
+      this.endAgySwitchQuestions(state);
     }
     this.emit(sessionId);
     if (shouldDrainTail) this.scheduleDrain(sessionId, 'clear-active-turn-error');
@@ -3956,10 +3961,11 @@ export class AgentInputCoordinator {
    * (sessionAgentSwitchHandler.ts); an agreement that was only recorded, by the task's entry, the
    * model picker, a change of mode or the dialog of another message's send, does not reach this.
    * `heldMessage` is the hold the answer is about. If the message at the head of the queue is in
-   * that hold and waiting (its banner showing, or closed and the queue paused for it), the hold
-   * is lifted and the queue goes on; the dispatch checks the hold once more. The send step still
-   * decides; if the agreement does not fit, the message is held again, in a new hold. A queue the
-   * user stopped stays stopped. Returns whether a message was let go.
+   * that hold with its banner showing and the queue is not paused, the hold is lifted and the
+   * queue goes on; the dispatch checks the hold once more. The send step still decides; if the
+   * agreement does not fit, the message is held again, in a new hold. After the banner was
+   * closed, the queue stopped or the history gone back in, nothing is lifted: "Continue sending"
+   * is the way on. Returns whether a message was let go.
    */
   wakeHeldForAgySwitch(sessionId: string, heldMessage?: unknown): boolean {
     const state = this.states.get(sessionId);
@@ -3972,26 +3978,17 @@ export class AgentInputCoordinator {
     // without a send, and whatever is held now waits for its own answer (QQ, 2026-11-23).
     if (typeof heldMessage !== 'string' || heldMessage.length === 0) return false;
     if (head.awaitsAgySwitchConfirmation !== true || head.agySwitchHoldId !== heldMessage) return false;
-    const heldByRecovery = state.recovery?.kind === 'queue-head' && state.recovery.clientId === head.clientId;
-    const pausedByClosedBanner = state.queuePaused && state.heldSwitchPause === true;
-    if (!heldByRecovery && !pausedByClosedBanner) return false;
-    // The user stopped the queue after the question opened: the answer given to it does not
-    // start the queue again, and is not kept for when the user does.
-    if (state.queuePaused && !pausedByClosedBanner) return false;
+    // Only a message whose banner is showing, in a queue that is not paused. Once the banner
+    // was closed or the queue stopped (in any window), "Continue sending" is the only way on:
+    // an answer to a dialog that another window still had open lifts no pause.
+    if (state.recovery?.kind !== 'queue-head' || state.recovery.clientId !== head.clientId) return false;
+    if (state.queuePaused) return false;
     state.agySwitchLetGo = heldMessage;
-    // Emptied with the pause it is lifting; this hold is the only one let go.
-    if (pausedByClosedBanner) state.agySwitchHoldsLetGo = new Set();
     (state.agySwitchHoldsLetGo ??= new Set()).add(heldMessage);
-    if (heldByRecovery) {
-      state.error = null;
-      clearErrorProjectionSignals(state);
-      state.stickyError = null;
-      state.recovery = null;
-    }
-    if (pausedByClosedBanner) {
-      state.queuePaused = false;
-      state.heldSwitchPause = false;
-    }
+    state.error = null;
+    clearErrorProjectionSignals(state);
+    state.stickyError = null;
+    state.recovery = null;
     this.emit(sessionId);
     this.scheduleDrain(sessionId, 'agy-switch-agreed');
     return true;
@@ -5572,6 +5569,21 @@ export class AgentInputCoordinator {
     const head = state.pendingQueue[0] ?? null;
     if (head && this.keepsHeldForAgySwitch(sessionId, state, head)) return null;
     return head;
+  }
+
+  /**
+   * The user closed the banner of a held message, stopped the queue or went back in the task's
+   * history. A question about a held message that a window opened before that is over: its answer
+   * and its retry must send nothing, in this window or another one that still shows the dialog.
+   * Every held message gets a new hold, so nothing asked earlier names it any more, and nothing
+   * stays let go. From here "Continue sending" is the way on (QQ on 72e7b16a, 2026-11-23).
+   */
+  private endAgySwitchQuestions(state: SessionInputState): void {
+    state.agySwitchLetGo = null;
+    state.agySwitchHoldsLetGo?.clear();
+    for (const queued of state.pendingQueue) {
+      if (queued.awaitsAgySwitchConfirmation === true) queued.agySwitchHoldId = crypto.randomUUID();
+    }
   }
 
   /**

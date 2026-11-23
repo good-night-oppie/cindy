@@ -95,9 +95,11 @@ How this differs from switching a task to Codex, and what the user is told (cind
   queue is paused again in front of the held message.
 - A confirmation is about one message in one hold. The host names each hold; the window
   reads the name when its question opens and sends it back with the answer and the
-  retry. If the message was removed, edited, merged, moved back or held anew, or the
-  user stopped the queue meanwhile, the answer is recorded as an agreement about the
-  permissions and sends nothing.
+  retry. If the message was removed, edited, merged, moved back or held anew, the
+  answer is recorded as an agreement about the permissions and sends nothing. The same
+  once the user has closed its banner, stopped the queue or gone back in the task's
+  history, in this window or another: every question opened before that is over, and
+  "Continue sending" is the only way on.
 - A new registration (another model, effort, Fast, thinking) starts with no agreement;
   the next message that needs one asks. An agreement belongs to one registration and
   one permission change.
