@@ -109,6 +109,7 @@ describe('what a window tells the host when the host already has the right agree
     const compiled = ts.transpileModule(source.slice(from, to), { compilerOptions: { target: ts.ScriptTarget.ES2022 } }).outputText;
     const intent = { target: 'agy', model: 'gemini-test', providerId: null, agyPermissionRevision: 7 };
     h.intent = intent;
+    const modeRef = { current: 'ask' };
     const sendRef = { current: async (_id: string): Promise<boolean> => false };
     const permissionRef = { current: async (_id: string, _mode: string): Promise<boolean> => false };
     const env = {
@@ -117,7 +118,7 @@ describe('what a window tells the host when the host already has the right agree
       agentSwitchIntent: intent, runtimeAgentKind: 'claude-code', confirmDialog: vi.fn(async () => true),
       agyPermissionChangeTitle: () => 'title', activeAgentCapabilities: undefined, t: (key: string) => key,
       makerChatStore: { getAgentSwitchIntent: () => h.intent }, log: { warn: vi.fn() }, toast: { error: h.toastError },
-      activePermissionModeRef: { current: 'bypassPermissions' },
+      activePermissionModeRef: modeRef,
       confirmPendingAgySwitchPermissionRef: sendRef, confirmPermissionChangeDuringAgySwitchRef: permissionRef,
     };
     new Function(...Object.keys(env), compiled)(...Object.values(env));
@@ -128,11 +129,14 @@ describe('what a window tells the host when the host already has the right agree
     // The permission menu: the task is in a mode Antigravity keeps and the user picks Full access.
     forgetAgySwitchPermissionAgreed('task-1');
     await expect(permissionRef.current('task-1', 'bypassPermissions')).resolves.toBe(true);
+    // No wake parameter; and which change it is, since the new mode is not stored yet.
     expect(requests()).toEqual([
-      { agyPermissionAgreement: { change: 'fromFullAccess', mode: 'auto' }, agyPermissionAgreementOnly: true, agyPermissionRevision: 7 },
+      { agyPermissionAgreement: { change: 'fromFullAccess', mode: 'auto' }, agyPermissionAgreementOnly: true, agyPermissionRevision: 7,
+        agyPermissionChangingTo: 'bypassPermissions', agyPermissionChangingFrom: 'ask' },
     ]);
 
     // A send, in the mode the task is in.
+    modeRef.current = 'bypassPermissions';
     h.registerWithHost.mockClear();
     forgetAgySwitchPermissionAgreed('task-1');
     await expect(sendRef.current('task-1')).resolves.toBe(true);
@@ -306,10 +310,12 @@ describe('a message the host held for an unconfirmed permission change', () => {
     render(view({ error: HELD, mode: 'bypassPermissions', onResend }));
     await waitFor(() => expect(onResend).toHaveBeenCalledTimes(1));
     expect(screen.queryByText(TITLE)).toBeNull();
-    // The host is told again what this window is doing with its record: sending.
+    // The host is told again what this window is doing with its record: sending. And what
+    // this window knew to be on record, without which the host replaces nothing.
     expect(h.registerWithHost).toHaveBeenCalledExactlyOnceWith(
       'task-1', 'agy', 'gemini-test', null, undefined, undefined,
-      { agyPermissionAgreement: { change: 'fromFullAccess', mode: 'auto' }, agyPermissionAgreementOnly: true, agyPermissionAgreementForSend: true, agyPermissionRevision: 7 },
+      { agyPermissionAgreement: { change: 'fromFullAccess', mode: 'auto' }, agyPermissionAgreementOnly: true, agyPermissionAgreementForSend: true,
+        agyPermissionAgreementExpected: { change: 'fromFullAccess', mode: 'auto' }, agyPermissionRevision: 7 },
     );
   });
 
@@ -331,7 +337,8 @@ describe('a message the host held for an unconfirmed permission change', () => {
     await waitFor(() => expect(onResend).toHaveBeenCalledTimes(1));
     expect(h.registerWithHost).toHaveBeenCalledExactlyOnceWith(
       'task-1', 'agy', 'gemini-test', null, undefined, undefined,
-      { agyPermissionAgreement: { change: 'fromFullAccess', mode: 'auto' }, agyPermissionAgreementOnly: true, agyPermissionAgreementForSend: true, agyPermissionRevision: 7 },
+      { agyPermissionAgreement: { change: 'fromFullAccess', mode: 'auto' }, agyPermissionAgreementOnly: true, agyPermissionAgreementForSend: true,
+        agyPermissionAgreementExpected: { change: 'fromFullAccess', mode: 'auto' }, agyPermissionRevision: 7 },
     );
   });
 
@@ -380,7 +387,8 @@ describe('a message the host held for an unconfirmed permission change', () => {
     fireEvent.click(confirm);
     await waitFor(() => expect(onResend).toHaveBeenCalledTimes(1));
     expect(h.registerWithHost.mock.calls.map((call) => call[6])).toEqual([
-      { agyPermissionAgreement: { change: 'fromUnsupported', mode: 'ask' }, agyPermissionAgreementOnly: true, agyPermissionAgreementForSend: true, agyPermissionRevision: 7 },
+      { agyPermissionAgreement: { change: 'fromUnsupported', mode: 'ask' }, agyPermissionAgreementOnly: true, agyPermissionAgreementForSend: true,
+        agyPermissionAgreementExpected: { change: 'fromUnsupported', mode: 'ask' }, agyPermissionRevision: 7 },
     ]);
   });
 

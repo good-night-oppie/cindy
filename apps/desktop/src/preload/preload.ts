@@ -7891,6 +7891,11 @@ contextBridge.exposeInMainWorld('electronAPI', {
         agyPermissionAgreement?: { change: 'fromFullAccess' | 'fromUnsupported' | null; mode: string };
         agyPermissionAgreementOnly?: boolean;
         agyPermissionAgreementForSend?: boolean;
+        /** With agyPermissionAgreementOnly: what the host had on record when the user was asked; a different record is replaced only then. */
+        agyPermissionAgreementExpected?: { change: 'fromFullAccess' | 'fromUnsupported' | null; mode: string };
+        /** With agyPermissionAgreementOnly, for a change of mode being confirmed: the new mode and the one the window shows the task in. */
+        agyPermissionChangingTo?: string;
+        agyPermissionChangingFrom?: string;
         agyPermissionRevision?: number;
       },
       thinking?: boolean,

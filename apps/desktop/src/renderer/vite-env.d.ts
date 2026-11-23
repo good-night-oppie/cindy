@@ -6792,6 +6792,11 @@ interface ElectronAPI {
          * Left out by the task's own entry, which sends nothing.
          */
         agyPermissionAgreementForSend?: boolean;
+        /** With agyPermissionAgreementOnly: what the host had on record when the user was asked; a different record is replaced only then. */
+        agyPermissionAgreementExpected?: { change: 'fromFullAccess' | 'fromUnsupported' | null; mode: string };
+        /** With agyPermissionAgreementOnly, for a change of mode being confirmed: the new mode and the one the window shows the task in. */
+        agyPermissionChangingTo?: string;
+        agyPermissionChangingFrom?: string;
         /** With agyPermissionAgreementOnly: the registration the user was asked about, as the host reported it. */
         agyPermissionRevision?: number;
       },

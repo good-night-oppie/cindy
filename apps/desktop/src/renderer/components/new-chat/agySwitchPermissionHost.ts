@@ -29,15 +29,30 @@ export function recordAgySwitchPermissionAgreementWithHost(
     model: string; providerId: string | null; effort?: string; fastMode?: boolean | 'ultrafast';
     /** The registration the user was shown, as the host reported it. Without it the host records nothing. */
     agyPermissionRevision?: number;
+    /**
+     * What the host reported as agreed for it when the user was asked. Sent back so that the host
+     * replaces a record only for a caller that knew it; the host refuses a write that would
+     * replace a different agreement the caller had not seen.
+     */
+    agyPermissionAgreement?: { change: 'fromFullAccess' | 'fromUnsupported' | null; mode: string } | null;
   },
   agreement: { change: 'fromFullAccess' | 'fromUnsupported' | null; mode: string },
   purpose: 'send' | 'recordOnly',
+  /**
+   * The user is confirming a change of the permission mode: the mode they are changing to and the
+   * one this window shows the task in. The host takes the agreement as one about the new mode
+   * only while the task is still in the old one. Left out everywhere else, where the agreement is
+   * about the mode the task is in.
+   */
+  changing?: { to: string; from: string | null | undefined },
 ): Promise<unknown> {
   return makerApiFor(sessionId).switchSessionAgent(
     sessionId, 'agy', askedAbout.model, askedAbout.providerId, askedAbout.effort, askedAbout.fastMode,
     {
       agyPermissionAgreement: agreement, agyPermissionAgreementOnly: true,
       ...(purpose === 'send' ? { agyPermissionAgreementForSend: true } : {}),
+      ...(askedAbout.agyPermissionAgreement ? { agyPermissionAgreementExpected: askedAbout.agyPermissionAgreement } : {}),
+      ...(changing && typeof changing.from === 'string' ? { agyPermissionChangingTo: changing.to, agyPermissionChangingFrom: changing.from } : {}),
       ...(askedAbout.agyPermissionRevision !== undefined ? { agyPermissionRevision: askedAbout.agyPermissionRevision } : {}),
     },
   );

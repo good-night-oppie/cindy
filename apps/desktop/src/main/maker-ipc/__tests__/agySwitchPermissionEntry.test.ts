@@ -181,13 +181,24 @@ function fixture(initialMode: string) {
      * `from` is where the answer comes from.
      */
     /** 'recordOnly' is the task's own entry; 'send' is a dialog or banner the user agrees in to send. */
-    agreeOnly: async (agreedFor: string, model = 'gemini-test', from: 'here' | 'remote' = 'here', shownRevision?: number | null, providerId: string | null = null, purpose: 'recordOnly' | 'send' = 'recordOnly') => {
+    agreeOnly: async (agreedFor: string, model = 'gemini-test', from: 'here' | 'remote' = 'here', shownRevision?: number | null, providerId: string | null = null, purpose: 'recordOnly' | 'send' = 'recordOnly',
+      window: {
+        /** What this window believes the host has on record: 'shown' is what the host reports now (the app), 'unsaid' is a window that does not say. */
+        knows?: 'shown' | 'unsaid' | { change: 'fromFullAccess' | 'fromUnsupported' | null; mode: string };
+        /** The permission menu: the mode being chosen, and the one the window shows the task in. */
+        changing?: { to: string; from: string };
+      } = {}) => {
       // By default the answer is about the registration the task's window shows right now.
-      const revision = shownRevision !== undefined ? shownRevision
-        : ((await ipc.invoke(MAKER_INVOKE.GET_SESSION_AGENT_SWITCH_INTENT, id)) as { agyPermissionRevision?: number } | null)?.agyPermissionRevision;
+      const shown = (await ipc.invoke(MAKER_INVOKE.GET_SESSION_AGENT_SWITCH_INTENT, id)) as
+        { agyPermissionRevision?: number; agyPermissionAgreement?: { change: 'fromFullAccess' | 'fromUnsupported' | null; mode: string } | null } | null;
+      const revision = shownRevision !== undefined ? shownRevision : shown?.agyPermissionRevision;
+      const knows = window.knows ?? 'shown';
+      const expected = knows === 'shown' ? shown?.agyPermissionAgreement : knows === 'unsaid' ? null : knows;
       const call = () => ipc.invoke(MAKER_INVOKE.SWITCH_SESSION_AGENT, id, 'agy', model, providerId, undefined, undefined, {
         agyPermissionAgreementOnly: true,
         ...(purpose === 'send' ? { agyPermissionAgreementForSend: true } : {}),
+        ...(expected ? { agyPermissionAgreementExpected: expected } : {}),
+        ...(window.changing ? { agyPermissionChangingTo: window.changing.to, agyPermissionChangingFrom: window.changing.from } : {}),
         ...(typeof revision === 'number' ? { agyPermissionRevision: revision } : {}),
         agyPermissionAgreement: { change: agySwitchPermissionChange(agreedFor), mode: permissionModeAfterSwitchToAgy(agreedFor) },
       });
@@ -766,6 +777,67 @@ describe('switching a task into Antigravity from the model picker, with permissi
   // sends no agreement of its own, is applied by the host's own record, once. The record is for
   // one change: once the stored mode makes it another change, the same send is refused again,
   // and a remote controller can add nothing to it.
+  // DD 7085158660, item 5, on the host (QQ, 2026-11-22: "the host must keep a stale answer from
+  // replacing a valid agreement; it cannot be left to an up-to-date window"). The record is
+  // written under the task's lock and only when the answer is about a mode the host can name and,
+  // if it would replace a different agreement, when the caller shows it knew that one.
+  // Two windows are two callers of the real handler; nothing here is an attack, only what an
+  // older window, or one that read before a change, sends.
+  it('refuses an answer that would replace a different agreement the sender had not seen, and wakes nothing for it', async () => {
+    const h = fixture('bypassPermissions');
+    await h.pickGeminiModel(null);
+    // Window B: the user agrees, for a send. That is the host's record now.
+    await expect(h.agreeOnly('bypassPermissions', 'gemini-test', 'here', undefined, null, 'send'))
+      .resolves.toMatchObject({ agyPermissionAgreementRecorded: true });
+    expect(h.agreedSignals()).toBe(1);
+    const valid = { change: 'fromFullAccess', mode: 'auto' };
+
+    // Window A still holds an answer about the mode the task was in before (plan). It asks to
+    // wake a held message too. An older window says nothing of what it knew; one that read
+    // before B's answer says "nothing was agreed"; neither replaces the record.
+    for (const knows of ['unsaid', { change: 'fromUnsupported', mode: 'ask' }] as const) {
+      await expect(h.agreeOnly('plan', 'gemini-test', 'here', undefined, null, 'send', { knows }))
+        .resolves.toMatchObject({ agyPermissionAgreementRecorded: false });
+    }
+    // Nor does an answer about another mode from a window that did see the record.
+    await expect(h.agreeOnly('plan', 'gemini-test', 'here', undefined, null, 'send'))
+      .resolves.toMatchObject({ agyPermissionAgreementRecorded: false });
+    await expect(h.pendingSwitch()).resolves.toMatchObject({ agyPermissionAgreement: valid, agyPermissionAgreementForSend: true });
+    expect(h.agreedSignals()).toBe(1);
+
+    // The record still does what it was given for.
+    await h.send();
+    expect(h.log).toEqual(['switched agy auto', 'launch agy auto isolated']);
+  });
+
+  it('takes the agreement of a change of mode the user confirms, for the new mode, only while the task is still in the mode they saw', async () => {
+    const h = fixture('bypassPermissions');
+    await h.pickGeminiModel(null);
+    await expect(h.agreeOnly('bypassPermissions')).resolves.toMatchObject({ agyPermissionAgreementRecorded: true });
+
+    // The permission menu, as the app orders it: agree first, then store the new mode.
+    await expect(h.agreeOnly('acceptEdits', 'gemini-test', 'here', undefined, null, 'recordOnly',
+      { changing: { to: 'acceptEdits', from: 'bypassPermissions' } })).resolves.toMatchObject({ agyPermissionAgreementRecorded: true });
+    await expect(h.pendingSwitch()).resolves.toMatchObject({ agyPermissionAgreement: { change: 'fromUnsupported', mode: 'ask' } });
+    expect(h.agreedSignals()).toBe(0);
+    await h.setPermission('acceptEdits');
+    await h.send();
+    expect(h.log).toEqual(['saved acceptEdits', 'switched agy ask', 'launch agy ask isolated']);
+
+    // Another window confirms a change it started from a mode the task has since left.
+    const moved = fixture('bypassPermissions');
+    await moved.pickGeminiModel(null);
+    await moved.setPermission('acceptEdits');
+    await expect(moved.agreeOnly('plan', 'gemini-test', 'here', undefined, null, 'recordOnly',
+      { changing: { to: 'plan', from: 'bypassPermissions' } })).resolves.toMatchObject({ agyPermissionAgreementRecorded: false });
+    // And an answer that names a new mode without saying which mode it started from is about
+    // the stored mode like any other, which it does not fit.
+    await expect(moved.agreeOnly('bypassPermissions')).resolves.toMatchObject({ agyPermissionAgreementRecorded: false });
+    await expect(moved.pendingSwitch()).resolves.toMatchObject({ agyPermissionAgreement: null });
+    await expect(moved.send()).rejects.toMatchObject({ code: 'AGENT_SWITCH_PERMISSION_UNCONFIRMED' });
+    expect(moved.agreedSignals()).toBe(0);
+  });
+
   it('applies a send from a window that asked nothing on the agreement another window recorded, and refuses again once it no longer fits', async () => {
     const reused = fixture('bypassPermissions');
     await reused.pickGeminiModel(null);

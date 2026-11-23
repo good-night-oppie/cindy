@@ -48,7 +48,7 @@ import {
 } from './agentHandoff.js';
 import { throwIpcError } from '../utils/ipcValidate.js';
 import { shouldApplyExclusiveProviderRerouteLive } from '../maker-host/model-route-guard-catalog.js';
-import { dbToMakerAgentKind, makerToDbAgentKind, normalizeDbAgentKind } from '../../shared/agentKindConversion.js';
+import { agySwitchPermissionChange, dbToMakerAgentKind, makerToDbAgentKind, normalizeDbAgentKind, permissionModeAfterSwitchToAgy } from '../../shared/agentKindConversion.js';
 import {
   AgentSwitchPermissionUnconfirmedError, agySwitchPermissionIsUnconfirmed, parseAgySwitchPermissionAgreement,
   type AgySwitchPermissionAgreement,
@@ -589,6 +589,19 @@ export function projectPendingAgentSwitchIntent(
  * `forSend` says the user agreed where a message was to go out with it. Only then is the host
  * told to let a held message go. Without it the agreement is recorded and nothing is sent:
  * that is what the task's own entry promises on screen.
+ *
+ * What is written is checked here, on the host, and not left to the window that sends it
+ * (DD 7085158660, item 5; QQ 2026-11-22). `check` carries what the host knows and what the
+ * caller declared:
+ *  - The agreement has to be about a mode the host can name: the mode the task is stored in, or,
+ *    for a change of mode the user is confirming, the mode they are changing to (`changingTo`),
+ *    and then only while the task is still in the mode the caller saw (`changingFrom`). An answer
+ *    about any other mode is an old one.
+ *  - An agreement already on record is replaced by a different one only when the caller shows
+ *    that it knew what was on record (`expected`). A request that says nothing about it, as an
+ *    older window sends, cannot replace it; neither can one that read the record before it changed.
+ * Without `check` (callers inside the host, tests of the record itself) nothing of this applies.
+ * A refused write records nothing and wakes nothing.
  */
 export function recordAgySwitchPermissionAgreement(
   deps: Pick<MakerSessionAgentSwitchHandlerDeps, 'pendingSwitches' | 'onPendingSwitchChanged' | 'onPendingSwitchAgreementChanged' | 'onPendingSwitchAgreed'>,
@@ -596,6 +609,15 @@ export function recordAgySwitchPermissionAgreement(
   askedAbout: { revision: unknown; model: unknown; providerId: unknown },
   agreement: unknown,
   forSend = false,
+  check?: {
+    /** The permission mode the task is stored in now. */
+    storedMode: string | null | undefined;
+    /** What the caller says the host had on record when the user was asked: an agreement, null for none, undefined when it does not say. */
+    expected?: unknown;
+    /** A change of mode being confirmed: the mode the user is changing to, and the one the caller saw the task in. */
+    changingTo?: unknown;
+    changingFrom?: unknown;
+  },
 ): boolean {
   const parsed = parseAgySwitchPermissionAgreement(agreement);
   const pending = deps.pendingSwitches?.get?.(sessionId);
@@ -606,6 +628,20 @@ export function recordAgySwitchPermissionAgreement(
   // Checked where it is written, against the stamp on the pending switch itself. A registry
   // that issues no revisions stamps nothing, so nothing is recorded through it.
   if (typeof askedAbout.revision !== 'number' || pending.revision !== askedAbout.revision) return false;
+  if (check) {
+    const changing = typeof check.changingTo === 'string' && check.changingTo.length > 0;
+    // A change of mode is confirmed before the new mode is stored, so the stored mode is still the
+    // old one: it must be the one the caller saw, or the task has moved on since the question.
+    if (changing && check.changingFrom !== check.storedMode) return false;
+    const about = changing ? check.changingTo as string : check.storedMode;
+    if (typeof about !== 'string' || parsed.change !== agySwitchPermissionChange(about)
+      || parsed.mode !== permissionModeAfterSwitchToAgy(about)) return false;
+    const onRecord = pending.agyPermissionAgreement;
+    if (onRecord && (onRecord.change !== parsed.change || onRecord.mode !== parsed.mode)) {
+      const expected = parseAgySwitchPermissionAgreement(check.expected);
+      if (!expected || expected.change !== onRecord.change || expected.mode !== onRecord.mode) return false;
+    }
+  }
   // Written on the pending switch itself, not on a copy stored in its place. It stays the same
   // registration: its revision does not move, so a withdrawal that read the revision before this
   // still clears it, and a switch being applied still recognises its own intent when it finishes.
@@ -2016,13 +2052,21 @@ export function registerMakerSessionAgentSwitchHandler(
         if (typeof sessionId !== 'string' || sessionId.length === 0) throwIpcError('INVALID_PARAMS', 'sessionId required');
         const answer = options as {
           agyPermissionAgreement?: unknown; agyPermissionRevision?: unknown; agyPermissionAgreementForSend?: unknown;
+          agyPermissionAgreementExpected?: unknown; agyPermissionChangingTo?: unknown; agyPermissionChangingFrom?: unknown;
         };
         const fromThisComputer = !isDeviceLinkInvoke();
         const record = async () => {
-          const recorded = fromThisComputer && targetAgentKind === 'agy'
+          // Read under the task's lock, where a change of mode and this write cannot interleave.
+          const stored = fromThisComputer && targetAgentKind === 'agy' ? await deps.getSessionRow(sessionId) : null;
+          const recorded = !!stored && stored.agentKind !== 'agy'
             && recordAgySwitchPermissionAgreement(deps, sessionId, {
               revision: answer.agyPermissionRevision, model, providerId,
-            }, answer.agyPermissionAgreement, answer.agyPermissionAgreementForSend === true);
+            }, answer.agyPermissionAgreement, answer.agyPermissionAgreementForSend === true, {
+              storedMode: typeof stored.permissionMode === 'string' ? stored.permissionMode : null,
+              expected: answer.agyPermissionAgreementExpected,
+              changingTo: answer.agyPermissionChangingTo,
+              changingFrom: answer.agyPermissionChangingFrom,
+            });
           return {
             switched: false, agentKind: 'agy' as const, model: typeof model === 'string' ? model : '', engineReady: true,
             deferred: recorded, agyPermissionAgreementRecorded: recorded,

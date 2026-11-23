@@ -7484,7 +7484,10 @@ export function ChatInput({
           // Agreeing in order to send lets a message held for this go; an ordinary change of
           // the permission mode only records the agreement.
           recordAgySwitchPermissionAgreementWithHost(sourceSessionId, intent, agreement,
-            agySwitchAgreementPurposeOfComposerDialog(about)),
+            agySwitchAgreementPurposeOfComposerDialog(about),
+            // The permission menu asks before the new mode is stored: the host is told which
+            // change this is, from the mode the task is in to the one being chosen.
+            about === 'permissionConfirmation' ? { to: permissionMode, from: activePermissionModeRef.current } : undefined),
         currentIntent: () => makerChatStore.getAgentSwitchIntent(sourceSessionId),
       });
     } catch (err) {
