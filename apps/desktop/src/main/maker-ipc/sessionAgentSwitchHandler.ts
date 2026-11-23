@@ -1217,30 +1217,26 @@ export async function performSessionAgentSwitch(
       ...(typeof thinking === 'boolean' ? { thinking } : {}),
       ...(agentDeviceChanges ? { targetAgentDeviceId } : {}),
     };
-    // What was agreed is about the permission rewrite, not the model: picking another Gemini model
-    // while the switch is pending keeps it. A registration that says nothing does not erase it.
     // Taken with the registration only when the caller says the user answered this pick's own
     // dialog, and only as an answer about the mode the task is stored in. Anything else that
-    // comes along is ignored here: the record the host already has is carried over instead.
+    // comes along is ignored here.
     const broughtAgreement = params.agyPermissionAgreedWithThisPick === true
       ? parseAgySwitchPermissionAgreement(params.agyPermissionAgreement) : undefined;
     const agreedWithThisPick = broughtAgreement && typeof row?.permissionMode === 'string'
       && broughtAgreement.change === agySwitchPermissionChange(row.permissionMode)
       && broughtAgreement.mode === permissionModeAfterSwitchToAgy(row.permissionMode)
       ? broughtAgreement : undefined;
-    const keptAgreement = existingIntent?.targetAgentKind === targetAgentKind ? existingIntent : undefined;
-    const agyPermissionAgreement = agreedWithThisPick ?? keptAgreement?.agyPermissionAgreement;
-    if (targetAgentKind === 'agy' && agyPermissionAgreement) {
-      intent.agyPermissionAgreement = agyPermissionAgreement;
-      // Agreed in the dialog of this engine pick, which the user makes in order to send with it;
-      // an agreement carried over keeps what it was.
-      if (agreedWithThisPick || keptAgreement?.agyPermissionAgreementForSend === true) intent.agyPermissionAgreementForSend = true;
-    }
+    // QQ's ruling, 2026-11-23 (on DD 7089552822, "A"):
+    //  - The pick's dialog tells the user what the switch does. Agreeing there agrees to the
+    //    conversion and to nothing else: it is recorded, never as given for a send, and no held
+    //    message goes on it. A held message goes when the user confirms on its banner or
+    //    continues the queue.
+    //  - An agreement belongs to the registration it was given for. A later registration
+    //    (another model, an effort, Fast, thinking) is a new one and starts with none: an old
+    //    answer is not carried over to it.
+    if (targetAgentKind === 'agy' && agreedWithThisPick) intent.agyPermissionAgreement = agreedWithThisPick;
     deps.pendingSwitches.set(sessionId, intent);
     deps.onPendingSwitchChanged?.(sessionId, projectPendingAgentSwitchIntent(intent));
-    // Only an agreement given with this pick lets a held message go: one carried over was either
-    // acted on when it was given or was recorded by the task's entry, which sends nothing.
-    if (targetAgentKind === 'agy' && agreedWithThisPick) deps.onPendingSwitchAgreed?.(sessionId);
     deps.log.info('agent-switch: intent registered (applies on next send)', {
       sessionId,
       targetAgentKind,

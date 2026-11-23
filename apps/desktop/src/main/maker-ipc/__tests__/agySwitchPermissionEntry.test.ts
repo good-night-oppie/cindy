@@ -399,8 +399,13 @@ describe('switching a task into Antigravity from the model picker, with permissi
     expect(h.row).toMatchObject({ agentKind: 'cc', permissionMode: 'bypassPermissions' });
     expect(h.log).toEqual([]);
 
+    // A pick from the other computer is a registration of its own: it starts with no agreement,
+    // so this computer is asked again; it grants nothing.
     await h.pickGeminiModel();
     await h.pickGeminiModelFromRemote('acceptEdits');
+    await expect(h.send()).rejects.toMatchObject({ code: 'AGENT_SWITCH_PERMISSION_UNCONFIRMED' });
+    expect(h.log).toEqual([]);
+    await h.pickGeminiModel();
     await h.send();
     expect(h.log).toEqual(['switched agy auto', 'launch agy auto isolated']);
   });
@@ -671,12 +676,12 @@ describe('switching a task into Antigravity from the model picker, with permissi
     const recordedOnly = await h.pendingSwitch();
     expect(recordedOnly).toMatchObject({ agyPermissionAgreement: { change: 'fromFullAccess', mode: 'auto' } });
     expect(recordedOnly).not.toHaveProperty('agyPermissionAgreementForSend');
-    // Another Gemini model keeps the agreement, as what it was.
+    // Another Gemini model is another registration: it starts with no agreement.
     await h.pickOtherGeminiModel();
     expect(h.agreedSignals()).toBe(0);
-    expect(await h.pendingSwitch()).not.toHaveProperty('agyPermissionAgreementForSend');
+    await expect(h.pendingSwitch()).resolves.toMatchObject({ model: 'gemini-other', agyPermissionAgreement: null });
 
-    // The banner of a held message, or the dialog of a send.
+    // The banner of a held message.
     await h.agreeOnly('bypassPermissions', 'gemini-other', 'here', undefined, null, 'send');
     expect(h.agreedSignals()).toBe(1);
     await expect(h.pendingSwitch()).resolves.toMatchObject({ agyPermissionAgreementForSend: true });
@@ -685,11 +690,14 @@ describe('switching a task into Antigravity from the model picker, with permissi
     expect(h.agreedSignals()).toBe(1);
     await expect(h.pendingSwitch()).resolves.toMatchObject({ agyPermissionAgreementForSend: true });
 
-    // The model picker, agreed in its own dialog.
+    // The model picker, agreed in its own dialog: the conversion is agreed to, recorded, and
+    // that is all. Its dialog says what the switch does, nothing about sending (QQ, 2026-11-23).
     await h.withdrawSwitch();
     await h.pickGeminiModel();
-    expect(h.agreedSignals()).toBe(2);
-    await expect(h.pendingSwitch()).resolves.toMatchObject({ agyPermissionAgreementForSend: true });
+    expect(h.agreedSignals()).toBe(1);
+    const picked = await h.pendingSwitch();
+    expect(picked).toMatchObject({ agyPermissionAgreement: { change: 'fromFullAccess', mode: 'auto' } });
+    expect(picked).not.toHaveProperty('agyPermissionAgreementForSend');
   });
 
   // Where it goes back to. Antigravity runs only on the task's own computer, so a saved
@@ -851,31 +859,22 @@ describe('switching a task into Antigravity from the model picker, with permissi
   // that as "agreed with this pick": it marked the agreement as given for a send and let a held
   // message go. An agreement is taken with a registration only when the caller says it was given
   // in that pick's dialog; otherwise the host carries its own record over, as what it was.
-  it('does not take an agreement that merely travels with a later pick as agreed in that pick, and wakes nothing for it', async () => {
+  it('does not take an agreement that merely travels with a later pick, starts that registration with none, and wakes nothing', async () => {
     const h = fixture('bypassPermissions');
     await h.pickGeminiModel(null);
     await expect(h.agreeOnly('bypassPermissions')).resolves.toMatchObject({ agyPermissionAgreementRecorded: true });
     expect(h.agreedSignals()).toBe(0);
 
+    // Another effort, then another model, each with what the window remembers as agreed.
     await h.pickAgainCarrying('bypassPermissions');
+    await expect(h.pendingSwitch()).resolves.toMatchObject({ model: 'gemini-test', agyPermissionAgreement: null });
     await h.pickAgainCarrying('bypassPermissions', 'gemini-other');
+    const later = await h.pendingSwitch();
+    expect(later).toMatchObject({ model: 'gemini-other', agyPermissionAgreement: null });
+    expect(later).not.toHaveProperty('agyPermissionAgreementForSend');
     expect(h.agreedSignals()).toBe(0);
-    const carried = await h.pendingSwitch();
-    expect(carried).toMatchObject({ model: 'gemini-other', agyPermissionAgreement: { change: 'fromFullAccess', mode: 'auto' } });
-    expect(carried).not.toHaveProperty('agyPermissionAgreementForSend');
-
-    // Nor does a remembered answer about another mode replace the record on the way.
-    await h.pickAgainCarrying('plan');
-    await expect(h.pendingSwitch()).resolves.toMatchObject({ agyPermissionAgreement: { change: 'fromFullAccess', mode: 'auto' } });
-    expect(h.agreedSignals()).toBe(0);
-
-    // With no record on the host, what travels along does not become one.
-    const none = fixture('bypassPermissions');
-    await none.pickGeminiModel(null);
-    await none.pickAgainCarrying('bypassPermissions');
-    await expect(none.pendingSwitch()).resolves.toMatchObject({ agyPermissionAgreement: null });
-    await expect(none.send()).rejects.toMatchObject({ code: 'AGENT_SWITCH_PERMISSION_UNCONFIRMED' });
-    expect(none.agreedSignals()).toBe(0);
+    await expect(h.send()).rejects.toMatchObject({ code: 'AGENT_SWITCH_PERMISSION_UNCONFIRMED' });
+    expect(h.log).toEqual([]);
   });
 
   // DD 7089552822, item 2. "Given for a send" stayed on the pending switch when a different
@@ -883,7 +882,10 @@ describe('switching a task into Antigravity from the model picker, with permissi
   // reporting {new agreement, given for a send} and a window resent a held message by itself.
   it('does not pass "given for a send" on to a different agreement that is only recorded', async () => {
     const h = fixture('bypassPermissions');
-    await h.pickGeminiModel();
+    await h.pickGeminiModel(null);
+    // The banner of a held message: agreed, for that send.
+    await expect(h.agreeOnly('bypassPermissions', 'gemini-test', 'here', undefined, null, 'send'))
+      .resolves.toMatchObject({ agyPermissionAgreementRecorded: true });
     await expect(h.pendingSwitch()).resolves.toMatchObject({ agyPermissionAgreementForSend: true });
     expect(h.agreedSignals()).toBe(1);
 
@@ -970,12 +972,29 @@ describe('switching a task into Antigravity from the model picker, with permissi
     expect(h.row).toMatchObject({ agentKind: 'cc', permissionMode: 'acceptEdits' });
   });
 
-  it('keeps what was agreed when another Gemini model is picked while the switch is pending', async () => {
+  // QQ, 2026-11-23: an agreement is reused only within the task and the registration it was
+  // given for. Picking again (another model, an effort) is a new registration and starts with
+  // none; the user is asked again before anything is applied.
+  it('starts a later registration with no agreement: what was agreed for the earlier pick is not carried over', async () => {
     const h = fixture('bypassPermissions');
     await h.pickGeminiModel();
     await h.pickGeminiModel(null);
+    await expect(h.send()).rejects.toMatchObject({ code: 'AGENT_SWITCH_PERMISSION_UNCONFIRMED' });
+    expect(h.row).toMatchObject({ agentKind: 'cc', permissionMode: 'bypassPermissions' });
+    expect(h.log).toEqual([]);
+  });
+
+  // The other side of the same ruling: within one registration an agreement is about a kind of
+  // change and the mode it ends in, not about the mode the task happened to be in. Accept edits
+  // and Plan mode both end in the same mode by the same kind of change, with the same effect the
+  // user was told, so an agreement given in one holds when the task is in the other.
+  it('reuses an agreement within its registration for another mode of the same kind of change, ending in the same mode', async () => {
+    const h = fixture('acceptEdits');
+    await h.pickGeminiModel();
+    await h.setPermission('plan');
     await h.send();
-    expect(h.row).toMatchObject({ agentKind: 'agy', permissionMode: 'auto' });
+    expect(h.log).toEqual(['saved plan', 'switched agy ask', 'launch agy ask isolated']);
+    expect(h.agreedSignals()).toBe(0);
   });
 
   it('send first: a tighter mode picked while Antigravity is starting waits, then reaches the running process', async () => {

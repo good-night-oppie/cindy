@@ -6,21 +6,24 @@ import { makerApiFor } from '@/lib/makerTransport';
  * pending one and registers no switch. Its answer says whether it was recorded (see
  * agreeToPendingAgySwitchPermission).
  *
- * `purpose` is what the user was told on screen. 'send': they agreed in order to send (the dialog
- * of a send or of a permission change, the banner of a held message); the host then lets a
- * message it held for this go. 'recordOnly': the task's own entry, which says that confirming
- * sends no message; the host records the agreement and sends nothing.
+ * `purpose` is what the user was told on screen. 'send': they confirmed on the banner of a held
+ * message that it should go; the host then lets that message go. 'recordOnly': everything else
+ * (the task's own entry, the permission menu, the dialog of a new message's send); the host
+ * records the agreement and sends nothing it was holding.
  */
 /**
- * What the composer's two dialogs tell the host an agreement is for. The dialog of a send: the
- * message goes out with it, and so may one the host held for this. The dialog of the permission
- * menu ("Confirm change"): the user is changing a setting, and nothing is sent on it (QQ's
- * ruling "A", 2026-11-22), whatever is held and whichever window shows it.
+ * What an agreement given in one of the composer's dialogs is for, as far as a message the host
+ * already holds is concerned: nothing (QQ's rulings of 2026-11-22 and 2026-11-23).
+ *  - The permission menu's "Confirm change" changes a setting.
+ *  - The dialog shown when a new message is sent is about that new message. A message held or
+ *    paused before it stays where it is, ahead of the new one, until the user confirms on its
+ *    banner or continues the queue.
+ * Only the banner of the held message itself asks the host to let that message go.
  */
 export function agySwitchAgreementPurposeOfComposerDialog(
-  about: 'sendConfirmation' | 'permissionConfirmation',
+  _about: 'sendConfirmation' | 'permissionConfirmation',
 ): 'send' | 'recordOnly' {
-  return about === 'sendConfirmation' ? 'send' : 'recordOnly';
+  return 'recordOnly';
 }
 
 export function recordAgySwitchPermissionAgreementWithHost(

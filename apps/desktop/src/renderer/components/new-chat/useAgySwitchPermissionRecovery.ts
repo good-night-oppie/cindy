@@ -15,9 +15,8 @@ import { recordAgySwitchPermissionAgreementWithHost } from './agySwitchPermissio
  * from another window, a device or IM. The message is still at the head of the queue and the
  * switch is still pending.
  *
- * Automatically, at most once per pending switch and stored mode: ask with the dialog a send shows
- * (or, when the host already has an agreement given for a send, use that), tell the host, and
- * resend the held message once. A retry clears the error before the host answers, so "the error went away
+ * Automatically, at most once per pending switch and stored mode: ask with the dialog a send
+ * shows, tell the host, and resend the held message once on a "yes". A retry clears the error before the host answers, so "the error went away
  * and came back" is not a new occasion: if the host holds the message again, nothing more happens
  * on its own. The banner stays, and its action asks the user afresh, never trusting an agreement
  * the host has just shown it does not have.
@@ -57,13 +56,12 @@ export function useAgySwitchPermissionRecovery(input: {
     if (!sessionId || asking.current) return;
     asking.current = true;
     try {
-      // Resent without a question only on an agreement the host has as one given for a send (in
-      // the model picker's dialog, or by a send in another window). The task's own entry and an
-      // ordinary change of the permission mode told the user nothing about sending: on what they
-      // recorded, or on what this window remembers of them, the question of a send is asked here
-      // and only its answer sends.
-      const recorded = makerChatStore.getAgentSwitchIntent(sessionId);
-      if (!(recorded?.agyPermissionAgreement && recorded.agyPermissionAgreementForSend === true)) askAfresh = true;
+      // A held message is resent only on the user's answer to the question of sending it, asked
+      // here. Whatever the host has on record, or this window remembers, was agreed about
+      // something else: the conversion (the model picker, the task's entry), a setting (the
+      // permission menu), another message (a send), or in another window. None of that stands in
+      // for this answer (QQ, 2026-11-23).
+      askAfresh = true;
       if (askAfresh) forgetAgySwitchPermissionAgreed(sessionId);
       const agreed = await agreeToPendingAgySwitchPermission({
         sessionId,
