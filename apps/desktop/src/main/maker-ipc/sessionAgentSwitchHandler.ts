@@ -620,6 +620,10 @@ export function recordAgySwitchPermissionAgreement(
   },
 ): boolean {
   const parsed = parseAgySwitchPermissionAgreement(agreement);
+  // An ordinary change of mode never lets a held message go, whatever else the request says
+  // (QQ, 2026-11-22). A request that declares a change of mode is one, so it is not also an
+  // agreement given for a send: the two are read apart and must not be combined by a caller.
+  if (check && typeof check.changingTo === 'string' && check.changingTo.length > 0) forSend = false;
   const pending = deps.pendingSwitches?.get?.(sessionId);
   if (!parsed || !pending || pending.targetAgentKind !== 'agy' || pending.model !== askedAbout.model
     || (pending.providerId ?? null) !== (typeof askedAbout.providerId === 'string' && askedAbout.providerId ? askedAbout.providerId : null)) {

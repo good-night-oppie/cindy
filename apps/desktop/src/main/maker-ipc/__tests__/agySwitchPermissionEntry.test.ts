@@ -838,6 +838,36 @@ describe('switching a task into Antigravity from the model picker, with permissi
     expect(moved.agreedSignals()).toBe(0);
   });
 
+  // QQ, 2026-11-22. The permission menu records its agreement before the new mode is stored. If
+  // the store then fails, or another change of mode gets there first, the agreement is for a mode
+  // the task is not in. What is applied is decided by the mode actually stored when a message is
+  // sent, never by what was agreed in advance; and a request that declares a change of mode
+  // cannot double as an agreement given for a send, even if it says so.
+  it('judges a send by the mode actually stored when the change of mode an agreement was recorded for did not happen', async () => {
+    // The store of the new mode failed: the task is still in Full access.
+    const failed = fixture('bypassPermissions');
+    await failed.pickGeminiModel(null);
+    await expect(failed.agreeOnly('acceptEdits', 'gemini-test', 'here', undefined, null, 'send',
+      { changing: { to: 'acceptEdits', from: 'bypassPermissions' } })).resolves.toMatchObject({ agyPermissionAgreementRecorded: true });
+    // Recorded, as a change of mode: not as an agreement for a send, and with no wake.
+    expect(failed.agreedSignals()).toBe(0);
+    expect(await failed.pendingSwitch()).not.toHaveProperty('agyPermissionAgreementForSend');
+    await expect(failed.send()).rejects.toMatchObject({ code: 'AGENT_SWITCH_PERMISSION_UNCONFIRMED' });
+    expect(failed.log).toEqual([]);
+    expect(failed.row).toMatchObject({ agentKind: 'cc', permissionMode: 'bypassPermissions' });
+
+    // Another change of mode got there first: the task is in a mode whose rewrite is another one.
+    const overtaken = fixture('acceptEdits');
+    await overtaken.pickGeminiModel(null);
+    await expect(overtaken.agreeOnly('bypassPermissions', 'gemini-test', 'here', undefined, null, 'recordOnly',
+      { changing: { to: 'bypassPermissions', from: 'acceptEdits' } })).resolves.toMatchObject({ agyPermissionAgreementRecorded: true });
+    await overtaken.setPermission('plan');
+    await expect(overtaken.send()).rejects.toMatchObject({ code: 'AGENT_SWITCH_PERMISSION_UNCONFIRMED' });
+    expect(overtaken.log).toEqual(['saved plan']);
+    expect(overtaken.row).toMatchObject({ agentKind: 'cc', permissionMode: 'plan' });
+    expect(overtaken.agreedSignals()).toBe(0);
+  });
+
   it('applies a send from a window that asked nothing on the agreement another window recorded, and refuses again once it no longer fits', async () => {
     const reused = fixture('bypassPermissions');
     await reused.pickGeminiModel(null);

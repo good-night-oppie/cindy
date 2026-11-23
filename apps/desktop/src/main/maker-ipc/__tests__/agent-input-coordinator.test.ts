@@ -30,6 +30,7 @@ import {
 } from '../sessionAgentSwitchHandler.js';
 import { MAKER_INVOKE } from '../channels.js';
 import { runDeviceLinkInvokeContext } from '../../device-link/invoke-context.js';
+import { agySwitchPermissionChange, permissionModeAfterSwitchToAgy } from '../../../shared/agentKindConversion.js';
 import { IpcHarness } from './helpers/ipcHarness.js';
 import { AgentSwitchPermissionUnconfirmedError, agySwitchPermissionIsUnconfirmed } from '../agentSwitchPermissionAgreement.js';
 import { captureProductTurnFailureOwner, createDeferredProductTurnFailureGate } from '../productTurnFailureOwner.js';
@@ -6345,6 +6346,13 @@ describe('AgentInputCoordinator send transaction', () => {
        * says nothing about sending.
        */
       confirmWithoutSending: (revision?: number) => answer({}, revision),
+      /** The permission menu's "Confirm change" for a new mode; `claimsSend` is a caller that also asks to wake. */
+      confirmModeChange: (to: string, claimsSend: boolean) => ipc.invoke(
+        MAKER_INVOKE.SWITCH_SESSION_AGENT, sid, 'agy', 'gemini-test', null, undefined, undefined,
+        { agyPermissionAgreementOnly: true, agyPermissionRevision: pendingSwitches.get(sid)?.revision,
+          agyPermissionAgreement: { change: agySwitchPermissionChange(to), mode: permissionModeAfterSwitchToAgy(to) },
+          agyPermissionChangingTo: to, agyPermissionChangingFrom: row.permissionMode,
+          ...(claimsSend ? { agyPermissionAgreementForSend: true } : {}) }),
       /** The banner's "Review and confirm", or the dialog of a send. */
       confirmToSend: (revision?: number) => answer({ agyPermissionAgreementForSend: true }, revision),
       confirmToSendFromRemote: () => runDeviceLinkInvokeContext(
@@ -6428,6 +6436,45 @@ describe('AgentInputCoordinator send transaction', () => {
     expect(h.coordinator.getProjection(sid)).toMatchObject({ queuePaused: true, error: null });
     expect(h.coordinator.getProjection(sid).pendingQueue.map((q) => q.clientId)).toEqual(['q-1']);
 
+    h.coordinator.resume(sid);
+    await host.settle();
+    expect(host.dispatched).toEqual(['held']);
+    await host.turnEnds();
+    expect(host.dispatched).toEqual(['held']);
+  });
+
+  // QQ, 2026-11-22: an ordinary change of mode never wakes a held message, even while the switch
+  // is still pending and even if the request also claims to be for a send; and when the new mode
+  // is then not stored (the store failed, or another change won), the head of the queue is judged
+  // by the mode that is stored. Held message at the head, its banner closed or still showing.
+  it.each([[true], [false]])('a change of mode wakes nothing for a held message (banner closed: %s), and Continue sending holds it again while the stored mode is still unagreed', async (closeBanner) => {
+    const sid = `held-then-mode-change-${closeBanner}`;
+    const host = hostWithQueue(sid);
+    const { h } = host;
+    await host.pick(false);
+    h.coordinator.enqueue(sid, makeItem('q-1', 'held'));
+    await host.settle();
+    if (closeBanner) h.coordinator.clearError(sid);
+
+    for (const claimsSend of [false, true]) {
+      await expect(host.confirmModeChange('acceptEdits', claimsSend)).resolves.toMatchObject({ agyPermissionAgreementRecorded: true });
+      await host.settle();
+      expect(host.dispatched).toEqual([]);
+      expect(host.pendingSwitches.get(sid)).toMatchObject({ agyPermissionAgreement: { change: 'fromUnsupported', mode: 'ask' } });
+      expect(host.pendingSwitches.get(sid)?.agyPermissionAgreementForSend).toBeUndefined();
+    }
+    // The new mode was never stored. The user continues: the send step looks at the stored mode.
+    h.coordinator.clearError(sid);
+    h.coordinator.resume(sid);
+    await host.settle();
+    expect(host.dispatched).toEqual([]);
+    const held = h.coordinator.getProjection(sid);
+    expect(held.error).toMatch(/^AGENT_SWITCH_PERMISSION_UNCONFIRMED: /);
+    expect(held.pendingQueue.map((q) => [q.clientId, q.awaitsAgySwitchConfirmation])).toEqual([['q-1', true]]);
+
+    // Once the mode they agreed to is the stored one, Continue sending sends it, once.
+    host.row.permissionMode = 'acceptEdits';
+    h.coordinator.clearError(sid);
     h.coordinator.resume(sid);
     await host.settle();
     expect(host.dispatched).toEqual(['held']);
