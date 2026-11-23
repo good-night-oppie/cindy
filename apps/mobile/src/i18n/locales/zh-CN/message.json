@@ -348,7 +348,7 @@
       "defaultTitle": "待发送队列"
     },
     "row": {
-      "steerHeldForAgySwitch": "这条消息在等你确认权限的改变，确认前不能插话。",
+      "steerHeldForAgySwitch": "这条消息在等任务所在的电脑确认权限的改变，确认前不能插话。",
       "syntheticEditDisabled": "系统指令消息不支持编辑或插话发送。",
       "autoSentEditDisabled": "自动发送的消息不支持编辑或插话发送。",
       "first": "已经是队列第一条。",

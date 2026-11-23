@@ -312,7 +312,7 @@ describe('shared queue presentation model', () => {
   // is the row's hint, and nothing else about the row changes.
   it('makes interject unavailable, with the reason as the row hint, for a message held for a permission confirmation', () => {
     const projection = { steeringQueueClientIds: [], queueEditLocks: [], queueInteractionLocks: [] };
-    const reason = '这条消息在等你确认权限的改变，确认前不能插话。';
+    const reason = '这条消息在等任务所在的电脑确认权限的改变，确认前不能插话。';
     const held = buildQueueRowPresentation({
       item: { ...queued('q-1'), awaitsAgySwitchConfirmation: true }, originalIndex: 0, projection, queueLength: 2,
     });

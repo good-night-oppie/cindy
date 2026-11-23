@@ -348,7 +348,7 @@
       "defaultTitle": "待遣佇列"
     },
     "row": {
-      "steerHeldForAgySwitch": "此訊候君確認權限之改，未確認前不可插言。",
+      "steerHeldForAgySwitch": "此訊候任務所在之電腦確認權限之改，未確認前不可插言。",
       "syntheticEditDisabled": "系統指令之訊不可修，亦不可插言遣之。",
       "autoSentEditDisabled": "自遣之訊不可修，亦不可插言遣之。",
       "first": "已居佇列之首。",

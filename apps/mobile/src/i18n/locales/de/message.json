@@ -348,7 +348,7 @@
       "defaultTitle": "Ausstehende Warteschlange"
     },
     "row": {
-      "steerHeldForAgySwitch": "Diese Nachricht wartet darauf, dass du die Änderung der Berechtigungen bestätigst. Vorher ist „Einschieben“ nicht möglich.",
+      "steerHeldForAgySwitch": "Diese Nachricht wartet darauf, dass die Änderung der Berechtigungen auf dem Computer bestätigt wird, auf dem die Aufgabe läuft. Vorher ist „Einschieben“ für sie nicht verfügbar.",
       "syntheticEditDisabled": "Nachrichten mit Systemanweisungen können nicht bearbeitet oder als Einschub gesendet werden.",
       "autoSentEditDisabled": "Automatisch gesendete Nachrichten können nicht bearbeitet oder als Einschub gesendet werden.",
       "first": "Dies ist bereits das erste Element in der Warteschlange.",

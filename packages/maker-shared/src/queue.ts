@@ -164,7 +164,7 @@ export function buildQueueRowPresentation(input: {
   const steerHeldForAgySwitch = input.item.awaitsAgySwitchConfirmation === true
     && !baseDisabledReason && !syntheticEditReason && !autoSentReason;
   const heldSteerReason = steerHeldForAgySwitch
-    ? presentationText(localizer, 'message.queuePresentation.row.steerHeldForAgySwitch', '这条消息在等你确认权限的改变，确认前不能插话。')
+    ? presentationText(localizer, 'message.queuePresentation.row.steerHeldForAgySwitch', '这条消息在等任务所在的电脑确认权限的改变，确认前不能插话。')
     : null;
 
   return {
