@@ -20,6 +20,7 @@ import { AgentSwitchPermissionUnconfirmedError, agySwitchPermissionIsUnconfirmed
 import { runDeviceLinkInvokeContext } from '../../device-link/invoke-context.js';
 import { createScheduledModelScope, type ScheduledModelSelection } from '../scheduledModelSelection';
 import { IpcHarness } from './helpers/ipcHarness';
+import { agySwitchWiringFromRegister } from './helpers/agySwitchWiring';
 
 const ownership = vi.hoisted(() => ({ current: null as unknown }));
 vi.mock('../../localDb/client/current.js', () => ({ getCurrentDbClientSnapshot: () => ownership.current }));
@@ -85,9 +86,15 @@ function fixture(initialMode: string) {
   } };
 
   // The registry the app uses: it stamps each registration with the session's revision.
-  const hooks = { landed: () => {}, restoreSettled: () => {} };
+  const hooks = { landed: () => {}, retireSavedModel: async (): Promise<boolean> => true };
   let agreed = 0;
-  const newRegistry = () => createPendingAgentSwitchRegistry({ onScheduledRestoreSettled: () => { hooks.restoreSettled(); } });
+  // Joined the way register.ts joins them, from its source: what the registry is created with,
+  // and the two callbacks of the switch handler. The queue and the store are the stand-ins.
+  const wiring = agySwitchWiringFromRegister({
+    agentInputCoordinatorHolder: { wakeHeldForAgySwitch: () => { agreed += 1; return true; } },
+    updateScheduledPreference: () => hooks.retireSavedModel(),
+  });
+  const newRegistry = () => createPendingAgentSwitchRegistry(wiring.registryOptions);
   const pendingSwitches = newRegistry();
   const guards: Array<{ guarded: boolean; agreement?: unknown }> = [];
   const switchDeps: MakerSessionAgentSwitchHandlerDeps = {
@@ -118,7 +125,7 @@ function fixture(initialMode: string) {
     withSessionLock: withSendToSessionLock,
     pendingSwitches,
     onUserRouteSelectionLanded: () => { hooks.landed(); },
-    onPendingSwitchAgreed: () => { agreed += 1; },
+    ...wiring.deps,
     log: { info: vi.fn(), warn: vi.fn() },
   };
   const ipc = new IpcHarness();
@@ -225,9 +232,8 @@ function fixture(initialMode: string) {
     hostRevision: () => switchDeps.pendingSwitches?.revision?.(id),
     pickGeminiModelOfProvider: (providerId: string) => ipc.invoke(MAKER_INVOKE.SWITCH_SESSION_AGENT, id, 'agy', 'gemini-test', providerId),
     onLanded: (fn: () => void) => { hooks.landed = fn; },
-    onRestoreSettled: (fn: () => void) => { hooks.restoreSettled = fn; },
-    /** As register.ts wires it: the apply step waits for the saved model of an applied restore to be retired. */
-    onRestoreLanded: (fn: () => Promise<void>) => { switchDeps.onScheduledRestoreLanded = fn; },
+    /** The store's clearing of the task's saved model (the host's updateScheduledPreference(null)). */
+    onRetireSavedModel: (fn: () => Promise<boolean>) => { hooks.retireSavedModel = fn; },
     /** How often the host was told "the pending switch has just been agreed to". */
     agreedSignals: () => agreed,
     /**
@@ -516,17 +522,16 @@ describe('switching a task into Antigravity from the model picker, with permissi
     h.onLanded(() => { saved.retiredBy.push('landed as the user\'s own pick'); });
     // Retiring is a read and a conditional write in the store, each a step later, as in the app:
     // it clears the saved model it read, if that is still the one there.
-    const retire = async (by: string) => {
+    // register.ts decides who waits for it: the apply step does, for an applied restore; nothing
+    // does for one that was replaced or withdrawn.
+    h.onRetireSavedModel(async () => {
       await Promise.resolve();
       const read = saved.baseline;
       await Promise.resolve();
       if (saved.baseline === read) saved.baseline = null;
-      saved.retiredBy.push(by);
-    };
-    // Replaced or withdrawn: not waited for by whatever replaced it.
-    h.onRestoreSettled(() => { void retire('settled'); });
-    // Applied: the apply step waits.
-    h.onRestoreLanded(() => retire('applied'));
+      saved.retiredBy.push('retired');
+      return true;
+    });
     const scope = createScheduledModelScope({
       createId: () => 'scope-1',
       read: async () => ({ profile: { ...profile, effort: profile.effort ?? '' }, baseline: saved.baseline }),
@@ -587,7 +592,7 @@ describe('switching a task into Antigravity from the model picker, with permissi
     // Retired because its question was answered, not by being counted as a pick of the user's:
     // putting the user's model back must not detach an IM task from the route it follows (item 4).
     await settle();
-    expect(s.saved).toMatchObject({ baseline: null, retiredBy: ['applied'] });
+    expect(s.saved).toMatchObject({ baseline: null, retiredBy: ['retired'] });
     expect(s.restores).toEqual(['gemini-test', 'gemini-test']);
   });
 
@@ -606,13 +611,13 @@ describe('switching a task into Antigravity from the model picker, with permissi
     // The next scheduled run, in the order register.ts runs it: apply what is pending, then begin.
     await h.send();
     expect(h.row).toMatchObject({ agentKind: 'agy', model: 'gemini-test' });
-    expect(s.saved).toMatchObject({ baseline: null, retiredBy: ['applied'] });
+    expect(s.saved).toMatchObject({ baseline: null, retiredBy: ['retired'] });
     s.backOnTheUsersModel();
     await s.begin();
     await settle();
     // What this run saved is still there to go back to, and nothing retired it a second time.
     expect(JSON.parse(s.saved.baseline!)).toMatchObject({ agentKind: 'agy', model: 'gemini-test' });
-    expect(s.saved.retiredBy).toEqual(['applied']);
+    expect(s.saved.retiredBy).toEqual(['retired']);
   });
 
   // DD 7083915988, item 3. In the app the model picker does not reach the handler's "clear the
@@ -632,7 +637,7 @@ describe('switching a task into Antigravity from the model picker, with permissi
 
     // Picking a model of the engine the task runs on: it stays there, with its permissions.
     await h.withdrawSwitch();
-    expect(s.saved).toMatchObject({ baseline: null, retiredBy: ['settled'] });
+    expect(s.saved).toMatchObject({ baseline: null, retiredBy: ['retired'] });
     // Restarted before anything is sent: nothing is left to put back.
     h.restartHost();
     await s.send();
@@ -649,7 +654,7 @@ describe('switching a task into Antigravity from the model picker, with permissi
     await s.begin();
     await expect(s.send()).rejects.toMatchObject(HELD);
     await h.pickOtherGeminiModel();
-    expect(s.saved).toMatchObject({ baseline: null, retiredBy: ['settled'] });
+    expect(s.saved).toMatchObject({ baseline: null, retiredBy: ['retired'] });
     await expect(h.pendingSwitch()).resolves.toMatchObject({ model: 'gemini-other', agyPermissionAgreement: null });
   });
 

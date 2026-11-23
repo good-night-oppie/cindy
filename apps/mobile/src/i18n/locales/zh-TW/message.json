@@ -348,6 +348,7 @@
       "defaultTitle": "待傳送佇列"
     },
     "row": {
+      "steerHeldForAgySwitch": "這則訊息在等你確認權限的改變，確認前不能插話。",
       "syntheticEditDisabled": "系統指令訊息不支援編輯或插話傳送。",
       "autoSentEditDisabled": "自動傳送的訊息不支援編輯或插話傳送。",
       "first": "已經是佇列第一條。",

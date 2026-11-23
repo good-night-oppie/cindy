@@ -72,7 +72,7 @@ export function PendingQueueBubble({
   const [open, setOpen] = useState(false);
   // Held for the user's agreement to a permission change: the menu keeps "Interject", unavailable,
   // with the reason written under it, so that opening the menu is enough to read it.
-  const steerHeld = presentation.steerHeldForAgySwitch && !availability.actions.steer.disabled;
+  const steerHeld = availability.steerHeldForAgySwitch;
   const steerHeldReasonId = useId();
   const sentAt = new Date(entry.chatMessage.createdAt ?? 0).getTime();
   const [statusShown, setStatusShown] = useState(!localSend || Date.now() - sentAt >= 600);

@@ -304,6 +304,45 @@ describe('shared queue presentation model', () => {
     expect(normalRow.actions.edit.disabled).toBe(false);
   });
 
+  // cindy#19 (DD 7089552822, item 6; QQ 2026-11-23). The host holds a queued message until the
+  // user confirms what a pending switch into Antigravity does to the task's permissions, and
+  // refuses to interject it meanwhile. The computer's queue said so; the phone, which builds its
+  // rows from this function, still offered Interject and then showed a generic "not delivered".
+  // The condition lives here now, for both: Interject is unavailable with the reason, the reason
+  // is the row's hint, and nothing else about the row changes.
+  it('makes interject unavailable, with the reason as the row hint, for a message held for a permission confirmation', () => {
+    const projection = { steeringQueueClientIds: [], queueEditLocks: [], queueInteractionLocks: [] };
+    const reason = '这条消息在等你确认权限的改变，确认前不能插话。';
+    const held = buildQueueRowPresentation({
+      item: { ...queued('q-1'), awaitsAgySwitchConfirmation: true }, originalIndex: 0, projection, queueLength: 2,
+    });
+    expect(held.steerHeldForAgySwitch).toBe(true);
+    expect(held.actions.steer).toMatchObject({ disabled: true, disabledReason: reason });
+    expect(held.hint).toBe(reason);
+    expect(held.actions.edit.disabled).toBe(false);
+    expect(held.actions.remove.disabled).toBe(false);
+    expect(held.actions.moveDown.disabled).toBe(false);
+
+    const plain = buildQueueRowPresentation({ item: queued('q-2'), originalIndex: 1, projection, queueLength: 2 });
+    expect(plain.steerHeldForAgySwitch).toBe(false);
+    expect(plain.actions.steer.disabled).toBe(false);
+    expect(plain.hint).toBeNull();
+
+    // A row that could not be interjected anyway keeps its own reason and hint.
+    const synthetic = buildQueueRowPresentation({
+      item: { ...queued('q-3'), text: CONTINUE_AFTER_ERROR_PROMPT, awaitsAgySwitchConfirmation: true },
+      originalIndex: 0, projection, queueLength: 1,
+    });
+    expect(synthetic.steerHeldForAgySwitch).toBe(false);
+    expect(synthetic.actions.steer.disabledReason).toBe('系统指令消息不支持编辑或插话发送。');
+    const locked = buildQueueRowPresentation({
+      item: { ...queued('q-4'), awaitsAgySwitchConfirmation: true }, originalIndex: 0, queueLength: 1,
+      projection: { ...projection, queueEditLocks: ['q-4'] },
+    });
+    expect(locked.steerHeldForAgySwitch).toBe(false);
+    expect(locked.hint).not.toBe(reason);
+  });
+
   it('allows task messages to steer and reorder while keeping automatic prompts locked', () => {
     const projection = {
       steeringQueueClientIds: [],

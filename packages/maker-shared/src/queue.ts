@@ -47,6 +47,13 @@ export interface QueueRowPresentation {
    * 且 edit / steer 已被禁用(任何合成指令都不该被改写;删除/排序保留)。
    */
   syntheticKind: 'continue' | 'generic' | null;
+  /**
+   * The message could be interjected but for one thing: the host holds it until the user
+   * confirms what the task's pending switch into Antigravity does to its permissions, and
+   * refuses to interject it meanwhile. Interject is unavailable with that reason, and the reason
+   * is the row's hint. One condition for the computer's queue and the phone's (cindy#19).
+   */
+  steerHeldForAgySwitch: boolean;
   title: string;
 }
 
@@ -115,7 +122,7 @@ export function buildQueuePanelSummary(
 
 export function buildQueueRowPresentation(input: {
   busy?: boolean;
-  item: { clientId: string; origin?: unknown; text?: string; sourcePlugin?: unknown };
+  item: { clientId: string; origin?: unknown; text?: string; sourcePlugin?: unknown; awaitsAgySwitchConfirmation?: unknown };
   originalIndex: number;
   projection: QueueRowProjectionLike;
   queueLength: number;
@@ -152,11 +159,19 @@ export function buildQueueRowPresentation(input: {
     ? presentationText(localizer, 'message.queuePresentation.row.orcaEditDisabled', '协同消息不支持编辑。')
     : null;
 
+  // Held by the host for the user's agreement to a permission change. Only for a message that
+  // could be interjected otherwise; its other actions are untouched.
+  const steerHeldForAgySwitch = input.item.awaitsAgySwitchConfirmation === true
+    && !baseDisabledReason && !syntheticEditReason && !autoSentReason;
+  const heldSteerReason = steerHeldForAgySwitch
+    ? presentationText(localizer, 'message.queuePresentation.row.steerHeldForAgySwitch', '这条消息在等你确认权限的改变，确认前不能插话。')
+    : null;
+
   return {
     actions: {
       moveUp: queueRowAction(baseDisabledReason, moveUpTarget, presentationText(localizer, 'message.queuePresentation.row.first', '已经是队列第一条。')),
       moveDown: queueRowAction(baseDisabledReason, moveDownTarget, presentationText(localizer, 'message.queuePresentation.row.last', '已经是队列最后一条。')),
-      steer: queueRowAction(baseDisabledReason ?? syntheticEditReason ?? autoSentReason),
+      steer: queueRowAction(baseDisabledReason ?? syntheticEditReason ?? autoSentReason ?? heldSteerReason),
       edit: queueRowAction(baseDisabledReason ?? syntheticEditReason ?? autoSentReason ?? orcaEditReason),
       remove: queueRowAction(baseDisabledReason),
     },
@@ -167,10 +182,11 @@ export function buildQueueRowPresentation(input: {
       readOnlyReason: input.readOnlyReason,
       steering,
       syntheticKind,
-    }, localizer),
+    }, localizer) ?? heldSteerReason,
     interactionLocked,
     orcaOrigin,
     steering,
+    steerHeldForAgySwitch,
     syntheticKind,
     title: steering
       ? presentationText(localizer, 'message.queuePresentation.row.steering', '插话发送中')

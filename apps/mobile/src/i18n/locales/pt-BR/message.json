@@ -349,6 +349,7 @@
       "defaultTitle": "Fila pendente"
     },
     "row": {
+      "steerHeldForAgySwitch": "Esta mensagem aguarda você confirmar a mudança de permissões; até lá, não é possível usar “Intervir”.",
       "syntheticEditDisabled": "Mensagens de instrução do sistema não podem ser editadas nem enviadas como intervenções.",
       "autoSentEditDisabled": "Mensagens enviadas automaticamente não podem ser editadas nem enviadas como intervenções.",
       "first": "Este já é o primeiro item da fila.",

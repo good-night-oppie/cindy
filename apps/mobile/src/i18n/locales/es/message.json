@@ -349,6 +349,7 @@
       "defaultTitle": "Cola pendiente"
     },
     "row": {
+      "steerHeldForAgySwitch": "Este mensaje espera a que confirmes el cambio de permisos; hasta entonces no se puede usar «Intervenir».",
       "syntheticEditDisabled": "Los mensajes de instrucciones del sistema no se pueden editar ni enviar como interjecciones.",
       "autoSentEditDisabled": "Los mensajes enviados automáticamente no se pueden editar ni enviar como interjecciones.",
       "first": "Este ya es el primer elemento de la cola.",

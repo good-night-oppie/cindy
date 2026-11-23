@@ -32,6 +32,7 @@ import { MAKER_INVOKE } from '../channels.js';
 import { runDeviceLinkInvokeContext } from '../../device-link/invoke-context.js';
 import { agySwitchPermissionChange, permissionModeAfterSwitchToAgy } from '../../../shared/agentKindConversion.js';
 import { IpcHarness } from './helpers/ipcHarness.js';
+import { agySwitchWiringFromRegister } from './helpers/agySwitchWiring.js';
 import { AgentSwitchPermissionUnconfirmedError, agySwitchPermissionIsUnconfirmed } from '../agentSwitchPermissionAgreement.js';
 import { captureProductTurnFailureOwner, createDeferredProductTurnFailureGate } from '../productTurnFailureOwner.js';
 import { createProviderGroupHeldRecovery, createProviderGroupHeldTurnErrors } from '../../provider-group/heldTurnErrors.js';
@@ -6318,7 +6319,8 @@ describe('AgentInputCoordinator send transaction', () => {
       getLiveSession: () => null,
       withSessionLock: (_id: string, fn: () => unknown) => fn(),
       pendingSwitches,
-      onPendingSwitchAgreed: (id: string) => { h.coordinator.wakeHeldForAgySwitch(id); },
+      // register.ts's own callbacks, from its source, with the real queue as what it holds.
+      ...agySwitchWiringFromRegister({ agentInputCoordinatorHolder: h.coordinator }).deps,
       log: { info: () => undefined, warn: () => undefined },
     } as never);
     const dispatched: unknown[] = [];
