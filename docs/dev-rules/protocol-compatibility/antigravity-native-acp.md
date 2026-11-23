@@ -73,9 +73,11 @@ How this differs from switching a task to Codex, and what the user is told (cind
   task is hosted. A window that controls the task on another computer, and the phone,
   do not offer it and cannot agree to it.
 - The switch is registered and applied when the next message is sent, as for other
-  engines. Unlike them it can rewrite the task's permission mode, because Antigravity
-  has no "accept edits" or "plan" mode and its Full access removes file and network
-  isolation:
+  engines. Unlike them, a switch the user makes from the model picker can rewrite the
+  task's permission mode. Antigravity has no "accept edits" or "plan" mode. Where it
+  runs inside the Linux sandbox, its Full access removes the file and network isolation
+  the sandbox gives; on Windows and macOS it is started without that isolation in every
+  mode, so this difference does not apply there. The rule is the same on all three:
 
   | Mode before the switch | Mode after | Asked first |
   | --- | --- | --- |
@@ -83,26 +85,39 @@ How this differs from switching a task to Codex, and what the user is told (cind
   | Full access | Auto (Cindy reviews the approval requests) | yes |
   | any other (accept edits, plan, ...) | Ask | yes |
 
-  Full access is never a starting value; the user can choose it in the task afterwards.
+  Full access is not what a task is switched into; the user can choose it in the task
+  afterwards.
 - The host checks the user's agreement to that change where the switch is applied, not
   where it was asked. A message that would apply the switch without it is not sent on
-  either engine: it stays first in the queue, marked as held, with a banner.
+  either engine. What happens to it depends on where it came from: a message already in
+  the task's queue stays first in the queue, marked as held, with a banner; an entry
+  that does not queue (a message from IM, for one) is refused before it is sent and
+  says so, and there is no queue head or banner for it.
 - A held message is sent by one of two actions of the user's on it and by nothing else:
   confirming on its own banner, or "Continue sending". Picking the engine or a model
   again, changing effort, Fast, thinking or the permission mode, confirming from the
   task's entry, sending or interjecting another message, and a restart all record or
   change settings and send nothing held. When any of them sets the queue moving, the
   queue is paused again in front of the held message.
-- A confirmation is about one message in one hold. The host names each hold; the window
-  reads the name when its question opens and sends it back with the answer and the
-  retry. If the message was removed, edited, merged, moved back or held anew, the
-  answer is recorded as an agreement about the permissions and sends nothing. The same
-  once the user has closed its banner, stopped the queue or gone back in the task's
-  history, in this window or another: every question opened before that is over, and
-  "Continue sending" is the only way on.
-- A new registration (another model, effort, Fast, thinking) starts with no agreement;
-  the next message that needs one asks. An agreement belongs to one registration and
-  one permission change.
+- A confirmation to send is about one message in one hold. The host names each hold;
+  the window reads the name when its question opens and sends it back with the answer
+  and the retry. The hold gets a new name when the message is held again or its content
+  changes (an edit that leaves the content as it was keeps it), and when the user closes
+  the message's banner, stops the queue or goes back in the task's history, in any
+  window. An answer or retry that names an earlier hold, or none, sends nothing. After
+  the banner was closed or the queue paused, no answer lifts the pause, whichever hold
+  it names: "Continue sending" is the way on.
+- Such an answer may still record the agreement about the permissions, for no send, and
+  only if it passes the same checks as any other: it comes from this computer, names
+  the registration that is still pending, and is about the conversion the task's stored
+  mode would get now. An answer about a switch that was withdrawn or replaced, or about
+  another conversion, records nothing.
+- A new registration does not inherit an earlier agreement, an earlier dialog's answer
+  or a permission to send. The one exception is the conversion the user has just agreed
+  to in the dialog of that very pick, which is written with the registration it led to.
+  Changing the model, effort, Fast or thinking afterwards registers anew without it.
+  Not every entry that sends the next message can ask; one that cannot is refused as
+  above.
 - A held message cannot be interjected into the running turn: that would deliver it to
   the engine it was not written for, without the send step that applies the switch.
 - The mark on a held message is stored with the queue, the pending switch is not. After
@@ -110,9 +125,15 @@ How this differs from switching a task to Codex, and what the user is told (cind
   with no switch pending it is held again and its banner says that the switch is no
   longer pending. The user picks the engine again, or removes the message.
 
-Not verified on a running app, on a phone, or with two windows as of this writing; the
-rules above are covered by tests of the host's switch handler joined to the real queue
-with a stand-in engine.
+Evidence, as of f7c0bcaa. Earlier runs of the switch on Windows 11 are recorded on
+cindy#19 and stand for what they covered. What was added after them has not been run on
+a real app: the binding of a confirmation to one message and one hold, and the rules for
+a closed banner, Stop and going back, including the case of two windows. Those are
+covered by tests of the host's switch handler joined to the real queue through
+register.ts's own wiring, with a stand-in engine, and by component tests of the window's
+question; "two windows" there is two series of calls to one host. The lines that pass
+the hold's name from the desktop task view and from the phone's task page are not
+executed by any test, and nothing here was seen on a phone.
 
 ## MCP and other capability gaps
 
