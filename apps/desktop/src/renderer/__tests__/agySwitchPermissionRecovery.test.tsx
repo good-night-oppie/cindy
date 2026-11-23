@@ -44,11 +44,11 @@ const TITLE = 'newChat.chatInput.agentSwitch.sendConfirmation.titleFromFullAcces
 const CONFIRM = 'newChat.chatInput.agentSwitch.sendConfirmation.confirm';
 const DECLINE = 'newChat.chatInput.agentSwitch.sendConfirmation.cancel';
 
-type ViewProps = { error: string | null; mode: string; onResend: () => void; remote?: boolean };
-function TaskView({ error, mode, onResend, remote = false }: ViewProps) {
+type ViewProps = { error: string | null; mode: string; onResend: () => void; remote?: boolean; agent?: string };
+function TaskView({ error, mode, onResend, remote = false, agent = 'claude-code' }: ViewProps) {
   const { confirm } = useConfirmDialog();
   const retry = useAgySwitchPermissionRecovery({
-    sessionId: 'task-1', error, runningAgent: 'claude-code', permissionMode: mode, remote, confirm, retry: onResend,
+    sessionId: 'task-1', error, runningAgent: agent, permissionMode: mode, remote, confirm, retry: onResend,
     pendingSwitchKey: h.intent ? `${h.intent.target}|${h.intent.agyPermissionRevision ?? ''}|${h.hostAgreed}` : null,
   });
   return <button type="button" onClick={retry}>Retry</button>;
@@ -277,6 +277,22 @@ describe('a message the host held for an unconfirmed permission change', () => {
     await waitFor(() => expect(onResend).toHaveBeenCalledTimes(1));
     expect(onResend).toHaveBeenCalledExactlyOnceWith('hold-1');
     expect(screen.queryByRole('alertdialog')).toBeNull();
+  });
+
+  // The host now holds a message that was held for the switch whenever something other than its
+  // own banner or "Continue sending" would send it (DD 7091620535, items 1 and 2), also once the
+  // task already runs Antigravity: another message applied the switch meanwhile. No switch is
+  // pending then and there is nothing to agree to; without this the banner's action did nothing.
+  it('on a task that already runs Antigravity, the banner’s action sends the held message it names, with no dialog and nothing sent by itself', async () => {
+    h.intent = null;
+    const onResend = vi.fn();
+    render(view({ error: HELD, mode: 'auto', onResend, agent: 'agy' }));
+    await settle();
+    expect(onResend).not.toHaveBeenCalled();
+    fireEvent.click(screen.getByRole('button', { name: 'Retry' }));
+    await waitFor(() => expect(onResend).toHaveBeenCalledExactlyOnceWith('hold-1'));
+    expect(screen.queryByRole('alertdialog')).toBeNull();
+    expect(h.registerWithHost).not.toHaveBeenCalled();
   });
 
   it('stops after one resend when the error is cleared and the host holds the message again', async () => {

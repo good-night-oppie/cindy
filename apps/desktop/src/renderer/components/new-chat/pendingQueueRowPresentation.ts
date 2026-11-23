@@ -2,7 +2,7 @@ import { isAnsweredAsyncQuestionClientId, isAsyncQuestionReplyClientId } from '@
 import { forwardedRequestDisplayText, isHookSchedulerOrigin } from '@cindy/maker-shared/message-source';
 import i18n from '@/i18n';
 import { isOrcaAutoBridgeBatch } from '@/lib/messageAutomationOrigin';
-import { queueItemVisibleSource, queueItemVisibleText } from '@cindy/maker-shared/queue';
+import { queueItemVisibleSource, queueItemVisibleText, queueItemHeldForAgySwitch } from '@cindy/maker-shared/queue';
 import { UI_ACTION_TRIGGER_PREFIX, type QueuedMessage } from '@/lib/makerChatStore';
 import { stripChatQuoteMarkerLines } from '@/lib/chatQuotes';
 import {
@@ -91,7 +91,7 @@ export function getPendingQueueRowPresentation(entry: QueuedMessage): PendingQue
     entry.text === CONTINUE_AFTER_APP_EXIT_PROMPT || entry.text === CONTINUE_AFTER_ERROR_PROMPT;
   const isPendingEnqueue = entry.isPendingEnqueue === true;
   const couldSteer = !isPendingEnqueue && (isOrca || isSession || !isMachineGenerated) && !isSyntheticTrigger && !isAnswered;
-  const steerHeldForAgySwitch = couldSteer && entry.awaitsAgySwitchConfirmation === true;
+  const steerHeldForAgySwitch = couldSteer && queueItemHeldForAgySwitch(entry);
 
   return {
     isOrca,

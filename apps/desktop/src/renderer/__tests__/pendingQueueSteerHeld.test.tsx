@@ -107,11 +107,11 @@ describe('"Interject" for a queued message held for a permission confirmation', 
     expect(onSteer.mock.calls).toEqual([['plain'], ['held']]);
   });
 
-  function renderBubble(entry: QueuedMessage) {
+  function renderBubble(entry: QueuedMessage, remoteTask = false) {
     const onSteer = vi.fn(async () => true);
     render(
       <PendingQueueBubble pluginUi={{} as never} entry={entry} index={0} count={2} editingClientId={null}
-        steeringClientIds={[]} editLocks={[]} interactionLocks={[]} onEdit={() => undefined}
+        steeringClientIds={[]} editLocks={[]} interactionLocks={[]} onEdit={() => undefined} remoteTask={remoteTask}
         onSteer={onSteer} onRemove={() => undefined} onMove={() => undefined} />,
     );
     const trigger = screen.getByRole('button', { name: i18n.t('newChat.pendingQueue.queued') });
@@ -138,6 +138,19 @@ describe('"Interject" for a queued message held for a permission confirmation', 
     expect(onSteer).not.toHaveBeenCalled();
     // Selecting it leaves the menu open with the reason still there.
     expect(screen.getByRole('menu').contains(described)).toBe(true);
+  });
+
+  // DD 7091620535, item 6; wording by JJ (7091858789). In a window that controls the task on
+  // another computer the permission change cannot be confirmed, so "waiting for you to confirm"
+  // is wrong there: the reason says where it is confirmed.
+  it('queue menu, on a computer that controls the task remotely: the reason says the change is confirmed on the computer the task runs on', () => {
+    const { onSteer, menu } = renderBubble(queued('held', true), true);
+    const item = within(menu).getByRole('menuitem', { name: new RegExp(interject()) });
+    const described = document.getElementById(item.getAttribute('aria-describedby')!);
+    expect(described?.textContent).toBe(i18n.t('newChat.pendingQueue.steerHeldForAgySwitchRemote'));
+    expect(described?.textContent).not.toBe(reason());
+    fireEvent.click(item);
+    expect(onSteer).not.toHaveBeenCalled();
   });
 
   it('queue menu: a message that is not held interjects as before and shows no reason', () => {

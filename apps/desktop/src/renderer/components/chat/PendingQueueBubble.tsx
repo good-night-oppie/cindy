@@ -24,6 +24,11 @@ export interface PendingQueueBubbleProps {
   steeringClientIds: readonly string[];
   editLocks: readonly string[];
   interactionLocks: readonly string[];
+  /**
+   * The task runs on another computer that this window controls. The permission change a held
+   * message waits for can only be confirmed on that computer, and the reason says so.
+   */
+  remoteTask?: boolean;
   readOnly?: boolean;
   localSend?: boolean;
   simplifiedBotConversation?: boolean;
@@ -45,6 +50,7 @@ export function PendingQueueBubble({
   editLocks,
   interactionLocks,
   readOnly,
+  remoteTask = false,
   localSend,
   simplifiedBotConversation = false,
   onEdit,
@@ -139,7 +145,7 @@ export function PendingQueueBubble({
                 <span className="flex min-w-0 flex-col gap-0.5">
                   <span className="opacity-50">{t('newChat.pendingQueue.steerAction')}</span>
                   <span id={steerHeldReasonId} className="whitespace-normal text-12 leading-[1.4] text-[var(--text-secondary)]">
-                    {t('newChat.pendingQueue.steerHeldForAgySwitch')}
+                    {t(remoteTask ? 'newChat.pendingQueue.steerHeldForAgySwitchRemote' : 'newChat.pendingQueue.steerHeldForAgySwitch')}
                   </span>
                 </span>
               </DropdownMenuItem>

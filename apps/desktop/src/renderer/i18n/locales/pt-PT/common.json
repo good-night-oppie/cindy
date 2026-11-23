@@ -14310,6 +14310,7 @@
       "botRowAria": "Mensagem em fila do amigo \"{{sender}}\"",
       "dragAria": "Arrastar a mensagem em fila {{index}} para reordenar",
       "steerHeldForAgySwitch": "Esta mensagem aguarda que confirme a alteração de permissões; até lá, não é possível usar “Orientar”.",
+      "steerHeldForAgySwitchRemote": "Esta mensagem aguarda que a alteração de permissões seja confirmada no computador onde a tarefa é executada; até lá, “Orientar” não está disponível para ela.",
       "steerAction": "Orientar",
       "steerRunningTip": "Encaminhar esta mensagem para a tarefa em curso sem a interromper; será tratada assim que a ação atual terminar",
       "steerPausedTip": "Continuar a tarefa e tratar esta mensagem primeiro",

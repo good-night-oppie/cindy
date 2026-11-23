@@ -14310,6 +14310,7 @@
       "botRowAria": "Message en file d'attente de l’ami « {{sender}} »",
       "dragAria": "Faire glisser le message en file d'attente {{index}} pour le réordonner",
       "steerHeldForAgySwitch": "Ce message attend que vous confirmiez le changement d'autorisations ; d'ici là, « Réorienter » n'est pas disponible.",
+      "steerHeldForAgySwitchRemote": "Ce message attend que le changement d'autorisations soit confirmé sur l'ordinateur où la tâche s'exécute ; d'ici là, « Réorienter » n'est pas disponible pour lui.",
       "steerAction": "Réorienter",
       "steerRunningTip": "Réorienter la tâche en cours d'exécution avec ce message, sans l'interrompre ; il sera traité une fois l'action en cours terminée",
       "steerPausedTip": "Reprendre la tâche en traitant d'abord ce message",

@@ -7581,6 +7581,12 @@ export function ChatInput({
       // 分支末尾的 isAgentSwitchEchoConfigConsistent)同样返 false —— 三元组落了不等于
       // 这份完整配置落了,调用方挂在 true 上的持久化收尾(清 override / 提交・删除收藏
       // 编辑 / 写收藏锚点)一律不做。只有完整配置原样成为权威意图 / 已应用才返 true。
+      // "The user has just agreed in this pick's dialog" belongs to this one call. It is read and
+      // cleared here, before anything below can return: left set by a call that stopped early (the
+      // settings lock, a send in flight, a declined context check), it would ride along with a
+      // later registration that showed no dialog (DD 7091620535, item 4).
+      const agreedInPickDialog = !!sessionId && agyAgreedInPickDialogRef.current === sessionId;
+      agyAgreedInPickDialogRef.current = null;
       if (!sessionId || settingsLocked) return false;
       // 发送的引用水合 / 预检也可能 await。以同步登记的 session 级发送 token 为准，
       // 防止「先点发送、后选引擎」被异步准备反转成先登记切换再 maker:send。
@@ -7706,10 +7712,9 @@ export function ChatInput({
         // Sent only with the registration that the pick's own dialog led to. Picking another
         // Gemini model, an effort, Fast or thinking afterwards shows no dialog and sends none:
         // what this window remembers may come from the task's entry or the permission menu, and
-        // the host keeps its own record across those registrations.
-        const agreedInThisPick = targetAgentKind === 'agy' && !deviceLinkDeviceId
-          && agyAgreedInPickDialogRef.current === sourceSessionId;
-        if (agyAgreedInPickDialogRef.current === sourceSessionId) agyAgreedInPickDialogRef.current = null;
+        // a new registration starts with no agreement on the host either: the next message that
+        // needs one asks.
+        const agreedInThisPick = targetAgentKind === 'agy' && !deviceLinkDeviceId && agreedInPickDialog;
         const agyPermissionAgreement = agreedInThisPick ? readAgySwitchPermissionAgreed(sourceSessionId) : undefined;
         const switchOptions = {
           ...(relocateTo !== undefined ? { agentDeviceId: relocateTo } : {}),

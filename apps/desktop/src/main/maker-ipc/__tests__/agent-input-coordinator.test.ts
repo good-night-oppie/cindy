@@ -6791,6 +6791,99 @@ describe('AgentInputCoordinator send transaction', () => {
       expect(host.dispatched).toEqual(['second']);
     });
 
+    // QQ's static review of 816dee58. The retry looked at the hold it named only when the task's
+    // banner was that of a held message. Arriving when the banner had become that of an ordinary
+    // undelivered message, or the error of a turn, it fell through to the ordinary retry and
+    // resent something the user had not clicked on. Each case with its control: the ordinary
+    // retry of the same state, which names nothing, still works.
+    it.each([
+      ['an ordinary undelivered message is at the head', false],
+      ['an ordinary undelivered message is at the head (control: a retry that names nothing)', true],
+    ])('a retry naming a hold retries nothing when %s', async (_name, ordinary) => {
+      const sid = `named-retry-vs-ordinary-head-${ordinary}`;
+      const { host, about } = await twoQueuedFirstHeld(sid);
+      const { h } = host;
+      h.coordinator.remove(sid, 'q-1');
+      h.coordinator.remove(sid, 'q-2');
+      await host.settle();
+      // An ordinary message fails to go out for a reason that has nothing to do with the switch.
+      h.sendToAgent.mockResolvedValueOnce(hostSendFailure('SEND_FAILED', 'not dispatched'));
+      h.coordinator.enqueue(sid, makeItem('q-9', 'ordinary'));
+      await host.settle();
+      const before = h.coordinator.getProjection(sid);
+      expect(before.recovery).toEqual({ kind: 'queue-head', clientId: 'q-9' });
+      expect(before.pendingQueue[0]?.awaitsAgySwitchConfirmation).toBeUndefined();
+      const tried = h.sendToAgent.mock.calls.length;
+      await host.confirmToSendNamingNoMessage();
+      await host.settle();
+
+      await h.coordinator.retryLastError(sid, ordinary ? undefined : about);
+      await host.settle();
+      if (ordinary) {
+        expect(host.dispatched).toEqual(['ordinary']);
+      } else {
+        expect(h.sendToAgent).toHaveBeenCalledTimes(tried);
+        expect(host.dispatched).toEqual([]);
+        const after = h.coordinator.getProjection(sid);
+        expect(after.recovery).toEqual(before.recovery);
+        expect(after.error).toBe(before.error);
+        expect(after.pendingQueue.map((q) => q.clientId)).toEqual(['q-9']);
+      }
+    });
+
+    it.each([
+      ['the error of a turn is showing', false],
+      ['the error of a turn is showing (control: a retry that names nothing)', true],
+    ])('a retry naming a hold retries nothing when %s', async (_name, ordinary) => {
+      const sid = `named-retry-vs-turn-error-${ordinary}`;
+      const h = createHarness();
+      const failed = makeItem('q-9', 'another turn');
+      h.coordinator.enqueue(sid, failed);
+      await flush();
+      h.setRunning(false);
+      h.coordinator.onTurnEvent(sid, 'error', 'the turn failed');
+      await flush();
+      const before = h.coordinator.getProjection(sid);
+      expect(before.recovery).toEqual({ kind: 'active-turn', item: failed });
+      expect(h.sendToAgent).toHaveBeenCalledTimes(1);
+
+      // The retry of a window that was showing a held message, arriving now.
+      await h.coordinator.retryLastError(sid, ordinary ? undefined : 'the-hold-of-a-message-held-earlier');
+      await flush();
+      await flush();
+      if (ordinary) {
+        expect(h.sendToAgent).toHaveBeenCalledTimes(2);
+      } else {
+        expect(h.sendToAgent).toHaveBeenCalledTimes(1);
+        const after = h.coordinator.getProjection(sid);
+        expect(after.recovery).toEqual(before.recovery);
+        expect(after.error).toBe(before.error);
+        expect(after.pendingQueue).toEqual([]);
+      }
+    });
+
+    // QQ's A1: an answer is not used once the user has pressed Stop after the question opened.
+    it('the user stops the queue while the question is open: the answer is recorded and sends nothing, then or later; Continue sending sends the message once', async () => {
+      const sid = 'stopped-while-question-open';
+      const { host, about } = await twoQueuedFirstHeld(sid);
+      const { h } = host;
+      h.coordinator.stop(sid, { keepQueue: true, pauseQueue: true });
+      await host.settle();
+      expect(h.coordinator.getProjection(sid).queuePaused).toBe(true);
+
+      expect(await host.confirmToSend(undefined, about)).toMatchObject({ agyPermissionAgreementRecorded: true });
+      await host.retry(about);
+      await host.settle();
+      expect(host.pendingSwitches.get(sid)?.agyPermissionAgreementForSend).toBeUndefined();
+      expect(host.dispatched).toEqual([]);
+      expect(h.coordinator.getProjection(sid).queuePaused).toBe(true);
+      expect(h.coordinator.getProjection(sid).pendingQueue.map((q) => q.clientId)).toEqual(['q-1', 'q-2']);
+
+      h.coordinator.resume(sid);
+      await host.settle();
+      expect(host.dispatched).toEqual(['first']);
+    });
+
     it('an answer whose message was removed, with nothing queued behind it, does not hold a message sent afterwards', async () => {
       const sid = 'removed-then-a-new-message';
       const host = hostWithQueue(sid);
@@ -7067,16 +7160,79 @@ describe('AgentInputCoordinator send transaction', () => {
     expect(h.steerToAgent).toHaveBeenCalledTimes(1);
     expect(h.coordinator.getProjection(sid).pendingQueue.map((q) => q.clientId)).toEqual(['q-1']);
 
-    // The turn ends; the user has confirmed and continues: the held message goes out, once.
+    // DD 7091620535, item 2. Interjecting the other message released the pause that followed
+    // the closed banner, and when its turn ended the held message went out by itself, with no
+    // action of the user's on it. Interjecting sends the interjected message only: when its turn
+    // ends the queue is paused in front of the held one again, as it was (QQ 2026-11-23). The
+    // engine is not asked and no banner is raised.
+    h.sendToAgent.mockImplementation(async () => { h.setRunning(true); return sendSuccess(); });
     h.setRunning(false);
     h.coordinator.onTurnEvent(sid, 'done');
     await flush();
-    h.sendToAgent.mockImplementation(async () => { h.setRunning(true); return sendSuccess(); });
+    await flush();
+    expect(h.sendToAgent).toHaveBeenCalledTimes(1);
+    const again = h.coordinator.getProjection(sid);
+    expect(again.pendingQueue.map((q) => q.clientId)).toEqual(['q-1']);
+    expect(again.queuePaused).toBe(true);
+    expect(again.recovery).toBeNull();
+    expect(again.error).toBeNull();
+
+    // "Continue sending": it goes out, once.
     h.coordinator.resume(sid);
     await flush();
     await flush();
     expect(h.sendToAgent).toHaveBeenCalledTimes(2);
     expect(h.sendToAgent.mock.calls[1]?.[1]).toMatchObject({ content: 'held' });
+  });
+
+  // DD 7091620535, item 1. A held message is stored with its mark. After a restart the queue is
+  // only "paused by the restart", which a new message from the composer releases: the held
+  // message went out first, on a send that was about the new one. The same with Stop and
+  // "resume on the next message". Through the host's entry as above; the engine stand-in lets
+  // everything through once the switch is agreed to, as the real send step does.
+  it.each([
+    ['after a restart', true],
+    ['after Stop with "resume on the next message"', false],
+  ])('a new message sent %s is only queued behind the held message: nothing is sent and the queue stays paused; Continue sending sends the held one, then the new one', async (_name, restart) => {
+    const sid = `held-then-new-message-${restart ? 'restart' : 'stop'}`;
+    const before = hostWithQueue(sid);
+    await before.pick(false);
+    await before.h.coordinator.ensureQueueRestored(sid);
+    before.h.coordinator.enqueue(sid, makeItem('q-1', 'held'));
+    await before.settle();
+    let host = before;
+    if (restart) {
+      const snapshot = JSON.parse(JSON.stringify(before.h.persistQueueSnapshot.mock.calls.at(-1)?.[1] ?? []));
+      expect(snapshot).toMatchObject([{ clientId: 'q-1', awaitsAgySwitchConfirmation: true }]);
+      host = hostWithQueue(sid);
+      host.h.setLoadQueueSnapshot(async () => snapshot);
+      await host.h.coordinator.ensureQueueRestored(sid);
+    } else {
+      host.h.coordinator.stop(sid, { keepQueue: true, pauseQueue: true, resumeOnUserInput: true });
+      await host.settle();
+    }
+    const { h } = host;
+    expect(h.coordinator.getProjection(sid).queuePaused).toBe(true);
+    // The engine is picked again and the conversion agreed to in the picker's dialog: recorded only.
+    await host.pick(true);
+    await host.settle();
+    expect(host.dispatched).toEqual([]);
+
+    h.coordinator.enqueue(sid, makeItem('q-2', 'new'), { resumeRestorePausedQueue: true });
+    await host.settle();
+    expect(host.dispatched).toEqual([]);
+    expect(h.sendToAgent).toHaveBeenCalledTimes(restart ? 0 : 1);
+    const held = h.coordinator.getProjection(sid);
+    expect(held.pendingQueue.map((q) => q.clientId)).toEqual(['q-1', 'q-2']);
+    expect(held.queuePaused).toBe(true);
+    expect(held.recovery).toBeNull();
+    expect(held.error).toBeNull();
+
+    h.coordinator.resume(sid);
+    await host.settle();
+    expect(host.dispatched).toEqual(['held']);
+    await host.turnEnds();
+    expect(host.dispatched).toEqual(['held', 'new']);
   });
 
   // cindy#19, found while answering JJ on 7081611824: a held message whose switch is no longer

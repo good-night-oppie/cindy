@@ -14141,6 +14141,7 @@
       "botRowAria": "同伴「{{sender}}」遣来之排队讯",
       "dragAria": "拖第 {{index}} 条待遣之讯以排序",
       "steerHeldForAgySwitch": "此讯候君确认权限之改，未确认前不可插话。",
+      "steerHeldForAgySwitchRemote": "此讯候任务所在之电脑确认权限之改，未确认前不可插话。",
       "steerAction": "插话",
       "steerRunningTip": "插话于今之差事，不中断方行之工，今之举毕后先理此讯",
       "steerPausedTip": "续差事，并先理此讯",

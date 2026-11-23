@@ -14195,6 +14195,7 @@
       "botRowAria": "Queued message from buddy “{{sender}}”",
       "dragAria": "Drag queued message {{index}} to reorder",
       "steerHeldForAgySwitch": "This message is waiting for you to confirm the permission change, so it can't steer yet.",
+      "steerHeldForAgySwitchRemote": "This message is waiting for the permission change to be confirmed on the computer the task runs on, so it can't steer yet.",
       "steerAction": "Steer",
       "steerRunningTip": "Steer this message into the running task without interrupting it; handled once the current action finishes",
       "steerPausedTip": "Continue the task and handle this message first",

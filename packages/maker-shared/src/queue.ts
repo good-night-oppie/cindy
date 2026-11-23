@@ -121,6 +121,17 @@ export function buildQueuePanelSummary(
 }
 
 /**
+ * Whether the host holds this queued message for the user's agreement to the permission change
+ * of a switch into Antigravity. The one definition of it for every surface that shows a queue
+ * (the desktop bubble and its shortcut, the phone): such a message cannot be interjected, and
+ * each surface says so where it would offer "Interject", unless a lock it knows about already
+ * makes the row unavailable for another reason.
+ */
+export function queueItemHeldForAgySwitch(item: { awaitsAgySwitchConfirmation?: unknown }): boolean {
+  return item.awaitsAgySwitchConfirmation === true;
+}
+
+/**
  * Which hold of which message a task's error banner is about, when that message is one the host
  * holds for a switch into Antigravity: the host's own name for the hold (`agySwitchHoldId`), read
  * from the queue as the screen shows it. A client reads it when the user acts on that banner
@@ -139,7 +150,7 @@ export function agySwitchHeldMessageOf(projection: {
   const recovery = projection.recovery && typeof projection.recovery === 'object'
     ? projection.recovery as { kind?: unknown; clientId?: unknown } : null;
   if (!head || !recovery || recovery.kind !== 'queue-head' || recovery.clientId !== head.clientId) return null;
-  if (head.awaitsAgySwitchConfirmation !== true) return null;
+  if (!queueItemHeldForAgySwitch(head)) return null;
   return typeof head.agySwitchHoldId === 'string' && head.agySwitchHoldId.length > 0 ? head.agySwitchHoldId : null;
 }
 
@@ -184,7 +195,7 @@ export function buildQueueRowPresentation(input: {
 
   // Held by the host for the user's agreement to a permission change. Only for a message that
   // could be interjected otherwise; its other actions are untouched.
-  const steerHeldForAgySwitch = input.item.awaitsAgySwitchConfirmation === true
+  const steerHeldForAgySwitch = queueItemHeldForAgySwitch(input.item)
     && !baseDisabledReason && !syntheticEditReason && !autoSentReason;
   const heldSteerReason = steerHeldForAgySwitch
     ? presentationText(localizer, 'message.queuePresentation.row.steerHeldForAgySwitch', '这条消息在等任务所在的电脑确认权限的改变，确认前不能插话。')

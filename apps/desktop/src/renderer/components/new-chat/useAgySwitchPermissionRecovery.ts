@@ -98,7 +98,9 @@ export function useAgySwitchPermissionRecovery(input: {
       // With no switch into Antigravity pending any more there is nothing to agree to, and the
       // host would only refuse the held message again: it was written for an engine the task is
       // not going to. The banner says so ("that switch is no longer pending") instead.
-      if (agreed && makerChatStore.getAgentSwitchIntent(sessionId)?.target === 'agy') retry(heldMessage);
+      // A task that already runs Antigravity has no switch left to agree to, and the message was
+      // written for the engine it runs on: the click on its banner is what sends it.
+      if (agreed && (makerChatStore.getAgentSwitchIntent(sessionId)?.target === 'agy' || runningAgent === 'agy')) retry(heldMessage);
     } catch {
       // The host did not record the agreement: the message stays held and the banner stays.
       toast.error(t('newChat.chatInput.agentSwitch.permissionAgreementNotRecorded'));
