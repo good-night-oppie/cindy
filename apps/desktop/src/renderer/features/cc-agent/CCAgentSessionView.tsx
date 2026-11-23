@@ -51,7 +51,7 @@ import { CindyMakeSessionGate } from './CindyMakeSessionGate';
 import { SessionRouteOriginGate } from './SessionRouteOriginGate';
 import { usePluginSkillSetup } from './pluginSkillSetup';
 import { useBotIslandVisibleSession } from '@/features/bots/useBotIslandVisibleSession';
-import { dbToMakerAgentKind, isLaunchableDbAgentKind, normalizeDbAgentKind } from '../../../shared/agentKindConversion';
+import { agySwitchPermissionChange, dbToMakerAgentKind, isLaunchableDbAgentKind, normalizeDbAgentKind } from '../../../shared/agentKindConversion';
 import { useTranslation } from 'react-i18next';
 import { buildSessionDeepLink } from '@/lib/deepLink';
 import {
@@ -5631,6 +5631,7 @@ function CCAgentSessionContent({
                 deviceLinkDeviceId={remoteDeviceId}
                 deviceLinkDeviceName={controlledDeviceName}
                 agySwitchPending={agentSwitchIntent?.target === 'agy'}
+                agySwitchKeepsPermissions={agySwitchPermissionChange(session?.permissionMode) === null}
                 agentDeviceId={session?.agentDeviceId}
                 modelId={session?.model}
                 providerId={session?.providerId}

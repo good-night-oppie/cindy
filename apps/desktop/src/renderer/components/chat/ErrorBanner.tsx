@@ -124,6 +124,12 @@ interface ErrorBannerProps {
    * banner says to pick the model again. Undefined is read as pending.
    */
   agySwitchPending?: boolean;
+  /**
+   * The task's permission mode is one Antigravity keeps as it is: the pending switch changes no
+   * permission, so there is nothing to review. The held message still goes only on the user's
+   * own action, and the banner says that, with a button named for what it does (JJ 7090463421).
+   */
+  agySwitchKeepsPermissions?: boolean;
   /** 当前 session 的 model id。用于判断 OpenAI/ChatGPT 连接来源及桥接模型。 */
   modelId?: string;
   /** 当前会话显式选择的模型来源。OpenAI 重连只能处理 openai / 无显式来源的历史会话；
@@ -195,6 +201,7 @@ export function ErrorBanner({
   deviceLinkDeviceId,
   deviceLinkDeviceName,
   agySwitchPending,
+  agySwitchKeepsPermissions = false,
   modelId,
   providerId,
   onSwitchToClaudeSubscription,
@@ -575,7 +582,9 @@ export function ErrorBanner({
         : t('chat.errorBanner.agentSwitchPermissionUnconfirmedRemote')
       : agySwitchPending === false
         ? t('chat.errorBanner.agentSwitchPermissionSwitchGone')
-        : t('chat.errorBanner.agentSwitchPermissionUnconfirmed');
+        : agySwitchKeepsPermissions
+          ? t('chat.errorBanner.agentSwitchPermissionKept')
+          : t('chat.errorBanner.agentSwitchPermissionUnconfirmed');
   } else if (isCredentialSwitchBusy) {
     displayError = t('chat.errorBanner.credentialSwitchBusy');
   } else if (isAccountBoundaryPending) {
@@ -1012,7 +1021,9 @@ export function ErrorBanner({
               title={reviewsHeldPermission ? undefined : t('chat.errorBanner.retryTitle')}
             >
               {!reviewsHeldPermission && <RotateCcw size={12} />}
-              {reviewsHeldPermission ? t('chat.errorBanner.agentSwitchPermissionReview') : t('chat.errorBanner.retry')}
+              {reviewsHeldPermission
+                ? t(agySwitchKeepsPermissions ? 'chat.errorBanner.agentSwitchPermissionKeptSend' : 'chat.errorBanner.agentSwitchPermissionReview')
+                : t('chat.errorBanner.retry')}
             </Button>
           )}
           {(showHistoryRecovery || showInvalidEncryptedContentRecovery) && onForkStripEncrypted && (

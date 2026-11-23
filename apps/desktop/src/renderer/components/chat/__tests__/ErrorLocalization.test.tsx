@@ -334,6 +334,28 @@ it.each([['en', en], ['zh-CN', zhCN]] as const)('presents a held permission conf
   expect(onRetry).toHaveBeenCalledExactlyOnceWith('the held message');
 });
 
+// JJ 7090463421. A held message, a switch pending again, and the task in a mode Antigravity keeps
+// as it is: the banner used to say that the switch "changes this task's permissions" and offer
+// "Review and confirm", with nothing to review; the click simply sent the message. It says that
+// the permissions do not change and that the message goes when Send is selected, and the button
+// is named Send. Where the mode is rewritten the banner is unchanged (the test above).
+it.each([['en', en], ['zh-CN', zhCN]] as const)('says that nothing changes and offers Send when the pending switch keeps the task\u2019s permissions (%s)', async (lng, strings) => {
+  const i18n = createInstance();
+  await i18n.init({ lng, resources: { [lng]: { translation: strings } } });
+  const onRetry = vi.fn();
+  render(<I18nextProvider i18n={i18n}><ErrorBanner
+    error="AGENT_SWITCH_PERMISSION_UNCONFIRMED: The pending switch to Antigravity would change this task's permissions"
+    retryText="the held message" onRetry={onRetry} onCancel={vi.fn()} agySwitchPending agySwitchKeepsPermissions /></I18nextProvider>);
+  expect(screen.getByText(strings.chat.errorBanner.agentSwitchPermissionKept)).toBeTruthy();
+  expect(screen.queryByText(strings.chat.errorBanner.agentSwitchPermissionUnconfirmed)).toBeNull();
+  expect(screen.queryByRole('button', { name: strings.chat.errorBanner.agentSwitchPermissionReview })).toBeNull();
+  // The sentence names the button exactly as the button reads.
+  expect(strings.chat.errorBanner.agentSwitchPermissionKept).toContain(strings.chat.errorBanner.agentSwitchPermissionKeptSend);
+  const send = screen.getByRole('button', { name: strings.chat.errorBanner.agentSwitchPermissionKeptSend });
+  fireEvent.click(send);
+  expect(onRetry).toHaveBeenCalledExactlyOnceWith('the held message');
+});
+
 // QQ's ruling on restarts: the pending switch does not survive a restart, the held message does.
 // With no switch pending there is nothing to review. DD 7080449825: a button that resends only
 // to be refused again looks like a button that does nothing, on a banner that cannot be closed.
