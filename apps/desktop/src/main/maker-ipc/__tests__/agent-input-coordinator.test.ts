@@ -6891,6 +6891,11 @@ describe('AgentInputCoordinator send transaction', () => {
       const before = h.coordinator.getProjection(sid);
       expect(before.queuePaused).toBe(true);
       expect(before.pendingQueue.map((q) => q.clientId)).toEqual(['q-1', 'q-2']);
+      // What the task view draws from: no error, so no banner of the held message with a button
+      // that would ask and then send nothing; a paused queue, which shows "Continue sending".
+      // Going back used to leave the banner up over the paused queue.
+      expect(before.error).toBeNull();
+      expect(before.recovery).toBeNull();
       // Nothing asked earlier names the held message any more.
       expect(before.pendingQueue[0]?.agySwitchHoldId).toEqual(expect.any(String));
       expect(before.pendingQueue[0]?.agySwitchHoldId).not.toBe(about);

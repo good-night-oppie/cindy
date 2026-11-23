@@ -2046,6 +2046,19 @@ export class AgentInputCoordinator {
     this.endAgySwitchQuestions(state);
     state.queuePaused = state.pendingQueue.length > 0 || state.pendingCompacts.length > 0;
     state.heldSwitchPause = false;
+    // The banner of a message held for a switch into Antigravity would stay up over a queue that
+    // is now paused: its button would ask, record the agreement and send nothing, since only
+    // "Continue sending" starts a paused queue. It is taken down as if the user had closed it;
+    // the message stays where it is and the paused queue shows "Continue sending".
+    const heldHead = state.recovery?.kind === 'queue-head' ? state.pendingQueue[0] : undefined;
+    if (state.queuePaused && heldHead && state.recovery?.kind === 'queue-head'
+      && heldHead.clientId === state.recovery.clientId && heldHead.awaitsAgySwitchConfirmation === true) {
+      state.error = null;
+      clearErrorProjectionSignals(state);
+      state.stickyError = null;
+      state.recovery = null;
+      state.heldSwitchPause = true;
+    }
     state.queuePausedByRestore = false;
     this.emit(sessionId);
     return this.getProjection(sessionId);
