@@ -254,6 +254,22 @@ export function agySwitchPendingKey(intent: AgySwitchPermissionPendingIntent | n
  * the task, not from another computer (the host takes no agreement from one), and not while a
  * held message's banner is up, which is the same question with a resend attached.
  */
+/**
+ * A message held for a switch into Antigravity, in a queue that is paused: the user stopped the
+ * queue or went back in the task's history, or closed the banner in another window. The host
+ * starts a paused queue on "Continue sending" only, so the held message's banner would offer an
+ * action ("Review and confirm", "Send") that asks, records the agreement and sends nothing. The
+ * task view shows neither that banner nor its question then; the paused queue's own
+ * "Continue sending", shown below the messages, is the way on. Only this error: every other
+ * error keeps its banner over a paused queue, and so does this one once the queue runs again
+ * (after a restart, "Continue sending" brings it back with what to do next).
+ */
+export function heldMessageBannerYieldsToPausedQueue(input: {
+  error: string | null | undefined; queuePaused: boolean;
+}): boolean {
+  return input.queuePaused && isAgentSwitchPermissionUnconfirmedError(input.error);
+}
+
 export function agySwitchPermissionEntryIsOffered(input: {
   readOnly: boolean; remote: boolean; error: string | null | undefined;
 }): boolean {

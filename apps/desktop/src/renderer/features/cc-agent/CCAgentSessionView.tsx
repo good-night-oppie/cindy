@@ -180,7 +180,7 @@ import { Tip } from '@/components/ui/tooltip';
 import { RunningTokenCount } from './RunningTokenCount';
 import { useConfirmDialog } from '@/components/ui/confirm-dialog-provider';
 import { useAgySwitchPermissionRecovery } from '@/components/new-chat/useAgySwitchPermissionRecovery';
-import { agySwitchPendingKey, agySwitchPermissionEntryIsOffered } from '@/components/new-chat/agentSwitchConfirmation';
+import { agySwitchPendingKey, agySwitchPermissionEntryIsOffered, heldMessageBannerYieldsToPausedQueue } from '@/components/new-chat/agentSwitchConfirmation';
 import { AgySwitchPermissionPendingNotice } from '@/components/chat/AgySwitchPermissionPendingNotice';
 import { useSilentEncryptedRetry } from '@/hooks/useSilentEncryptedRetry';
 import { TodaySpendChip } from '@/components/status/TodaySpendChip';
@@ -4793,9 +4793,11 @@ function CCAgentSessionContent({
 
   // A message the host held until the pending switch's permission change is agreed to: ask here,
   // and resend it once on agreement, instead of leaving the user with a generic error to decode.
+  // Over a paused queue the held message's banner and its question give way to "Continue sending".
+  const heldBannerYieldsToPausedQueue = heldMessageBannerYieldsToPausedQueue({ error, queuePaused });
   const handleRetryAfterAgySwitchAgreement = useAgySwitchPermissionRecovery({
     sessionId,
-    error: readOnly ? null : error,
+    error: readOnly || heldBannerYieldsToPausedQueue ? null : error,
     runningAgent: session ? dbToMakerAgentKind(session.agentKind) : null,
     permissionMode: session?.permissionMode,
     remote: remoteDeviceId != null,
@@ -5605,7 +5607,7 @@ function CCAgentSessionContent({
               )}
 
             {/* 只隐藏已有同一错误活动行的过载重试；认证、额度等操作入口照常保留。 */}
-            {!readOnly && error && !hasInlineOverloadRetry({
+            {!readOnly && error && !heldBannerYieldsToPausedQueue && !hasInlineOverloadRetry({
               error,
               errorReason,
               isRecoverable: errorIsRecoverable,

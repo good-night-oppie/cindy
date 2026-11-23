@@ -10,6 +10,7 @@ import {
   agreeToPendingAgySwitchPermission, agySwitchPendingKey, agySwitchPermissionEntryIsOffered,
   forgetAgySwitchPermissionAgreed, noteAgySwitchPermissionAgreed, readAgySwitchPermissionAgreed,
   type AgySwitchPermissionPendingIntent,
+  heldMessageBannerYieldsToPausedQueue,
 } from '@/components/new-chat/agentSwitchConfirmation';
 import { AgySwitchPermissionPendingNotice } from '@/components/chat/AgySwitchPermissionPendingNotice';
 import { useAgySwitchPermissionRecovery } from '@/components/new-chat/useAgySwitchPermissionRecovery';
@@ -54,6 +55,32 @@ function TaskView({ error, mode, onResend, remote = false, agent = 'claude-code'
   return <button type="button" onClick={retry}>Retry</button>;
 }
 const view = (props: ViewProps) => <ConfirmDialogProvider><TaskView {...props} /></ConfirmDialogProvider>;
+
+/**
+ * The part of the task view that a held message and a paused queue meet in, put together as
+ * CCAgentSessionView does it: the banner (its action here) is drawn from the projection's error,
+ * the "Continue sending" row from its queuePaused, and the held message's banner and question
+ * give way over a paused queue. `projection` stands for what the host reports.
+ */
+type Projection = { error: string | null; queuePaused: boolean };
+function TaskArea({ projection, mode, onResend, onContinue }: {
+  projection: Projection; mode: string; onResend: () => void; onContinue: () => void;
+}) {
+  const { confirm } = useConfirmDialog();
+  const yields = heldMessageBannerYieldsToPausedQueue(projection);
+  const retry = useAgySwitchPermissionRecovery({
+    sessionId: 'task-1', error: yields ? null : projection.error, runningAgent: 'claude-code', permissionMode: mode,
+    remote: false, confirm, retry: onResend,
+    pendingSwitchKey: h.intent ? `${h.intent.target}|${h.intent.agyPermissionRevision ?? ''}|${h.hostAgreed}` : null,
+  });
+  return (
+    <>
+      {projection.error && !yields && <button type="button" onClick={retry}>Banner action</button>}
+      {projection.queuePaused && <button type="button" onClick={onContinue}>Continue sending</button>}
+    </>
+  );
+}
+const area = (props: Parameters<typeof TaskArea>[0]) => <ConfirmDialogProvider><TaskArea {...props} /></ConfirmDialogProvider>;
 const settle = () => act(async () => { await Promise.resolve(); });
 
 // DD 7085158660, item 5. This window remembered an answer about another mode (the user had
@@ -293,6 +320,55 @@ describe('a message the host held for an unconfirmed permission change', () => {
     await waitFor(() => expect(onResend).toHaveBeenCalledExactlyOnceWith('hold-1'));
     expect(screen.queryByRole('alertdialog')).toBeNull();
     expect(h.registerWithHost).not.toHaveBeenCalled();
+  });
+
+  // QQ on d3db8512. The host starts a paused queue on "Continue sending" only and refuses the
+  // banner's answer while it is paused. The view drew the banner from the error alone, so over a
+  // paused queue (the user went back in the task's history; an older host after Stop) it still
+  // offered "Review and confirm" or "Send", which asked, recorded and sent nothing, and the
+  // automatic question could open by itself. Over a paused queue the held message's banner and
+  // its question now give way to "Continue sending".
+  it('over a paused queue shows no banner action and asks nothing for a held message; Continue sending is offered and is what the user uses', async () => {
+    const onResend = vi.fn();
+    const onContinue = vi.fn();
+    const shown = render(area({ projection: { error: HELD, queuePaused: true }, mode: 'bypassPermissions', onResend, onContinue }));
+    await settle();
+    await settle();
+    expect(screen.queryByText(TITLE)).toBeNull();
+    expect(screen.queryByRole('alertdialog')).toBeNull();
+    expect(screen.queryByRole('button', { name: 'Banner action' })).toBeNull();
+    fireEvent.click(screen.getByRole('button', { name: 'Continue sending' }));
+    expect(onContinue).toHaveBeenCalledTimes(1);
+    expect(onResend).not.toHaveBeenCalled();
+    expect(h.registerWithHost).not.toHaveBeenCalled();
+
+    // The host tries the message and holds it again, the queue running: its own banner is back
+    // and asks, and the answer on it sends the message once.
+    shown.rerender(area({ projection: { error: HELD, queuePaused: false }, mode: 'bypassPermissions', onResend, onContinue }));
+    fireEvent.click(await screen.findByRole('button', { name: CONFIRM }));
+    await waitFor(() => expect(onResend).toHaveBeenCalledExactlyOnceWith('hold-1'));
+    expect(h.registerWithHost.mock.calls[0]?.[6]).toMatchObject({ agyPermissionAgreementForSend: true, agyPermissionHeldMessage: 'hold-1' });
+    expect(onContinue).toHaveBeenCalledTimes(1);
+  });
+
+  it.each([
+    ['an ordinary undelivered message', 'SEND_FAILED: not dispatched'],
+    ['a failed turn', 'the turn failed'],
+  ])('keeps the banner of %s over a paused queue, with its ordinary retry', async (_name, error) => {
+    const onResend = vi.fn();
+    render(area({ projection: { error, queuePaused: true }, mode: 'bypassPermissions', onResend, onContinue: vi.fn() }));
+    await settle();
+    expect(screen.queryByRole('alertdialog')).toBeNull();
+    fireEvent.click(screen.getByRole('button', { name: 'Banner action' }));
+    expect(onResend).toHaveBeenCalledTimes(1);
+    expect(screen.getByRole('button', { name: 'Continue sending' })).toBeTruthy();
+  });
+
+  it('gives way only for a held message over a paused queue', () => {
+    expect(heldMessageBannerYieldsToPausedQueue({ error: HELD, queuePaused: true })).toBe(true);
+    expect(heldMessageBannerYieldsToPausedQueue({ error: HELD, queuePaused: false })).toBe(false);
+    expect(heldMessageBannerYieldsToPausedQueue({ error: 'SEND_FAILED: x', queuePaused: true })).toBe(false);
+    expect(heldMessageBannerYieldsToPausedQueue({ error: null, queuePaused: true })).toBe(false);
   });
 
   it('stops after one resend when the error is cleared and the host holds the message again', async () => {
