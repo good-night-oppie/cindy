@@ -385,11 +385,13 @@ export interface MakerSessionAgentSwitchHandlerDeps {
    */
   onUserRouteSelectionLanded?(sessionId: string): void | Promise<void>;
   /**
-   * The permission change of the task's pending switch into Antigravity has just been agreed to
-   * on this computer: with the registration (the model picker) or for a switch already pending.
-   * The host lets a message that was held for exactly that go on.
+   * The permission change of the task's pending switch into Antigravity is being agreed to on
+   * this computer, on the banner of a held message, so that this message goes. `heldMessage` is
+   * the hold the user was asked about, as the caller sent it (agySwitchHoldId; anything else
+   * when it sent none). Returns whether the queue still held that message in that hold and let
+   * it go; when it did not, the agreement is recorded as one given for no send.
    */
-  onPendingSwitchAgreed?(sessionId: string): void;
+  onPendingSwitchAgreed?(sessionId: string, heldMessage: unknown): boolean;
   /**
    * A pending switch that puts back the model a schedule had replaced has been applied. The host
    * retires the saved model before the apply step goes on: the caller may be a schedule about to
@@ -617,6 +619,11 @@ export function recordAgySwitchPermissionAgreement(
     /** A change of mode being confirmed: the mode the user is changing to, and the one the caller saw the task in. */
     changingTo?: unknown;
     changingFrom?: unknown;
+    /**
+     * For an agreement given for a send: which hold of which message the user was asked about
+     * (agySwitchHoldId), as the window read it when the question opened.
+     */
+    heldMessage?: unknown;
   },
 ): boolean {
   const parsed = parseAgySwitchPermissionAgreement(agreement);
@@ -652,6 +659,13 @@ export function recordAgySwitchPermissionAgreement(
   // Where the switch came from (configuration, an agent, the user) and everything else it carries
   // are untouched for the same reason.
   const replaced = pending.agyPermissionAgreement;
+  // An agreement is "given for a send" of one message: the one whose banner asked. The queue
+  // says whether that message, in that hold, is still the one waiting, and lets it go if so. If
+  // it is not (removed, edited, merged, another one held since) or the caller did not say which
+  // message (an older window), the agreement is still a valid answer about the permissions and is
+  // recorded, but for no send: nothing is let go and the message held now waits for its own
+  // answer (QQ, 2026-11-23). Nothing is awaited between this and the write below.
+  if (forSend) forSend = deps.onPendingSwitchAgreed?.(sessionId, check?.heldMessage) === true;
   pending.agyPermissionAgreement = parsed;
   // "Given for a send" is said of one agreement. It stays when the very same agreement is
   // recorded again without it (the entry confirming what a send had agreed to); it does not pass
@@ -662,7 +676,6 @@ export function recordAgySwitchPermissionAgreement(
   const report = projectPendingAgentSwitchIntent(pending)!;
   if (deps.onPendingSwitchAgreementChanged) deps.onPendingSwitchAgreementChanged(sessionId, report);
   else deps.onPendingSwitchChanged?.(sessionId, report);
-  if (forSend) deps.onPendingSwitchAgreed?.(sessionId);
   return true;
 }
 
@@ -2076,6 +2089,7 @@ export function registerMakerSessionAgentSwitchHandler(
         const answer = options as {
           agyPermissionAgreement?: unknown; agyPermissionRevision?: unknown; agyPermissionAgreementForSend?: unknown;
           agyPermissionAgreementExpected?: unknown; agyPermissionChangingTo?: unknown; agyPermissionChangingFrom?: unknown;
+          agyPermissionHeldMessage?: unknown;
         };
         const fromThisComputer = !isDeviceLinkInvoke();
         const record = async () => {
@@ -2089,6 +2103,7 @@ export function registerMakerSessionAgentSwitchHandler(
               expected: answer.agyPermissionAgreementExpected,
               changingTo: answer.agyPermissionChangingTo,
               changingFrom: answer.agyPermissionChangingFrom,
+              heldMessage: answer.agyPermissionHeldMessage,
             });
           return {
             switched: false, agentKind: 'agy' as const, model: typeof model === 'string' ? model : '', engineReady: true,

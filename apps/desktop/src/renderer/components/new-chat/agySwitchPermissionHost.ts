@@ -48,12 +48,20 @@ export function recordAgySwitchPermissionAgreementWithHost(
    * about the mode the task is in.
    */
   changing?: { to: string; from: string | null | undefined },
+  /**
+   * With 'send': which hold of which message the user was asked about, as this window read it
+   * when the question opened (makerChatStore.getAgySwitchHeldMessage). The host lets a message go
+   * only if the one it holds then is still that one; otherwise, or without it, the agreement is
+   * recorded and nothing is sent.
+   */
+  heldMessage?: string | null,
 ): Promise<unknown> {
   return makerApiFor(sessionId).switchSessionAgent(
     sessionId, 'agy', askedAbout.model, askedAbout.providerId, askedAbout.effort, askedAbout.fastMode,
     {
       agyPermissionAgreement: agreement, agyPermissionAgreementOnly: true,
       ...(purpose === 'send' ? { agyPermissionAgreementForSend: true } : {}),
+      ...(purpose === 'send' && heldMessage ? { agyPermissionHeldMessage: heldMessage } : {}),
       ...(askedAbout.agyPermissionAgreement ? { agyPermissionAgreementExpected: askedAbout.agyPermissionAgreement } : {}),
       ...(changing && typeof changing.from === 'string' ? { agyPermissionChangingTo: changing.to, agyPermissionChangingFrom: changing.from } : {}),
       ...(askedAbout.agyPermissionRevision !== undefined ? { agyPermissionRevision: askedAbout.agyPermissionRevision } : {}),

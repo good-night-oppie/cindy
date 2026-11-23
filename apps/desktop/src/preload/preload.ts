@@ -7898,6 +7898,8 @@ contextBridge.exposeInMainWorld('electronAPI', {
         /** With agyPermissionAgreementOnly, for a change of mode being confirmed: the new mode and the one the window shows the task in. */
         agyPermissionChangingTo?: string;
         agyPermissionChangingFrom?: string;
+        /** For an agreement given for a send: the hold of the message the user was asked about. */
+        agyPermissionHeldMessage?: string;
         agyPermissionRevision?: number;
       },
       thinking?: boolean,
@@ -8385,7 +8387,7 @@ contextBridge.exposeInMainWorld('electronAPI', {
         ipcRenderer.invoke('maker:images:retry', sessionId, imageId),
       retryLastError: (
         sessionId: string,
-        opts?: { expectedClearBoundaryMs?: number | null },
+        opts?: { expectedClearBoundaryMs?: number | null; agySwitchHeldMessage?: string },
       ): Promise<import('../shared/agentInputQueue').AgentInputProjection> =>
         ipcRenderer.invoke('maker:input:retry-last-error', sessionId, opts),
       clearError: (

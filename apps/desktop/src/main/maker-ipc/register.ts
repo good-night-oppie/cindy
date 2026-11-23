@@ -11506,7 +11506,7 @@ export function registerMakerIpc(maker: Maker, options: RegisterMakerIpcOptions)
       broadcastSessionPatched(sessionId, { agentSwitchIntent: intent });
     },
     // The message held for this very agreement goes on (it is refused again if it does not fit).
-    onPendingSwitchAgreed: (sessionId) => { agentInputCoordinatorHolder?.wakeHeldForAgySwitch(sessionId); },
+    onPendingSwitchAgreed: (sessionId, heldMessage) => agentInputCoordinatorHolder?.wakeHeldForAgySwitch(sessionId, heldMessage) ?? false,
     // Awaited by the apply step: a schedule about to run reads the saved model right after.
     onScheduledRestoreLanded: async (sessionId) => {
       if (!(await updateScheduledPreference(sessionId, null))) {
@@ -21505,7 +21505,10 @@ export function registerMakerIpc(maker: Maker, options: RegisterMakerIpcOptions)
     async (_e, sessionId: unknown, opts?: unknown) => {
       const sid = requireSessionId(sessionId);
       await assertRemoteInputControlBoundary(sid, isDeviceLinkInvoke(), opts);
-      return inputCoordinator.retryLastError(sid);
+      // Which held message the retry is about, when it is one held for a switch into Antigravity.
+      const heldMessage = opts && typeof opts === 'object' && !Array.isArray(opts)
+        ? (opts as { agySwitchHeldMessage?: unknown }).agySwitchHeldMessage : undefined;
+      return inputCoordinator.retryLastError(sid, typeof heldMessage === 'string' ? heldMessage : undefined);
     },
   );
 

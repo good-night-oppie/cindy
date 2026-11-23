@@ -13,7 +13,7 @@ const source = readFileSync(new URL('../../register.ts', import.meta.url), 'utf8
 const registryCall = '  const agentSwitchPending = createPendingAgentSwitchRegistry(';
 const registryStart = source.indexOf(registryCall);
 const registryEnd = source.indexOf('\n  });', registryStart);
-const depsStart = source.indexOf('    onPendingSwitchAgreed: (sessionId) =>');
+const depsStart = source.indexOf('    onPendingSwitchAgreed: (sessionId, heldMessage) =>');
 const depsEnd = source.indexOf('    onUserRouteSelectionLanded: async (sessionId) =>', depsStart);
 if (registryStart < 0 || registryEnd < registryStart || depsStart < 0 || depsEnd < depsStart) {
   throw new Error('register.ts: the pending-switch wiring for Antigravity was not found');
@@ -26,7 +26,7 @@ const compiled = transpileModule(`return { registryOptions: (${registryOptions})
 
 export interface AgySwitchWiringCollaborators {
   /** The queue coordinator, as register.ts holds it (may not be created yet). */
-  agentInputCoordinatorHolder?: { wakeHeldForAgySwitch(sessionId: string): boolean } | null;
+  agentInputCoordinatorHolder?: { wakeHeldForAgySwitch(sessionId: string, heldMessage?: unknown): boolean } | null;
   /** Clears the task's saved model; resolves false when it had changed meanwhile. */
   updateScheduledPreference?: (sessionId: string, patch: null) => Promise<boolean>;
   log?: { warn: (...args: unknown[]) => void };
@@ -35,7 +35,7 @@ export interface AgySwitchWiringCollaborators {
 export function agySwitchWiringFromRegister(collaborators: AgySwitchWiringCollaborators = {}): {
   registryOptions: { onScheduledRestoreSettled(sessionId: string): void };
   deps: {
-    onPendingSwitchAgreed(sessionId: string): void;
+    onPendingSwitchAgreed(sessionId: string, heldMessage: unknown): boolean;
     onScheduledRestoreLanded(sessionId: string): Promise<void>;
   };
 } {

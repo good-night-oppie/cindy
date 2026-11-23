@@ -4778,15 +4778,18 @@ function CCAgentSessionContent({
   // 成功路径已经有更可靠的收敛点:turn 真正跑起来 → store 清掉终止错误 →
   // useSessionRunningStatus 在 running 上升沿把 orphan 的 error 角标 explicit 清掉。
   // 失败路径则天然保留红点,与仍在展示的横幅一致。
-  const handleRetry = useCallback(() => {
+  // `agySwitchHeldMessage`: which held message the click is about, when the banner is that of a
+  // message held for a switch into Antigravity (see useAgySwitchPermissionRecovery).
+  const retryNamingHeldMessage = useCallback((agySwitchHeldMessage?: string) => {
     if (isHistoryRecoveryPending()) return;
     invalidateHistoryRecoveryNavigation();
     void rebuildClaudeSubscriptionSessionBeforeRetry(errorReason)
-      .then(() => retryLastError())
+      .then(() => retryLastError(agySwitchHeldMessage))
       .catch((error) => {
         log.warn('retryLastError failed', error);
       });
   }, [errorReason, invalidateHistoryRecoveryNavigation, isHistoryRecoveryPending, rebuildClaudeSubscriptionSessionBeforeRetry, retryLastError]);
+  const handleRetry = useCallback(() => retryNamingHeldMessage(), [retryNamingHeldMessage]);
 
   // A message the host held until the pending switch's permission change is agreed to: ask here,
   // and resend it once on agreement, instead of leaving the user with a generic error to decode.
@@ -4798,7 +4801,7 @@ function CCAgentSessionContent({
     remote: remoteDeviceId != null,
     pendingSwitchKey: agySwitchPendingKey(agentSwitchIntent),
     confirm: confirmDialog,
-    retry: handleRetry,
+    retry: retryNamingHeldMessage,
   });
 
   const handleSwitchToClaudeSubscription = useCallback(async (): Promise<void> => {

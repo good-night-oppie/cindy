@@ -23,10 +23,12 @@ const h = vi.hoisted(() => ({
   registerWithHost: vi.fn(async (..._args: unknown[]) => ({})),
   /** Stands for what the host reports as agreed; part of what the view renders of the switch. */
   hostAgreed: '',
+  /** The hold of the held message this window shows, as the host named it; null when it named none. */
+  held: 'hold-1' as string | null,
   toastError: vi.fn(),
 }));
 vi.mock('react-i18next', () => ({ useTranslation: () => ({ t: (key: string) => key }) }));
-vi.mock('@/lib/makerChatStore', () => ({ makerChatStore: { getAgentSwitchIntent: () => h.intent } }));
+vi.mock('@/lib/makerChatStore', () => ({ makerChatStore: { getAgentSwitchIntent: () => h.intent, getAgySwitchHeldMessage: () => h.held } }));
 vi.mock('@/lib/makerTransport', () => ({ makerApiFor: () => ({ switchSessionAgent: h.registerWithHost }) }));
 vi.mock('@/lib/toast', () => ({ toast: { error: h.toastError } }));
 
@@ -174,6 +176,7 @@ describe('a message the host held for an unconfirmed permission change', () => {
     h.registerWithHost.mockClear();
     h.toastError.mockClear();
     h.hostAgreed = '';
+    h.held = 'hold-1';
     forgetAgySwitchPermissionAgreed('task-1');
     noteAgySwitchPermissionAgreed('task-1', 'ask');
   });
@@ -227,13 +230,53 @@ describe('a message the host held for an unconfirmed permission change', () => {
     await waitFor(() => expect(onResend).toHaveBeenCalledTimes(1));
     expect(h.registerWithHost).toHaveBeenCalledExactlyOnceWith(
       'task-1', 'agy', 'gemini-test', null, undefined, undefined,
-      { agyPermissionAgreement: { change: 'fromFullAccess', mode: 'auto' }, agyPermissionAgreementOnly: true, agyPermissionAgreementForSend: true, agyPermissionRevision: 7 },
+      { agyPermissionAgreement: { change: 'fromFullAccess', mode: 'auto' }, agyPermissionAgreementOnly: true, agyPermissionAgreementForSend: true, agyPermissionHeldMessage: 'hold-1', agyPermissionRevision: 7 },
     );
     // The same held message reported again (the host refused once more) must not start a loop.
     shown.rerender(view({ error: HELD, mode: 'bypassPermissions', onResend }));
     await settle();
     expect(onResend).toHaveBeenCalledTimes(1);
     expect(screen.queryByText(TITLE)).toBeNull();
+  });
+
+  // QQ's ruling of 2026-11-23. While the question is open the user can remove or edit the held
+  // message, and the next one comes to be held in its place; the window then shows another
+  // message under the same dialog. The answer and the retry say which message the question was
+  // about: the one this window showed when the dialog opened, not the one it shows when the
+  // user answers. The host decides from that (agent-input-coordinator.test.ts).
+  it('names the held message it asked about, read when the question opened, in the answer and in the retry, even after another came to be held', async () => {
+    const onResend = vi.fn();
+    render(view({ error: HELD, mode: 'bypassPermissions', onResend }));
+    const confirm = await screen.findByRole('button', { name: CONFIRM });
+    h.held = 'hold-2';
+    fireEvent.click(confirm);
+    await waitFor(() => expect(onResend).toHaveBeenCalledTimes(1));
+    expect(h.registerWithHost.mock.calls[0]?.[6]).toMatchObject({ agyPermissionAgreementForSend: true, agyPermissionHeldMessage: 'hold-1' });
+    expect(onResend).toHaveBeenCalledExactlyOnceWith('hold-1');
+  });
+
+  it('names no message when the host named none: the host then records the agreement and sends nothing', async () => {
+    h.held = null;
+    const onResend = vi.fn();
+    render(view({ error: HELD, mode: 'bypassPermissions', onResend }));
+    fireEvent.click(await screen.findByRole('button', { name: CONFIRM }));
+    await waitFor(() => expect(onResend).toHaveBeenCalledTimes(1));
+    expect(h.registerWithHost.mock.calls[0]?.[6]).not.toHaveProperty('agyPermissionHeldMessage');
+    expect(onResend).toHaveBeenCalledExactlyOnceWith(undefined);
+  });
+
+  it.each([
+    ['a held message in a mode that needs no agreement (the banner\u2019s Send)', HELD, 'ask', false],
+    ['a held message on a computer that controls the task remotely', HELD, 'bypassPermissions', true],
+  ])('the banner\u2019s action with no dialog names the held message it is on: %s', async (_name, error, mode, remote) => {
+    const onResend = vi.fn();
+    render(view({ error, mode, onResend, remote }));
+    await settle();
+    expect(onResend).not.toHaveBeenCalled();
+    fireEvent.click(screen.getByRole('button', { name: 'Retry' }));
+    await waitFor(() => expect(onResend).toHaveBeenCalledTimes(1));
+    expect(onResend).toHaveBeenCalledExactlyOnceWith('hold-1');
+    expect(screen.queryByRole('alertdialog')).toBeNull();
   });
 
   it('stops after one resend when the error is cleared and the host holds the message again', async () => {
@@ -349,7 +392,7 @@ describe('a message the host held for an unconfirmed permission change', () => {
     // be on record, without which the host replaces nothing.
     expect(h.registerWithHost).toHaveBeenCalledExactlyOnceWith(
       'task-1', 'agy', 'gemini-test', null, undefined, undefined,
-      { agyPermissionAgreement: { change: 'fromFullAccess', mode: 'auto' }, agyPermissionAgreementOnly: true, agyPermissionAgreementForSend: true,
+      { agyPermissionAgreement: { change: 'fromFullAccess', mode: 'auto' }, agyPermissionAgreementOnly: true, agyPermissionAgreementForSend: true, agyPermissionHeldMessage: 'hold-1',
         agyPermissionAgreementExpected: { change: 'fromFullAccess', mode: 'auto' }, agyPermissionRevision: 7 },
     );
   });
@@ -372,7 +415,7 @@ describe('a message the host held for an unconfirmed permission change', () => {
     await waitFor(() => expect(onResend).toHaveBeenCalledTimes(1));
     expect(h.registerWithHost).toHaveBeenCalledExactlyOnceWith(
       'task-1', 'agy', 'gemini-test', null, undefined, undefined,
-      { agyPermissionAgreement: { change: 'fromFullAccess', mode: 'auto' }, agyPermissionAgreementOnly: true, agyPermissionAgreementForSend: true,
+      { agyPermissionAgreement: { change: 'fromFullAccess', mode: 'auto' }, agyPermissionAgreementOnly: true, agyPermissionAgreementForSend: true, agyPermissionHeldMessage: 'hold-1',
         agyPermissionAgreementExpected: { change: 'fromFullAccess', mode: 'auto' }, agyPermissionRevision: 7 },
     );
   });
@@ -419,7 +462,7 @@ describe('a message the host held for an unconfirmed permission change', () => {
     fireEvent.click(confirm);
     await waitFor(() => expect(onResend).toHaveBeenCalledTimes(1));
     expect(h.registerWithHost.mock.calls.map((call) => call[6])).toEqual([
-      { agyPermissionAgreement: { change: 'fromUnsupported', mode: 'ask' }, agyPermissionAgreementOnly: true, agyPermissionAgreementForSend: true,
+      { agyPermissionAgreement: { change: 'fromUnsupported', mode: 'ask' }, agyPermissionAgreementOnly: true, agyPermissionAgreementForSend: true, agyPermissionHeldMessage: 'hold-1',
         agyPermissionAgreementExpected: { change: 'fromUnsupported', mode: 'ask' }, agyPermissionRevision: 7 },
     ]);
   });

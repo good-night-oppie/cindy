@@ -317,6 +317,15 @@ export interface AgentInputQueuedMessage {
    * Antigravity. Retained by queue persistence and edits; removing the message is the way out.
    */
   awaitsAgySwitchConfirmation?: true;
+  /**
+   * Host-issued name of this hold of this message: a new one each time the message is held for a
+   * switch into Antigravity, and whenever its content changes while held (an edit, a merge, a
+   * replacement). A window that asks the user whether the held message should go reads it when
+   * the question opens and sends it back with the answer; the host lets a message go only on an
+   * answer that names the hold it is in now. So an answer given about a message that was since
+   * removed, replaced, edited or merged sends nothing, and neither does one that names no hold.
+   */
+  agySwitchHoldId?: string;
   clientId: string;
   /** Opt-in: a cancelled delivery ID must never become a fresh enqueue on reconnect. */
   durableDelivery?: true;

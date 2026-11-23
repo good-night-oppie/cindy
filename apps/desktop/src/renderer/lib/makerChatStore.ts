@@ -1,5 +1,6 @@
 import { recordGithubStarPromptSend, recordGithubStarPromptCompletion } from './githubStarPrompt';
 import { parseOutputLimitDetails, type OutputLimitDetails } from '@cindy/maker-shared';
+import { agySwitchHeldMessageOf } from '@cindy/maker-shared/queue';
 import { pendingGhostCardFormDelivery } from '@cindy/maker-shared/ghost-card-form';
 import { applySessionRebalancePreferencePatch } from '@/features/provider-group/sessionRebalanceCache';
 import { isVoiceCallTaskMessage } from '../../shared/voiceConversation';
@@ -17208,7 +17209,7 @@ function clearError(sessionId: string): void {
   });
 }
 
-function retryLastError(sessionId: string): Promise<void> {
+function retryLastError(sessionId: string, agySwitchHeldMessage?: string): Promise<void> {
   if (!sessionId) return Promise.resolve();
   disposeLiveErrorPersist(sessionId);
   // 续跑语义在 main:coordinator 判定失败 turn 已有 assistant 产出时,用共享英文
@@ -17252,7 +17253,12 @@ function retryLastError(sessionId: string): Promise<void> {
   if (preRetryQueueHeadClientId) {
     markLocalSentUserMessage(sessionId, preRetryQueueHeadClientId);
   }
-  const boundaryOpts = getRemoteInputClearBoundaryOpts(sessionId);
+  const remoteBoundaryOpts = getRemoteInputClearBoundaryOpts(sessionId);
+  // Which held message this click is about (see getAgySwitchHeldMessage); the host retries a
+  // message held for a switch into Antigravity only when told the hold it is in.
+  const boundaryOpts = agySwitchHeldMessage
+    ? { ...(remoteBoundaryOpts ?? {}), agySwitchHeldMessage }
+    : remoteBoundaryOpts;
   return runAgentDispatchProjectionOperation(sessionId, (input) =>
     boundaryOpts ? input.retryLastError(sessionId, boundaryOpts) : input.retryLastError(sessionId),
   ).then(
@@ -18895,6 +18901,18 @@ function getAgentSwitchIntent(sessionId: string): AgentSwitchIntentRecord | null
 }
 
 /**
+ * Which hold of which message the task's banner is about, when that message is one the host
+ * holds for a switch into Antigravity: the host's own name for it (agySwitchHoldId), as this
+ * window shows it now. A window reads it when it asks the user whether the message should go and
+ * sends it back with the answer and the retry, so that the host acts only if the message it
+ * holds then is still that one. Null when no such message is shown, or the host named none.
+ */
+function getAgySwitchHeldMessage(sessionId: string): string | null {
+  const state = sessions.get(sessionId);
+  return state ? agySwitchHeldMessageOf({ pendingQueue: state.pendingQueue, recovery: state.inputRecovery }) : null;
+}
+
+/**
  * 意图的单调修订号(不存在的会话按 0)。异步读回的新鲜度判定读它——值比较会被 ABA
  * (null → 已登记 → null)骗过,修订号不会。
  */
@@ -19316,6 +19334,7 @@ export const makerChatStore = {
   noteAgentSwitchIntent,
   clearAgentSwitchIntent,
   getAgentSwitchIntent,
+  getAgySwitchHeldMessage,
   /** 意图的单调修订号;异步读回的新鲜度判定用它,值比较会被 ABA 骗过。 */
   getAgentSwitchIntentRev,
   /** 会话所在端(被控端 / 另一窗口)的权威 pending 意图回流镜像;幂等,值等价即 no-op。 */

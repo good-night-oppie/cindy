@@ -1,4 +1,5 @@
 import Database from 'better-sqlite3';
+import { agySwitchHeldMessageOf } from '@cindy/maker-shared/queue';
 import { drizzle } from 'drizzle-orm/better-sqlite3';
 import type { DbClient } from '../../localDb/client/DbClient.js';
 import { setCurrentDbClient, clearCurrentDbClient } from '../../localDb/client/current.js';
@@ -1636,6 +1637,18 @@ const flush = async () => {
     await Promise.resolve();
   }
 };
+
+/**
+ * The host's name for the hold of the message at the head of a queue, when that message is held
+ * for a switch into Antigravity: what a window reads when it asks about the message, and sends
+ * back with the answer and the retry.
+ */
+function holdAtHead(
+  coordinator: { getProjection(sessionId: string): { pendingQueue: Array<{ agySwitchHoldId?: string }> } },
+  sessionId: string,
+): string | undefined {
+  return coordinator.getProjection(sessionId).pendingQueue[0]?.agySwitchHoldId;
+}
 
 function makeItem(
   clientId: string,
@@ -6047,7 +6060,7 @@ describe('AgentInputCoordinator send transaction', () => {
     expect(mocks.createMessage).not.toHaveBeenCalled();
     expect(h.sendToAgent).toHaveBeenCalledTimes(1);
 
-    await h.coordinator.retryLastError(sid);
+    await h.coordinator.retryLastError(sid, holdAtHead(h.coordinator, sid));
     await flush();
     expect(h.sendToAgent).toHaveBeenCalledTimes(2);
     expect(h.sendToAgent.mock.calls[1]?.[1]).toMatchObject({ content: 'first' });
@@ -6106,14 +6119,14 @@ describe('AgentInputCoordinator send transaction', () => {
     expect(mocks.createMessage).not.toHaveBeenCalled();
 
     // Asking again without having picked the engine again changes nothing.
-    await restarted.coordinator.retryLastError(sid);
+    await restarted.coordinator.retryLastError(sid, holdAtHead(restarted.coordinator, sid));
     await flush();
     expect(dispatched).toEqual([]);
     expect(restarted.coordinator.getProjection(sid).pendingQueue.map((q) => q.clientId)).toEqual(['q-1']);
 
     // The user picks a Gemini model again and agrees; the send step applies that switch.
     row.agentKind = 'agy';
-    await restarted.coordinator.retryLastError(sid);
+    await restarted.coordinator.retryLastError(sid, holdAtHead(restarted.coordinator, sid));
     await flush();
     await flush();
     expect(dispatched).toEqual(['first, edited']);
@@ -6236,7 +6249,7 @@ describe('AgentInputCoordinator send transaction', () => {
 
     // The user confirms; the task view retries the held message.
     h.sendToAgent.mockImplementation(async () => { h.setRunning(true); return sendSuccess(); });
-    await h.coordinator.retryLastError(sid);
+    await h.coordinator.retryLastError(sid, holdAtHead(h.coordinator, sid));
     await flush();
     expect(h.sendToAgent).toHaveBeenCalledTimes(2);
     expect(h.sendToAgent.mock.calls[1]?.[1]).toMatchObject({ content: 'first' });
@@ -6276,9 +6289,9 @@ describe('AgentInputCoordinator send transaction', () => {
     expect(h.coordinator.getProjection(sid).pendingQueue.map((q) => q.clientId)).toEqual(['q-1', 'q-2']);
 
     h.sendToAgent.mockImplementation(async () => { h.setRunning(true); return sendSuccess(); });
-    expect(h.coordinator.wakeHeldForAgySwitch(sid)).toBe(true);
+    expect(h.coordinator.wakeHeldForAgySwitch(sid, holdAtHead(h.coordinator, sid))).toBe(true);
     // The window that asked also retries once the answer is recorded; the two make one send.
-    await h.coordinator.retryLastError(sid);
+    await h.coordinator.retryLastError(sid, holdAtHead(h.coordinator, sid));
     await flush();
     await flush();
     expect(h.sendToAgent).toHaveBeenCalledTimes(2);
@@ -6293,7 +6306,7 @@ describe('AgentInputCoordinator send transaction', () => {
     expect(h.sendToAgent).toHaveBeenCalledTimes(3);
     expect(h.sendToAgent.mock.calls[2]?.[1]).toMatchObject({ content: 'typed later' });
     // Nothing left to wake.
-    expect(h.coordinator.wakeHeldForAgySwitch(sid)).toBe(false);
+    expect(h.coordinator.wakeHeldForAgySwitch(sid, holdAtHead(h.coordinator, sid))).toBe(false);
     expect(h.onDiscardedQueuedMessage).not.toHaveBeenCalled();
   });
 
@@ -6338,8 +6351,13 @@ describe('AgentInputCoordinator send transaction', () => {
     const answer = (extra: Record<string, unknown>, revision = pendingSwitches.get(sid)?.revision) => ipc.invoke(
       MAKER_INVOKE.SWITCH_SESSION_AGENT, sid, 'agy', 'gemini-test', null, undefined, undefined,
       { agyPermissionAgreementOnly: true, agyPermissionAgreement: agreement, agyPermissionRevision: revision, ...extra });
+    /** The hold of the message at the head of the queue, as a window reads it when its question opens. */
+    const heldMessage = (): string | undefined => agySwitchHeldMessageOf(h.coordinator.getProjection(sid)) ?? undefined;
+    const sendAnswer = (about: string | undefined) => ({
+      agyPermissionAgreementForSend: true, ...(about ? { agyPermissionHeldMessage: about } : {}),
+    });
     return {
-      h, dispatched, pendingSwitches, row,
+      h, dispatched, pendingSwitches, row, heldMessage,
       /** The model picker; "not now" in its dialog registers the switch with no agreement. */
       pick: (agreed: boolean) => ipc.invoke(MAKER_INVOKE.SWITCH_SESSION_AGENT, sid, 'agy', 'gemini-test', null, undefined, undefined,
         agreed ? { agyPermissionAgreement: agreement, agyPermissionAgreedWithThisPick: true } : undefined),
@@ -6355,11 +6373,20 @@ describe('AgentInputCoordinator send transaction', () => {
           agyPermissionAgreement: { change: agySwitchPermissionChange(to), mode: permissionModeAfterSwitchToAgy(to) },
           agyPermissionChangingTo: to, agyPermissionChangingFrom: row.permissionMode,
           ...(claimsSend ? { agyPermissionAgreementForSend: true } : {}) }),
-      /** The held message's own banner: "Review and confirm", agreed. */
-      confirmToSend: (revision?: number) => answer({ agyPermissionAgreementForSend: true }, revision),
+      /**
+       * The held message's own banner: "Review and confirm", agreed. `about` is the hold the
+       * window read when it opened the question; by default the one held when the answer is given
+       * (a question opened and answered with nothing happening in between).
+       */
+      confirmToSend: (revision?: number, about: string | undefined | null = heldMessage()) =>
+        answer(sendAnswer(about ?? undefined), revision),
+      /** A window from before holds had names: it asks for a send and says of no message. */
+      confirmToSendNamingNoMessage: () => answer({ agyPermissionAgreementForSend: true }),
       confirmToSendFromRemote: () => runDeviceLinkInvokeContext(
         { controllerDeviceId: 'controller-1', channel: MAKER_INVOKE.SWITCH_SESSION_AGENT },
-        () => answer({ agyPermissionAgreementForSend: true })),
+        () => answer(sendAnswer(heldMessage()))),
+      /** The banner's own retry (its Send, or the window's retry after an agreed question). */
+      retry: (about: string | undefined | null = heldMessage()) => h.coordinator.retryLastError(sid, about ?? undefined),
       turnEnds: async () => { h.setRunning(false); h.coordinator.onTurnEvent(sid, 'done'); await flush(); await flush(); },
       settle: async () => { await flush(); await flush(); await flush(); },
     };
@@ -6523,11 +6550,266 @@ describe('AgentInputCoordinator send transaction', () => {
     expect(waiting.recovery).toEqual({ kind: 'queue-head', clientId: 'q-1' });
 
     // The user selects Send on the banner.
-    await h.coordinator.retryLastError(sid);
+    await h.coordinator.retryLastError(sid, holdAtHead(h.coordinator, sid));
     await host.settle();
     expect(host.dispatched).toEqual(['held']);
     await host.turnEnds();
     expect(host.dispatched).toEqual(['held']);
+  });
+
+  // QQ's ruling of 2026-11-23 (must fix before cindy#19 merges), found on 1b19f63e: two messages
+  // queued, the first held and its question open. The user removes the first from the queue; the
+  // second comes to be held in its place. Agreeing in the dialog that was about the first sent
+  // the second. An answer was about "whatever is held", so it was about a message the user had
+  // never been asked about. The host now names each hold of a message (agySwitchHoldId); a window
+  // reads the name when its question opens and sends it back with the answer and with the retry;
+  // the host lets a message go only if the one it holds then is in that hold.
+  //
+  // Through the host's entry, as above: the real handler and registry, register.ts's own wiring,
+  // the real queue. `about` is what the window read when the dialog opened.
+  describe('a confirmation to send is about the one held message it was asked for', () => {
+    const twoQueuedFirstHeld = async (sid: string) => {
+      const host = hostWithQueue(sid);
+      await host.pick(false);
+      host.h.coordinator.enqueue(sid, makeItem('q-1', 'first'));
+      await host.settle();
+      host.h.coordinator.enqueue(sid, makeItem('q-2', 'second'));
+      await host.settle();
+      const about = host.heldMessage();
+      expect(about).toEqual(expect.any(String));
+      expect(host.h.coordinator.getProjection(sid).recovery).toEqual({ kind: 'queue-head', clientId: 'q-1' });
+      return { host, about: about as string };
+    };
+    const queued = (host: ReturnType<typeof hostWithQueue>, sid: string) =>
+      host.h.coordinator.getProjection(sid).pendingQueue.map((q) => q.clientId);
+
+    it('the first is removed while its question is open and the second is held in its place: the answer about the first is recorded and sends nothing; the second goes once, on its own answer', async () => {
+      const sid = 'answer-about-removed-message';
+      const { host, about } = await twoQueuedFirstHeld(sid);
+      host.h.coordinator.remove(sid, 'q-1');
+      await host.settle();
+      expect(host.h.coordinator.getProjection(sid).recovery).toEqual({ kind: 'queue-head', clientId: 'q-2' });
+      expect(host.heldMessage()).toEqual(expect.any(String));
+      expect(host.heldMessage()).not.toBe(about);
+
+      // The dialog that was about the first message is agreed to, and its window then retries.
+      expect(await host.confirmToSend(undefined, about)).toMatchObject({ agyPermissionAgreementRecorded: true });
+      await host.retry(about);
+      await host.settle();
+      // The answer is a valid one about the permissions; it is not one to send anything.
+      expect(host.pendingSwitches.get(sid)?.agyPermissionAgreement).toEqual({ change: 'fromFullAccess', mode: 'auto' });
+      expect(host.pendingSwitches.get(sid)?.agyPermissionAgreementForSend).toBeUndefined();
+      expect(host.dispatched).toEqual([]);
+      expect(queued(host, sid)).toEqual(['q-2']);
+      expect(host.h.coordinator.getProjection(sid).recovery).toEqual({ kind: 'queue-head', clientId: 'q-2' });
+
+      // The second message's own banner.
+      await host.confirmToSend();
+      await host.settle();
+      expect(host.dispatched).toEqual(['second']);
+      await host.turnEnds();
+      expect(host.dispatched).toEqual(['second']);
+    });
+
+    it('nothing changed while the question was open: the message goes once, and the window\u2019s retry after it adds nothing', async () => {
+      const sid = 'answer-about-unchanged-message';
+      const { host, about } = await twoQueuedFirstHeld(sid);
+      await host.confirmToSend(undefined, about);
+      await host.retry(about);
+      await host.settle();
+      expect(host.pendingSwitches.get(sid)?.agyPermissionAgreementForSend).toBe(true);
+      expect(host.dispatched).toEqual(['first']);
+      // The queue goes on in order once the turn ends; the first is not sent again.
+      await host.turnEnds();
+      await host.retry(about);
+      await host.settle();
+      expect(host.dispatched).toEqual(['first', 'second']);
+    });
+
+    it('the held message is edited while its question is open: same id, other content, so the answer sends nothing; a new answer sends what it says now', async () => {
+      const sid = 'answer-about-edited-message';
+      const { host, about } = await twoQueuedFirstHeld(sid);
+      host.h.coordinator.updateText(sid, 'q-1', 'first, edited');
+      await host.settle();
+      expect(queued(host, sid)).toEqual(['q-1', 'q-2']);
+      expect(host.heldMessage()).not.toBe(about);
+
+      await host.confirmToSend(undefined, about);
+      await host.retry(about);
+      await host.settle();
+      expect(host.dispatched).toEqual([]);
+      expect(host.pendingSwitches.get(sid)?.agyPermissionAgreementForSend).toBeUndefined();
+
+      await host.confirmToSend();
+      await host.settle();
+      expect(host.dispatched).toEqual(['first, edited']);
+    });
+
+    it('an edit that leaves the content as it was keeps the hold: the answer still stands', async () => {
+      const sid = 'answer-about-message-edited-to-the-same';
+      const { host, about } = await twoQueuedFirstHeld(sid);
+      host.h.coordinator.updateText(sid, 'q-1', 'first');
+      await host.settle();
+      expect(host.heldMessage()).toBe(about);
+      await host.confirmToSend(undefined, about);
+      await host.settle();
+      expect(host.dispatched).toEqual(['first']);
+    });
+
+    it('the held message is merged with the next under its own id: the answer about it sends nothing', async () => {
+      const sid = 'answer-about-merged-message';
+      const { host, about } = await twoQueuedFirstHeld(sid);
+      const merged = host.h.coordinator.mergeQueuedMessagesAtomically(sid, ['q-1', 'q-2'], (rows) => ({
+        ...rows[0]!, text: rows.map((row) => row.text).join('\n'), persistedContent: rows.map((row) => row.text).join('\n'),
+      }));
+      await host.settle();
+      expect(merged.merged).toBe(true);
+      expect(queued(host, sid)).toEqual(['q-1']);
+      expect(host.h.coordinator.getProjection(sid).pendingQueue[0]?.awaitsAgySwitchConfirmation).toBe(true);
+      expect(host.heldMessage()).not.toBe(about);
+
+      await host.confirmToSend(undefined, about);
+      await host.retry(about);
+      await host.settle();
+      expect(host.dispatched).toEqual([]);
+
+      // Whatever state the merge left the queue in, the merged message goes only on an answer
+      // that names it. A banner that is showing answers with the hold it reads now; with none
+      // showing the user continues the queue.
+      if (host.h.coordinator.getProjection(sid).recovery) await host.confirmToSend();
+      else host.h.coordinator.resume(sid);
+      await host.settle();
+      expect(host.dispatched).toEqual(['first\nsecond']);
+    });
+
+    it('another message is moved ahead while the question is open: the answer sends neither; with the held one first again, it goes', async () => {
+      const sid = 'answer-about-message-moved-back';
+      const { host, about } = await twoQueuedFirstHeld(sid);
+      host.h.coordinator.move(sid, 'q-2', 0);
+      await host.settle();
+      expect(queued(host, sid)).toEqual(['q-2', 'q-1']);
+
+      const sentBefore = host.dispatched.length;
+      await host.confirmToSend(undefined, about);
+      await host.retry(about);
+      await host.settle();
+      expect(host.dispatched.length).toBe(sentBefore);
+      expect(host.dispatched).not.toContain('first');
+      expect(host.pendingSwitches.get(sid)?.agyPermissionAgreementForSend).toBeUndefined();
+      expect(queued(host, sid)).toEqual(['q-2', 'q-1']);
+
+      // Moved back unchanged, it is the message the question was about, in the same hold.
+      host.h.coordinator.move(sid, 'q-1', 0);
+      await host.settle();
+      expect(host.heldMessage()).toBe(about);
+      await host.confirmToSend(undefined, about);
+      await host.settle();
+      expect(host.dispatched).toEqual(['first']);
+    });
+
+    it('a window that names no message (one from before holds had names) has its agreement recorded and sends nothing, by answer or by retry', async () => {
+      const sid = 'answer-naming-no-message';
+      const { host } = await twoQueuedFirstHeld(sid);
+      expect(await host.confirmToSendNamingNoMessage()).toMatchObject({ agyPermissionAgreementRecorded: true });
+      await host.retry(null);
+      await host.settle();
+      expect(host.pendingSwitches.get(sid)?.agyPermissionAgreement).toEqual({ change: 'fromFullAccess', mode: 'auto' });
+      expect(host.pendingSwitches.get(sid)?.agyPermissionAgreementForSend).toBeUndefined();
+      expect(host.dispatched).toEqual([]);
+      expect(host.h.coordinator.getProjection(sid).recovery).toEqual({ kind: 'queue-head', clientId: 'q-1' });
+
+      await host.confirmToSend();
+      await host.settle();
+      expect(host.dispatched).toEqual(['first']);
+    });
+
+    it('a retry that arrives late, after its message went and the next was held, retries nothing', async () => {
+      const sid = 'late-retry-after-next-held';
+      const { host, about } = await twoQueuedFirstHeld(sid);
+      await host.confirmToSend(undefined, about);
+      await host.settle();
+      expect(host.dispatched).toEqual(['first']);
+      // The mode is changed elsewhere meanwhile: the agreement on record no longer fits, and the
+      // second message is held when its turn comes.
+      host.row.permissionMode = 'plan';
+      await host.turnEnds();
+      expect(host.dispatched).toEqual(['first']);
+      expect(host.h.coordinator.getProjection(sid).recovery).toEqual({ kind: 'queue-head', clientId: 'q-2' });
+      const heldAs = host.heldMessage();
+      const tried = host.h.sendToAgent.mock.calls.length;
+
+      // Not even tried: the second message stays in the hold it was in, with its banner.
+      await host.retry(about);
+      await host.settle();
+      expect(host.h.sendToAgent).toHaveBeenCalledTimes(tried);
+      expect(host.heldMessage()).toBe(heldAs);
+      expect(host.dispatched).toEqual(['first']);
+      expect(host.h.coordinator.getProjection(sid).recovery).toEqual({ kind: 'queue-head', clientId: 'q-2' });
+    });
+
+    it('the same message held a second time is a new hold: the retry of the first hold retries nothing', async () => {
+      const sid = 'retry-of-an-earlier-hold';
+      const { host, about } = await twoQueuedFirstHeld(sid);
+      // The mode changes before the answer arrives: the answer is about another change, so the
+      // host refuses it, and the window's retry that follows must not send on nothing.
+      host.row.permissionMode = 'plan';
+      await host.retry(about);
+      await host.settle();
+      // The retry named the hold, so it was tried; the send step refused it and held it anew.
+      expect(host.dispatched).toEqual([]);
+      expect(host.heldMessage()).toEqual(expect.any(String));
+      expect(host.heldMessage()).not.toBe(about);
+      await host.retry(about);
+      await host.settle();
+      expect(host.h.sendToAgent).toHaveBeenCalledTimes(2);
+      expect(host.dispatched).toEqual([]);
+    });
+
+    it('checks again where the message is handed to the engine: removed between the answer and the dispatch, the next one is held, not sent on that answer', async () => {
+      const sid = 'removed-between-answer-and-dispatch';
+      const { host, about } = await twoQueuedFirstHeld(sid);
+      // A turn is running (one started from IM, say), so the answer cannot dispatch at once.
+      host.h.setRunning(true);
+      await host.confirmToSend(undefined, about);
+      await host.settle();
+      expect(host.dispatched).toEqual([]);
+      host.h.coordinator.remove(sid, 'q-1');
+      await host.turnEnds();
+      // The agreement is on record and would let any message through the send step.
+      expect(host.pendingSwitches.get(sid)?.agyPermissionAgreement).toEqual({ change: 'fromFullAccess', mode: 'auto' });
+      expect(host.dispatched).toEqual([]);
+      const now = host.h.coordinator.getProjection(sid);
+      expect(now.pendingQueue.map((q) => q.clientId)).toEqual(['q-2']);
+      expect(now.pendingQueue[0]?.awaitsAgySwitchConfirmation).toBe(true);
+      expect(now.recovery).toEqual({ kind: 'queue-head', clientId: 'q-2' });
+      expect(now.error).toMatch(/^AGENT_SWITCH_PERMISSION_UNCONFIRMED: /);
+
+      await host.confirmToSend();
+      await host.settle();
+      expect(host.dispatched).toEqual(['second']);
+      await host.turnEnds();
+      expect(host.dispatched).toEqual(['second']);
+    });
+
+    it('an answer whose message was removed, with nothing queued behind it, does not hold a message sent afterwards', async () => {
+      const sid = 'removed-then-a-new-message';
+      const host = hostWithQueue(sid);
+      await host.pick(false);
+      host.h.coordinator.enqueue(sid, makeItem('q-1', 'first'));
+      await host.settle();
+      const about = host.heldMessage();
+      host.h.setRunning(true);
+      await host.confirmToSend(undefined, about);
+      host.h.coordinator.remove(sid, 'q-1');
+      await host.turnEnds();
+      expect(host.dispatched).toEqual([]);
+
+      // A new message, sent with the switch agreed to: it goes, once.
+      host.h.coordinator.enqueue(sid, makeItem('q-3', 'new'));
+      await host.settle();
+      expect(host.dispatched).toEqual(['new']);
+      expect(host.h.coordinator.getProjection(sid).recovery).toBeNull();
+    });
   });
 
   // The paths that keep letting a held message go (DD 7083915988, items 1 and 2), through the
@@ -6633,7 +6915,7 @@ describe('AgentInputCoordinator send transaction', () => {
     h.coordinator.enqueue(sid, makeItem('q-1', 'held'));
     await flush();
     await flush();
-    expect(h.coordinator.wakeHeldForAgySwitch(sid)).toBe(true);
+    expect(h.coordinator.wakeHeldForAgySwitch(sid, holdAtHead(h.coordinator, sid))).toBe(true);
     await flush();
     await flush();
     const heldAgain = h.coordinator.getProjection(sid);
@@ -6666,7 +6948,7 @@ describe('AgentInputCoordinator send transaction', () => {
     expect(paused.pendingQueue.map((q) => q.clientId)).toEqual(['q-1']);
 
     h.sendToAgent.mockImplementation(async () => { h.setRunning(true); return sendSuccess(); });
-    expect(h.coordinator.wakeHeldForAgySwitch(sid)).toBe(false);
+    expect(h.coordinator.wakeHeldForAgySwitch(sid, holdAtHead(h.coordinator, sid))).toBe(false);
     await flush();
     await flush();
     expect(h.sendToAgent).toHaveBeenCalledTimes(1);
@@ -6683,16 +6965,16 @@ describe('AgentInputCoordinator send transaction', () => {
   it('wakes nothing when no message is held for a switch, or when the queue is paused for another reason', async () => {
     const h = createHarness();
     const sid = 'nothing-held';
-    expect(h.coordinator.wakeHeldForAgySwitch(sid)).toBe(false);
+    expect(h.coordinator.wakeHeldForAgySwitch(sid, holdAtHead(h.coordinator, sid))).toBe(false);
     h.setRunning(true);
     h.coordinator.enqueue(sid, makeItem('q-1', 'plain'));
     await flush();
-    expect(h.coordinator.wakeHeldForAgySwitch(sid)).toBe(false);
+    expect(h.coordinator.wakeHeldForAgySwitch(sid, holdAtHead(h.coordinator, sid))).toBe(false);
     h.coordinator.stop(sid, { keepQueue: true, pauseQueue: true });
     h.setRunning(false);
     await flush();
     expect(h.coordinator.getProjection(sid).queuePaused).toBe(true);
-    expect(h.coordinator.wakeHeldForAgySwitch(sid)).toBe(false);
+    expect(h.coordinator.wakeHeldForAgySwitch(sid, holdAtHead(h.coordinator, sid))).toBe(false);
     await flush();
     await flush();
     expect(h.sendToAgent).not.toHaveBeenCalled();
@@ -6734,7 +7016,7 @@ describe('AgentInputCoordinator send transaction', () => {
     // message's id, which the merge replaced, so agreeing woke nothing and the queue stayed
     // stopped. The pause is the queue's: the merged message goes out, once, then the other.
     h.sendToAgent.mockImplementation(async () => { h.setRunning(true); return sendSuccess(); });
-    expect(h.coordinator.wakeHeldForAgySwitch(sid)).toBe(true);
+    expect(h.coordinator.wakeHeldForAgySwitch(sid, holdAtHead(h.coordinator, sid))).toBe(true);
     await flush();
     await flush();
     expect(h.sendToAgent).toHaveBeenCalledTimes(2);
@@ -6744,7 +7026,7 @@ describe('AgentInputCoordinator send transaction', () => {
     await flush();
     await flush();
     expect(h.sendToAgent).toHaveBeenCalledTimes(3);
-    expect(h.coordinator.wakeHeldForAgySwitch(sid)).toBe(false);
+    expect(h.coordinator.wakeHeldForAgySwitch(sid, holdAtHead(h.coordinator, sid))).toBe(false);
   });
 
   // cindy#19 (QQ's ruling on "Interject"). The queue menu's Interject hands a queued message to

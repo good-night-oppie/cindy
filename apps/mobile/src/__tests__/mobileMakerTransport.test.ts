@@ -955,6 +955,7 @@ describe("mobile maker transport", () => {
     await maker.compactSession("s1", "");
     await maker.compactSession("s1", "focus on API design");
     await maker.input.retryLastError("s1");
+    await maker.input.retryLastError("s1", "hold-1");
     await maker.input.clearError("s1");
     await maker.input.cancelUsageLimitWait("s1");
     await maker.input.updateText("s1", "queued-1", "updated");
@@ -1033,6 +1034,7 @@ describe("mobile maker transport", () => {
       ["maker:compact-session", ["s1", ""]],
       ["maker:compact-session", ["s1", "focus on API design"]],
       ["maker:input:retry-last-error", ["s1"]],
+      ["maker:input:retry-last-error", ["s1", { agySwitchHeldMessage: "hold-1" }]],
       ["maker:input:clear-error", ["s1"]],
       ["maker:input:cancel-usage-limit-wait", ["s1"]],
       ["maker:input:update-text", ["s1", "queued-1", "updated"]],

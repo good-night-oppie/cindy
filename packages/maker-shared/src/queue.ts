@@ -120,6 +120,29 @@ export function buildQueuePanelSummary(
   };
 }
 
+/**
+ * Which hold of which message a task's error banner is about, when that message is one the host
+ * holds for a switch into Antigravity: the host's own name for the hold (`agySwitchHoldId`), read
+ * from the queue as the screen shows it. A client reads it when the user acts on that banner
+ * (when its question opens, where it asks one) and sends it back with the answer and with the
+ * retry; the host acts only if the message it holds then is still that one in that hold, so an
+ * action on a message that was since removed, edited, merged or replaced at the head of the
+ * queue sends nothing. Null when the banner is not that of such a message, or the host named no
+ * hold (an older host).
+ */
+export function agySwitchHeldMessageOf(projection: {
+  pendingQueue: ReadonlyArray<{ clientId: string; awaitsAgySwitchConfirmation?: unknown; agySwitchHoldId?: unknown }>;
+  /** What the task's banner can retry, as the host reports it; clients type it differently. */
+  recovery?: unknown;
+}): string | null {
+  const head = projection.pendingQueue[0];
+  const recovery = projection.recovery && typeof projection.recovery === 'object'
+    ? projection.recovery as { kind?: unknown; clientId?: unknown } : null;
+  if (!head || !recovery || recovery.kind !== 'queue-head' || recovery.clientId !== head.clientId) return null;
+  if (head.awaitsAgySwitchConfirmation !== true) return null;
+  return typeof head.agySwitchHoldId === 'string' && head.agySwitchHoldId.length > 0 ? head.agySwitchHoldId : null;
+}
+
 export function buildQueueRowPresentation(input: {
   busy?: boolean;
   item: { clientId: string; origin?: unknown; text?: string; sourcePlugin?: unknown; awaitsAgySwitchConfirmation?: unknown };

@@ -43,7 +43,8 @@ export function useAgySwitchPermissionRecovery(input: {
    */
   pendingSwitchKey?: string | null;
   confirm: (options: ConfirmOptions) => Promise<boolean>;
-  retry: () => void;
+  /** Retries the task's last error; for a held message, naming the hold the user acted on. */
+  retry: (agySwitchHeldMessage?: string) => void;
 }): () => void {
   const { t } = useTranslation();
   const latest = useRef(input);
@@ -61,6 +62,12 @@ export function useAgySwitchPermissionRecovery(input: {
     // the user's own action on the banner sends it then; that click is the confirmation.
     if (!askAfresh && agySwitchPermissionChange(permissionMode) === null) return;
     asking.current = true;
+    // The message the question is about, read before the question is shown. The answer and the
+    // retry carry it, and the host acts on them only if the message it holds then is still this
+    // one in this hold: while the dialog is open the user can remove or edit the message, and the
+    // next one in the queue can come to be held in its place. An answer about the first must not
+    // send the second (QQ, 2026-11-23).
+    const heldMessage = makerChatStore.getAgySwitchHeldMessage(sessionId) ?? undefined;
     try {
       // A held message is resent only on the user's answer to the question of sending it, asked
       // here. Whatever the host has on record, or this window remembers, was agreed about
@@ -84,14 +91,14 @@ export function useAgySwitchPermissionRecovery(input: {
           cancelText: t('newChat.chatInput.agentSwitch.sendConfirmation.cancel'),
         },
         t,
-        registerWithHost: (intent, agreement) => recordAgySwitchPermissionAgreementWithHost(sessionId, intent, agreement, 'send'),
+        registerWithHost: (intent, agreement) => recordAgySwitchPermissionAgreementWithHost(sessionId, intent, agreement, 'send', undefined, heldMessage),
         currentIntent: () => makerChatStore.getAgentSwitchIntent(sessionId),
         askAfresh,
       });
       // With no switch into Antigravity pending any more there is nothing to agree to, and the
       // host would only refuse the held message again: it was written for an engine the task is
       // not going to. The banner says so ("that switch is no longer pending") instead.
-      if (agreed && makerChatStore.getAgentSwitchIntent(sessionId)?.target === 'agy') retry();
+      if (agreed && makerChatStore.getAgentSwitchIntent(sessionId)?.target === 'agy') retry(heldMessage);
     } catch {
       // The host did not record the agreement: the message stays held and the banner stays.
       toast.error(t('newChat.chatInput.agentSwitch.permissionAgreementNotRecorded'));
@@ -124,6 +131,7 @@ export function useAgySwitchPermissionRecovery(input: {
   return useCallback(() => {
     const now = latest.current;
     if (!now.remote && isAgentSwitchPermissionUnconfirmedError(now.error)) void recover(true);
-    else now.retry();
+    // The click is on the banner as it is now; if it is that of a held message, it is about that one.
+    else now.retry((now.sessionId ? makerChatStore.getAgySwitchHeldMessage(now.sessionId) : null) ?? undefined);
   }, [recover]);
 }

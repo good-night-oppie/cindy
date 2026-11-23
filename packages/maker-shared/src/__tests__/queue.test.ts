@@ -1,5 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import {
+  agySwitchHeldMessageOf,
   buildQueuePanelSummary,
   buildQueueRowPresentation,
   isAutoSentQueueItem,
@@ -370,6 +371,30 @@ describe('shared queue presentation model', () => {
     expect(isAutoSentQueueItem({ sourcePlugin: { name: 'no id' } })).toBe(false);
     expect(isAutoSentQueueItem({ origin: { kind: 'orca', senderLabel: 'Lead' } })).toBe(false);
     expect(isAutoSentQueueItem({})).toBe(false);
+  });
+});
+
+// cindy#19, QQ's ruling of 2026-11-23: a confirmation to send a message the host holds for a
+// switch into Antigravity is about that one message. The desktop window and the phone both read
+// "which message is this banner about" here, and send it back with the answer and the retry;
+// the host's side of it is in agent-input-coordinator.test.ts.
+describe('agySwitchHeldMessageOf', () => {
+  const held = { clientId: 'q-1', awaitsAgySwitchConfirmation: true, agySwitchHoldId: 'hold-1' };
+  const banner = { kind: 'queue-head', clientId: 'q-1' };
+
+  it('names the hold of the held message the banner is about', () => {
+    expect(agySwitchHeldMessageOf({ pendingQueue: [held, { clientId: 'q-2' }], recovery: banner })).toBe('hold-1');
+  });
+
+  it.each([
+    ['no banner is showing', { pendingQueue: [held], recovery: null }],
+    ['the banner is that of a turn, not of a queued message', { pendingQueue: [held], recovery: { kind: 'active-turn' } }],
+    ['another message was moved ahead of the one the banner is about', { pendingQueue: [{ clientId: 'q-2' }, held], recovery: banner }],
+    ['the message at the head is held for another reason', { pendingQueue: [{ clientId: 'q-1', agySwitchHoldId: 'hold-1' }], recovery: banner }],
+    ['the host named no hold (an older host)', { pendingQueue: [{ clientId: 'q-1', awaitsAgySwitchConfirmation: true }], recovery: banner }],
+    ['the queue is empty', { pendingQueue: [], recovery: banner }],
+  ])('names nothing when %s', (_name, projection) => {
+    expect(agySwitchHeldMessageOf(projection)).toBeNull();
   });
 });
 
