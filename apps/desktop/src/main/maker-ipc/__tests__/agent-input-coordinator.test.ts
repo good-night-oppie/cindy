@@ -6479,6 +6479,57 @@ describe('AgentInputCoordinator send transaction', () => {
     expect(host.dispatched).toEqual(['held']);
   });
 
+  // QQ's acceptance, 2026-11-23: after a restart the held message is still at the head and no
+  // switch is pending; the task is in a mode Antigravity keeps. The user picks the engine again:
+  // nothing is sent, whether the banner is showing or was closed. The user's own action on the
+  // message (the banner's Send, which is the queue's retry of that message) sends it, once.
+  // The host's side of it; the window's side is in agySwitchPermissionRecovery.test.tsx.
+  it('after a restart, picking the engine again in a mode that needs no conversion sends nothing; the banner\u2019s Send sends the held message once', async () => {
+    const sid = 'held-across-restart-no-conversion';
+    const before = hostWithQueue(sid);
+    await before.pick(false);
+    await before.h.coordinator.ensureQueueRestored(sid);
+    before.h.coordinator.enqueue(sid, makeItem('q-1', 'held'));
+    await before.settle();
+    const snapshot = JSON.parse(JSON.stringify(before.h.persistQueueSnapshot.mock.calls.at(-1)?.[1] ?? []));
+    expect(snapshot).toMatchObject([{ clientId: 'q-1', awaitsAgySwitchConfirmation: true }]);
+
+    // The restarted host: the queue is read back from disk, the pending switch is gone.
+    const host = hostWithQueue(sid);
+    const { h } = host;
+    h.setLoadQueueSnapshot(async () => snapshot);
+    await h.coordinator.ensureQueueRestored(sid);
+    host.row.permissionMode = 'ask';
+    // Continue sending, with no switch pending: the message was written for an engine the task
+    // does not run, so it is held again (the banner that says the switch is gone).
+    h.sendToAgent.mockImplementation(async (id, message) => {
+      if (!host.pendingSwitches.get(id)) return hostSendFailure('AGENT_SWITCH_PERMISSION_UNCONFIRMED', 'the switch is gone');
+      host.dispatched.push((message as { content?: unknown }).content);
+      h.setRunning(true);
+      return sendSuccess();
+    });
+    h.coordinator.resume(sid);
+    await host.settle();
+    expect(host.dispatched).toEqual([]);
+    expect(h.coordinator.getProjection(sid).recovery).toEqual({ kind: 'queue-head', clientId: 'q-1' });
+
+    // The engine is picked again. No permission changes, so no agreement is given or needed.
+    await host.pick(false);
+    await host.settle();
+    expect(host.pendingSwitches.get(sid)?.agyPermissionAgreement).toBeUndefined();
+    expect(host.dispatched).toEqual([]);
+    const waiting = h.coordinator.getProjection(sid);
+    expect(waiting.pendingQueue.map((q) => q.clientId)).toEqual(['q-1']);
+    expect(waiting.recovery).toEqual({ kind: 'queue-head', clientId: 'q-1' });
+
+    // The user selects Send on the banner.
+    await h.coordinator.retryLastError(sid);
+    await host.settle();
+    expect(host.dispatched).toEqual(['held']);
+    await host.turnEnds();
+    expect(host.dispatched).toEqual(['held']);
+  });
+
   // The paths that keep letting a held message go (DD 7083915988, items 1 and 2), through the
   // same host entry, and what a request to wake cannot stand in for.
   it('sends a held message once when the user confirms on its banner, with a later message after it, and never on an answer the host does not take', async () => {
