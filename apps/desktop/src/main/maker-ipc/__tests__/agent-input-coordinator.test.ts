@@ -6336,7 +6336,7 @@ describe('AgentInputCoordinator send transaction', () => {
       MAKER_INVOKE.SWITCH_SESSION_AGENT, sid, 'agy', 'gemini-test', null, undefined, undefined,
       { agyPermissionAgreementOnly: true, agyPermissionAgreement: agreement, agyPermissionRevision: revision, ...extra });
     return {
-      h, dispatched, pendingSwitches,
+      h, dispatched, pendingSwitches, row,
       /** The model picker; "not now" in its dialog registers the switch with no agreement. */
       pick: (agreed: boolean) => ipc.invoke(MAKER_INVOKE.SWITCH_SESSION_AGENT, sid, 'agy', 'gemini-test', null, undefined, undefined,
         agreed ? { agyPermissionAgreement: agreement } : undefined),
@@ -6402,6 +6402,33 @@ describe('AgentInputCoordinator send transaction', () => {
     expect(kept.error).toMatch(/^AGENT_SWITCH_PERMISSION_UNCONFIRMED: /);
 
     await expect(host.confirmToSend()).resolves.toMatchObject({ agyPermissionAgreementRecorded: true });
+    await host.settle();
+    expect(host.dispatched).toEqual(['held']);
+    await host.turnEnds();
+    expect(host.dispatched).toEqual(['held']);
+  });
+
+  // DD 7085158660, "b"; QQ's ruling, 2026-11-22. After the banner was closed the task's mode was
+  // changed to one Antigravity keeps as it is, so picking the engine again needs no agreement and
+  // carries none. Nothing was agreed to in order to send, so nothing is sent: the queue stays
+  // paused and the user's own "Continue sending" sends the message, once.
+  it('keeps the queue paused when the engine is picked again in a mode that needs no agreement; Continue sending sends the held message once', async () => {
+    const sid = 'held-then-mode-needs-no-agreement';
+    const host = hostWithQueue(sid);
+    const { h } = host;
+    await host.pick(false);
+    h.coordinator.enqueue(sid, makeItem('q-1', 'held'));
+    await host.settle();
+    h.coordinator.clearError(sid);
+    host.row.permissionMode = 'ask';
+
+    await host.pick(false);
+    await host.settle();
+    expect(host.dispatched).toEqual([]);
+    expect(h.coordinator.getProjection(sid)).toMatchObject({ queuePaused: true, error: null });
+    expect(h.coordinator.getProjection(sid).pendingQueue.map((q) => q.clientId)).toEqual(['q-1']);
+
+    h.coordinator.resume(sid);
     await host.settle();
     expect(host.dispatched).toEqual(['held']);
     await host.turnEnds();
