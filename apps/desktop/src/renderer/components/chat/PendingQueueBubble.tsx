@@ -126,23 +126,23 @@ export function PendingQueueBubble({
           </DropdownMenuTrigger>
           <DropdownMenuContent align="end">
             {steerHeld ? (
-              <>
-                <DropdownMenuItem
-                  className="gap-2"
-                  disabled
-                  aria-describedby={steerHeldReasonId}
-                  data-steer-held="true"
-                >
-                  <ArrowUp size={16} className="shrink-0" />
-                  {t('newChat.pendingQueue.steerAction')}
-                </DropdownMenuItem>
-                <p
-                  id={steerHeldReasonId}
-                  className="max-w-[240px] px-2 pb-1 text-12 leading-[1.4] text-[var(--text-secondary)]"
-                >
-                  {t('newChat.pendingQueue.steerHeldForAgySwitch')}
-                </p>
-              </>
+              // Not the menu's own `disabled`: a disabled item is skipped by the arrow keys and
+              // never read. This one takes focus, says why in its second line, and does nothing.
+              <DropdownMenuItem
+                className="max-w-[260px] cursor-default items-start gap-2"
+                aria-disabled="true"
+                aria-describedby={steerHeldReasonId}
+                data-steer-held="true"
+                onSelect={(event) => event.preventDefault()}
+              >
+                <ArrowUp size={16} className="mt-0.5 shrink-0 opacity-50" />
+                <span className="flex min-w-0 flex-col gap-0.5">
+                  <span className="opacity-50">{t('newChat.pendingQueue.steerAction')}</span>
+                  <span id={steerHeldReasonId} className="whitespace-normal text-12 leading-[1.4] text-[var(--text-secondary)]">
+                    {t('newChat.pendingQueue.steerHeldForAgySwitch')}
+                  </span>
+                </span>
+              </DropdownMenuItem>
             ) : !availability.actions.steer.disabled && (
               <DropdownMenuItem
                 className="gap-2"

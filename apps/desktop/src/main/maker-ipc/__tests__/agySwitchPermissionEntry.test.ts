@@ -166,14 +166,21 @@ function fixture(initialMode: string) {
      */
     pickGeminiModel: (agreedFor: string | null = row.permissionMode) => ipc.invoke(
       MAKER_INVOKE.SWITCH_SESSION_AGENT, id, 'agy', 'gemini-test', null, undefined, undefined,
-      agreedFor === null ? undefined : { agyPermissionAgreement: {
+      agreedFor === null ? undefined : { agyPermissionAgreedWithThisPick: true, agyPermissionAgreement: {
         change: agySwitchPermissionChange(agreedFor), mode: permissionModeAfterSwitchToAgy(agreedFor),
       } }),
+    /**
+     * A later pick of the same engine (another model, an effort, Fast, thinking): no dialog. Before
+     * cindy#19's review the composer sent along whatever this window remembered as agreed.
+     */
+    pickAgainCarrying: (remembered: string, model = 'gemini-test') => ipc.invoke(
+      MAKER_INVOKE.SWITCH_SESSION_AGENT, id, 'agy', model, null, 'high', undefined,
+      { agyPermissionAgreement: { change: agySwitchPermissionChange(remembered), mode: permissionModeAfterSwitchToAgy(remembered) } }),
     /** The same pick arriving from another computer that controls this one, claiming an agreement. */
     pickGeminiModelFromRemote: (agreedFor: string) => runDeviceLinkInvokeContext(
       { controllerDeviceId: 'controller-1', channel: MAKER_INVOKE.SWITCH_SESSION_AGENT },
       () => ipc.invoke(MAKER_INVOKE.SWITCH_SESSION_AGENT, id, 'agy', 'gemini-test', null, undefined, undefined,
-        { agyPermissionAgreement: {
+        { agyPermissionAgreedWithThisPick: true, agyPermissionAgreement: {
           change: agySwitchPermissionChange(agreedFor), mode: permissionModeAfterSwitchToAgy(agreedFor),
         } })),
     /**
@@ -836,6 +843,61 @@ describe('switching a task into Antigravity from the model picker, with permissi
     await expect(moved.pendingSwitch()).resolves.toMatchObject({ agyPermissionAgreement: null });
     await expect(moved.send()).rejects.toMatchObject({ code: 'AGENT_SWITCH_PERMISSION_UNCONFIRMED' });
     expect(moved.agreedSignals()).toBe(0);
+  });
+
+  // DD 7089552822, item 1 (reproduced by DD on b144b3ee). After the task's entry or the permission
+  // menu had recorded an agreement, picking another Gemini model, an effort, Fast or thinking
+  // registered the switch again with what the window remembered as agreed, and the host took
+  // that as "agreed with this pick": it marked the agreement as given for a send and let a held
+  // message go. An agreement is taken with a registration only when the caller says it was given
+  // in that pick's dialog; otherwise the host carries its own record over, as what it was.
+  it('does not take an agreement that merely travels with a later pick as agreed in that pick, and wakes nothing for it', async () => {
+    const h = fixture('bypassPermissions');
+    await h.pickGeminiModel(null);
+    await expect(h.agreeOnly('bypassPermissions')).resolves.toMatchObject({ agyPermissionAgreementRecorded: true });
+    expect(h.agreedSignals()).toBe(0);
+
+    await h.pickAgainCarrying('bypassPermissions');
+    await h.pickAgainCarrying('bypassPermissions', 'gemini-other');
+    expect(h.agreedSignals()).toBe(0);
+    const carried = await h.pendingSwitch();
+    expect(carried).toMatchObject({ model: 'gemini-other', agyPermissionAgreement: { change: 'fromFullAccess', mode: 'auto' } });
+    expect(carried).not.toHaveProperty('agyPermissionAgreementForSend');
+
+    // Nor does a remembered answer about another mode replace the record on the way.
+    await h.pickAgainCarrying('plan');
+    await expect(h.pendingSwitch()).resolves.toMatchObject({ agyPermissionAgreement: { change: 'fromFullAccess', mode: 'auto' } });
+    expect(h.agreedSignals()).toBe(0);
+
+    // With no record on the host, what travels along does not become one.
+    const none = fixture('bypassPermissions');
+    await none.pickGeminiModel(null);
+    await none.pickAgainCarrying('bypassPermissions');
+    await expect(none.pendingSwitch()).resolves.toMatchObject({ agyPermissionAgreement: null });
+    await expect(none.send()).rejects.toMatchObject({ code: 'AGENT_SWITCH_PERMISSION_UNCONFIRMED' });
+    expect(none.agreedSignals()).toBe(0);
+  });
+
+  // DD 7089552822, item 2. "Given for a send" stayed on the pending switch when a different
+  // agreement was recorded over it without that, so an ordinary change of mode left the host
+  // reporting {new agreement, given for a send} and a window resent a held message by itself.
+  it('does not pass "given for a send" on to a different agreement that is only recorded', async () => {
+    const h = fixture('bypassPermissions');
+    await h.pickGeminiModel();
+    await expect(h.pendingSwitch()).resolves.toMatchObject({ agyPermissionAgreementForSend: true });
+    expect(h.agreedSignals()).toBe(1);
+
+    // The same agreement recorded again by the task's entry: still the one given for a send.
+    await expect(h.agreeOnly('bypassPermissions')).resolves.toMatchObject({ agyPermissionAgreementRecorded: true });
+    await expect(h.pendingSwitch()).resolves.toMatchObject({ agyPermissionAgreementForSend: true });
+
+    // The permission menu confirms another mode: another agreement, only recorded.
+    await expect(h.agreeOnly('acceptEdits', 'gemini-test', 'here', undefined, null, 'recordOnly',
+      { changing: { to: 'acceptEdits', from: 'bypassPermissions' } })).resolves.toMatchObject({ agyPermissionAgreementRecorded: true });
+    const after = await h.pendingSwitch();
+    expect(after).toMatchObject({ agyPermissionAgreement: { change: 'fromUnsupported', mode: 'ask' } });
+    expect(after).not.toHaveProperty('agyPermissionAgreementForSend');
+    expect(h.agreedSignals()).toBe(1);
   });
 
   // QQ, 2026-11-22. The permission menu records its agreement before the new mode is stored. If

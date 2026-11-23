@@ -3883,12 +3883,13 @@ export class AgentInputCoordinator {
   }
 
   /**
-   * The user has agreed to the pending switch into Antigravity (or picked the engine again and
-   * agreed). If a message held for exactly that is at the head of the queue, it is what they were
-   * waiting to send: the hold is lifted and the queue goes on, wherever the agreement was given
-   * (the banner, the task's entry, the composer, the model picker) and whether or not the banner
-   * was closed in between. The send step still decides; if the agreement does not fit, the message
-   * is held again. A queue the user stopped stays stopped.
+   * The user has agreed to the pending switch into Antigravity where a message was to go out with
+   * it: on the banner of a held message, in the dialog of a send, or in the dialog of an engine
+   * pick. The caller decides that (sessionAgentSwitchHandler.ts); an agreement that was only
+   * recorded, by the task's entry or an ordinary change of mode, does not reach this. If a message
+   * held for exactly that is waiting, the hold is lifted and the queue goes on, whether or not
+   * its banner was closed in between. The send step still decides; if the agreement does not
+   * fit, the message is held again. A queue the user stopped stays stopped.
    */
   wakeHeldForAgySwitch(sessionId: string): boolean {
     const state = this.states.get(sessionId);

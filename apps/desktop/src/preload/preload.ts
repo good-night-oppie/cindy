@@ -7889,6 +7889,8 @@ contextBridge.exposeInMainWorld('electronAPI', {
       options?: {
         agentDeviceId?: string | null; confirmedContextWindow?: number;
         agyPermissionAgreement?: { change: 'fromFullAccess' | 'fromUnsupported' | null; mode: string };
+        /** With agyPermissionAgreement on a registration: the user gave it in the dialog of this very pick. Without it the host ignores the agreement and keeps its own record. */
+        agyPermissionAgreedWithThisPick?: boolean;
         agyPermissionAgreementOnly?: boolean;
         agyPermissionAgreementForSend?: boolean;
         /** With agyPermissionAgreementOnly: what the host had on record when the user was asked; a different record is replaced only then. */

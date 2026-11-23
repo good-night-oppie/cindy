@@ -7535,6 +7535,8 @@ export function ChatInput({
       }),
     [sessionId, runtimeAgentKind, agentSwitchIntent?.target, confirmDialog, t, activePermissionMode],
   );
+  /** The task whose engine-pick dialog was just answered "yes", until the registration it led to is sent. */
+  const agyAgreedInPickDialogRef = useRef<string | null>(null);
   const confirmAgentBrowseSwitch = useCallback(
     async (targetAgent: 'claude-code' | 'codex' | 'pi' | 'agy' | null) => {
       // Picking another Gemini model while the switch is already pending shows no dialog, so it
@@ -7542,7 +7544,11 @@ export function ChatInput({
       const firstPickOfAntigravity = targetAgent === 'agy' && runtimeAgentKind !== 'agy' && !pendingAgySwitch;
       const modeAtPick = activePermissionMode;
       const proceed = await confirmAgentBrowseSwitchRisk(targetAgent);
-      if (proceed && firstPickOfAntigravity && sessionId) noteAgySwitchPermissionAgreed(sessionId, modeAtPick);
+      if (proceed && firstPickOfAntigravity && sessionId) {
+        noteAgySwitchPermissionAgreed(sessionId, modeAtPick);
+        // The registration that follows this dialog carries the answer; no later one does.
+        agyAgreedInPickDialogRef.current = sessionId;
+      }
       return proceed;
     },
     [confirmAgentBrowseSwitchRisk, runtimeAgentKind, pendingAgySwitch, activePermissionMode, sessionId],
@@ -7697,12 +7703,18 @@ export function ChatInput({
           ? makerApiForDevice(deviceLinkDeviceId)
           : makerApiFor(sourceSessionId);
         // The host applies the switch from any entry and checks the stored mode against this.
-        const agyPermissionAgreement = targetAgentKind === 'agy' && !deviceLinkDeviceId
-          ? readAgySwitchPermissionAgreed(sourceSessionId) : undefined;
+        // Sent only with the registration that the pick's own dialog led to. Picking another
+        // Gemini model, an effort, Fast or thinking afterwards shows no dialog and sends none:
+        // what this window remembers may come from the task's entry or the permission menu, and
+        // the host keeps its own record across those registrations.
+        const agreedInThisPick = targetAgentKind === 'agy' && !deviceLinkDeviceId
+          && agyAgreedInPickDialogRef.current === sourceSessionId;
+        if (agyAgreedInPickDialogRef.current === sourceSessionId) agyAgreedInPickDialogRef.current = null;
+        const agyPermissionAgreement = agreedInThisPick ? readAgySwitchPermissionAgreed(sourceSessionId) : undefined;
         const switchOptions = {
           ...(relocateTo !== undefined ? { agentDeviceId: relocateTo } : {}),
           ...(!deviceLinkDeviceId && confirmedContextWindow !== undefined ? { confirmedContextWindow } : {}),
-          ...(agyPermissionAgreement ? { agyPermissionAgreement } : {}),
+          ...(agyPermissionAgreement ? { agyPermissionAgreement, agyPermissionAgreedWithThisPick: true } : {}),
         };
         const result = Object.keys(switchOptions).length > 0
           ? await switchApi.switchSessionAgent(

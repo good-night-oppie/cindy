@@ -651,9 +651,14 @@ export function recordAgySwitchPermissionAgreement(
   // still clears it, and a switch being applied still recognises its own intent when it finishes.
   // Where the switch came from (configuration, an agent, the user) and everything else it carries
   // are untouched for the same reason.
+  const replaced = pending.agyPermissionAgreement;
   pending.agyPermissionAgreement = parsed;
-  // An agreement given for a send stays one when the entry records the same thing again later.
+  // "Given for a send" is said of one agreement. It stays when the very same agreement is
+  // recorded again without it (the entry confirming what a send had agreed to); it does not pass
+  // to a different agreement that was only recorded, or a window would resend a held message by
+  // itself on an ordinary change of mode (DD 7089552822, item 2).
   if (forSend) pending.agyPermissionAgreementForSend = true;
+  else if (!replaced || replaced.change !== parsed.change || replaced.mode !== parsed.mode) delete pending.agyPermissionAgreementForSend;
   const report = projectPendingAgentSwitchIntent(pending)!;
   if (deps.onPendingSwitchAgreementChanged) deps.onPendingSwitchAgreementChanged(sessionId, report);
   else deps.onPendingSwitchChanged?.(sessionId, report);
@@ -882,6 +887,14 @@ export async function performSessionAgentSwitch(
     confirmedContextWindow?: unknown;
     /** Local composer: what the user agreed this switch into Antigravity does to the permission mode. */
     agyPermissionAgreement?: unknown;
+    /**
+     * Local composer: the agreement above was given in the dialog of this very pick, a moment
+     * ago. Only then is it taken with a registration. An agreement that merely travels with a
+     * later pick (another model, effort, Fast, thinking: no dialog) is what the window remembers,
+     * possibly from the task's entry or the permission menu; taking it as "agreed with this pick"
+     * let a held message go on an agreement that was only recorded (DD 7089552822, item 1).
+     */
+    agyPermissionAgreedWithThisPick?: unknown;
     /**
      * Re-entry of a pending switch being applied: what it carries that a registration made again
      * on a failed recovery must keep (see PendingAgentSwitchIntent for both).
@@ -1206,7 +1219,15 @@ export async function performSessionAgentSwitch(
     };
     // What was agreed is about the permission rewrite, not the model: picking another Gemini model
     // while the switch is pending keeps it. A registration that says nothing does not erase it.
-    const agreedWithThisPick = parseAgySwitchPermissionAgreement(params.agyPermissionAgreement);
+    // Taken with the registration only when the caller says the user answered this pick's own
+    // dialog, and only as an answer about the mode the task is stored in. Anything else that
+    // comes along is ignored here: the record the host already has is carried over instead.
+    const broughtAgreement = params.agyPermissionAgreedWithThisPick === true
+      ? parseAgySwitchPermissionAgreement(params.agyPermissionAgreement) : undefined;
+    const agreedWithThisPick = broughtAgreement && typeof row?.permissionMode === 'string'
+      && broughtAgreement.change === agySwitchPermissionChange(row.permissionMode)
+      && broughtAgreement.mode === permissionModeAfterSwitchToAgy(row.permissionMode)
+      ? broughtAgreement : undefined;
     const keptAgreement = existingIntent?.targetAgentKind === targetAgentKind ? existingIntent : undefined;
     const agyPermissionAgreement = agreedWithThisPick ?? keptAgreement?.agyPermissionAgreement;
     if (targetAgentKind === 'agy' && agyPermissionAgreement) {
@@ -2046,6 +2067,8 @@ export function registerMakerSessionAgentSwitchHandler(
       // Only this computer's composer shows the dialog the agreement comes from.
       const agyPermissionAgreement = !isDeviceLinkInvoke() && options && typeof options === 'object' && !Array.isArray(options)
         ? (options as { agyPermissionAgreement?: unknown }).agyPermissionAgreement : undefined;
+      const agyPermissionAgreedWithThisPick = agyPermissionAgreement !== undefined
+        && (options as { agyPermissionAgreedWithThisPick?: unknown }).agyPermissionAgreedWithThisPick === true;
       // An answer to "may this pending switch change the permissions": it is attached to that
       // switch if it is still the pending one, and does nothing else (see the function). A remote
       // controller's answer is not taken; this path decides that for itself, from what was sent.
@@ -2096,6 +2119,7 @@ export function registerMakerSessionAgentSwitchHandler(
         fastMode,
         ...(confirmedContextWindow !== undefined ? { confirmedContextWindow } : {}),
         ...(agyPermissionAgreement !== undefined ? { agyPermissionAgreement } : {}),
+        ...(agyPermissionAgreedWithThisPick ? { agyPermissionAgreedWithThisPick: true as const } : {}),
         ...(agentDeviceId !== undefined ? { agentDeviceId } : {}),
         thinking,
         assertSelectionCurrent: guard.admit,

@@ -55,11 +55,18 @@ describe('"Interject" for a queued message held for a permission confirmation', 
     return { onSteer, rows, view };
   }
 
-  it('queue panel: stays in place unavailable with its reason, dispatches nothing by click, keys or shortcut, and leaves other rows alone', () => {
+  it('queue panel: stays in place unavailable with its reason, dispatches nothing by click, keys or shortcut, and leaves other rows alone', async () => {
     const { onSteer, rows, view } = renderPanel([queued('held', true), queued('plain', false)]);
     const [heldRow, plainRow] = rows();
 
-    fireEvent.mouseEnter(heldRow!);
+    // DD 7089552822, item 4: the row itself takes focus, and the interject shortcut on it did
+    // nothing at all. The row is described by the reason, and the shortcut shows it.
+    expect(document.getElementById(heldRow!.getAttribute('aria-describedby')!)?.textContent).toBe(reason());
+    expect(screen.queryByRole('tooltip')).toBeNull();
+    fireEvent.keyDown(heldRow!, steerShortcut);
+    expect(onSteer).not.toHaveBeenCalled();
+    expect(await screen.findByRole('tooltip')).toBeTruthy();
+    expect(screen.getByRole('tooltip').textContent).toBe(reason());
     const heldButton = heldRow!.querySelector('button[data-steer-held="true"]') as HTMLButtonElement;
     expect(heldButton).not.toBeNull();
     // Reachable: not natively disabled, so it takes focus, hover and a tap.
@@ -70,7 +77,12 @@ describe('"Interject" for a queued message held for a permission confirmation', 
     // The action is named the way its own button names it.
     expect(reason().toLowerCase()).toContain(interject().toLowerCase());
 
+    // DD 7089552822, item 3: Enter or Space on the focused button is a click; it used to close
+    // the reason that focus had just opened. It stays.
     fireEvent.click(heldButton);
+    expect(screen.getByRole('tooltip').textContent).toBe(reason());
+    fireEvent.click(heldButton);
+    expect(screen.getByRole('tooltip').textContent).toBe(reason());
     fireEvent.keyDown(heldButton, { key: 'Enter' });
     fireEvent.keyDown(heldButton, { key: ' ' });
     fireEvent.keyDown(heldButton, steerShortcut);
@@ -107,18 +119,25 @@ describe('"Interject" for a queued message held for a permission confirmation', 
     return { onSteer, menu: screen.getByRole('menu') };
   }
 
-  it('queue menu: shows "Interject" disabled with the reason written under it, and selecting it dispatches nothing', () => {
+  it('queue menu: shows "Interject" unavailable with the reason as its second line, reachable by keyboard, and selecting it dispatches nothing', () => {
     const { onSteer, menu } = renderBubble(queued('held', true));
     const item = within(menu).getByRole('menuitem', { name: new RegExp(interject()) });
     expect(item.getAttribute('aria-disabled')).toBe('true');
+    // DD 7089552822, item 5: the menu's own "disabled" takes an item out of keyboard reach and
+    // nothing reads its description. This one is reached like any other and carries the reason
+    // inside it, so the arrow keys and a screen reader get to the sentence.
+    expect(item.hasAttribute('data-disabled')).toBe(false);
     const described = document.getElementById(item.getAttribute('aria-describedby')!);
     expect(described?.textContent).toBe(reason());
-    // Readable by opening the menu alone: the sentence is part of the menu, not a hover hint.
-    expect(within(menu).getByText(reason())).toBe(described);
+    expect(item.contains(described)).toBe(true);
+    item.focus();
+    expect(document.activeElement).toBe(item);
     fireEvent.click(item);
     fireEvent.keyDown(item, { key: 'Enter' });
     fireEvent.keyDown(item, { key: ' ' });
     expect(onSteer).not.toHaveBeenCalled();
+    // Selecting it leaves the menu open with the reason still there.
+    expect(screen.getByRole('menu').contains(described)).toBe(true);
   });
 
   it('queue menu: a message that is not held interjects as before and shows no reason', () => {

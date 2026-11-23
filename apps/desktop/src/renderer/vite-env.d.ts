@@ -6785,6 +6785,8 @@ interface ElectronAPI {
          * Only record that agreement on the switch into Antigravity that is pending now (the one
          * with this model and provider): nothing is registered, replaced, applied or sent.
          */
+        /** With agyPermissionAgreement on a registration: the user gave it in the dialog of this very pick. Without it the host ignores the agreement and keeps its own record. */
+        agyPermissionAgreedWithThisPick?: boolean;
         agyPermissionAgreementOnly?: boolean;
         /**
          * With agyPermissionAgreementOnly: the user agreed where a message was to go out with it

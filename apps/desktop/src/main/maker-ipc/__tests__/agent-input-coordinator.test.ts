@@ -6340,7 +6340,7 @@ describe('AgentInputCoordinator send transaction', () => {
       h, dispatched, pendingSwitches, row,
       /** The model picker; "not now" in its dialog registers the switch with no agreement. */
       pick: (agreed: boolean) => ipc.invoke(MAKER_INVOKE.SWITCH_SESSION_AGENT, sid, 'agy', 'gemini-test', null, undefined, undefined,
-        agreed ? { agyPermissionAgreement: agreement } : undefined),
+        agreed ? { agyPermissionAgreement: agreement, agyPermissionAgreedWithThisPick: true } : undefined),
       /**
        * The task's own entry, and the permission menu's "Confirm change": the same request, which
        * says nothing about sending.
