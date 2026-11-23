@@ -8,6 +8,7 @@ import {
   isAgySwitchPermissionDialogOpen,
 } from './agentSwitchConfirmation';
 import { recordAgySwitchPermissionAgreementWithHost } from './agySwitchPermissionHost';
+import { agySwitchPermissionChange } from '../../../shared/agentKindConversion';
 
 /**
  * The host held a message (a queued one, usually) because applying the pending switch into
@@ -54,6 +55,11 @@ export function useAgySwitchPermissionRecovery(input: {
   const recover = useCallback(async (askAfresh: boolean) => {
     const { sessionId, runningAgent, permissionMode, confirm, retry } = latest.current;
     if (!sessionId || asking.current) return;
+    // In a mode Antigravity keeps as it is there is no permission change to ask about, so no
+    // dialog would show and "nothing to ask" would pass for a "yes": the held message would be
+    // resent by itself as soon as a switch appeared, which is the model picker sending it. Only
+    // the user's own action on the banner sends it then; that click is the confirmation.
+    if (!askAfresh && agySwitchPermissionChange(permissionMode) === null) return;
     asking.current = true;
     try {
       // A held message is resent only on the user's answer to the question of sending it, asked

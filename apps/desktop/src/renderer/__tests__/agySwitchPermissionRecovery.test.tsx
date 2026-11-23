@@ -308,6 +308,32 @@ describe('a message the host held for an unconfirmed permission change', () => {
   // registration and this very change, another window does not ask again. The answer was given on
   // this computer; asking twice adds nothing, and the host checks its own record when it applies
   // the switch whatever a window believes. An agreement for another change is not that answer.
+  // Asked by JJ (on 7089985832) and found to be real. A message held across a restart, with no
+  // switch pending; the task is in a mode Antigravity keeps as it is. The user picks the engine
+  // again. There is no permission change to ask about, so no dialog, and the automatic step took
+  // "nothing to ask" for a "yes": it resent the held message by itself. That is the model picker
+  // sending a held message, which QQ ruled out (2026-11-23). Nothing is resent on its own now;
+  // the banner's own action, the user's click, sends it, with no dialog since none applies.
+  it('does not resend by itself when the engine is picked again in a mode that needs no agreement; the banner\u2019s action resends once, with no dialog', async () => {
+    h.intent = null;
+    forgetAgySwitchPermissionAgreed('task-1');
+    const onResend = vi.fn();
+    const shown = render(view({ error: HELD, mode: 'ask', onResend }));
+    await settle();
+    h.intent = { target: 'agy', model: 'gemini-test', providerId: null, agyPermissionRevision: 9, agyPermissionAgreement: null };
+    shown.rerender(view({ error: HELD, mode: 'ask', onResend }));
+    await settle();
+    await settle();
+    expect(onResend).not.toHaveBeenCalled();
+    expect(screen.queryByRole('alertdialog')).toBeNull();
+    expect(h.registerWithHost).not.toHaveBeenCalled();
+
+    fireEvent.click(screen.getByRole('button', { name: 'Retry' }));
+    await waitFor(() => expect(onResend).toHaveBeenCalledTimes(1));
+    expect(screen.queryByRole('alertdialog')).toBeNull();
+    expect(h.registerWithHost).not.toHaveBeenCalled();
+  });
+
   it('asks in this window too when the host already has an agreement for this change, even one given for a send elsewhere, and resends only on the answer', async () => {
     h.intent = { target: 'agy', model: 'gemini-test', providerId: null, agyPermissionRevision: 7,
       agyPermissionAgreement: { change: 'fromFullAccess', mode: 'auto' }, agyPermissionAgreementForSend: true };
