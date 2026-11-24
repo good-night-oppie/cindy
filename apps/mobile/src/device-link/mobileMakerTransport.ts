@@ -884,7 +884,7 @@ export interface MobileMakerTransport {
       opts?: { keepQueue?: boolean; pauseQueue?: boolean },
     ): Promise<InputProjection>;
     /** `continueSending`: the user's "Continue sending"; an answer to a question card resumes without it. */
-    resume(sessionId: string, opts?: { continueSending?: boolean; answerClientId?: string; agySwitchHeldMessage?: string }): Promise<InputProjection>;
+    resume(sessionId: string, opts?: { continueSending?: boolean; answerClientId?: string; agySwitchHeldMessage?: string | null }): Promise<InputProjection>;
     retryImageDelivery(sessionId: string, imageId: string): Promise<void>;
     /** `agySwitchHeldMessage`: which held message the retry is about (agySwitchHeldMessageOf). */
     retryLastError(sessionId: string, agySwitchHeldMessage?: string | null): Promise<InputProjection>;
@@ -1573,7 +1573,7 @@ export function createMobileMakerTransport({
       },
       stop: (sessionId, opts) => call("maker:input:stop", [sessionId, opts]),
       resume: (sessionId, opts) => call("maker:input:resume", opts?.continueSending
-        ? [sessionId, { continueSending: true, ...(opts.agySwitchHeldMessage ? { agySwitchHeldMessage: opts.agySwitchHeldMessage } : {}) }]
+        ? [sessionId, { continueSending: true, ...(opts.agySwitchHeldMessage !== undefined ? { agySwitchHeldMessage: opts.agySwitchHeldMessage } : {}) }]
         : opts?.answerClientId ? [sessionId, { answerClientId: opts.answerClientId }] : [sessionId]),
       retryImageDelivery: (sessionId, imageId) => call("maker:images:retry", [sessionId, imageId]),
       retryLastError: (sessionId, agySwitchHeldMessage) =>

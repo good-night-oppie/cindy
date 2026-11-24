@@ -7968,7 +7968,7 @@ function SessionScreenContent({ beforeSessionSwitchRef, newSessionActionRef }: S
   const resumeQueue = () => {
     const pausedAt = inputProjection.pendingQueue[0] as { awaitsAgySwitchConfirmation?: unknown; agySwitchHoldId?: unknown } | undefined;
     const agySwitchHeldMessage = pausedAt?.awaitsAgySwitchConfirmation === true && typeof pausedAt.agySwitchHoldId === 'string'
-      ? pausedAt.agySwitchHoldId : undefined;
+      ? pausedAt.agySwitchHoldId : null;
     void runQueueAction(() => maker.input.resume(sessionId, { continueSending: true, agySwitchHeldMessage }));
   };
 

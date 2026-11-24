@@ -1170,7 +1170,8 @@ describe('renderer input queue facade', () => {
     );
     expect(input.stop).toHaveBeenCalledWith(sid, { keepQueue: true, pauseQueue: true });
     // "Continue sending" says that it is the user's click (cindy#19).
-    expect(input.resume).toHaveBeenCalledWith(sid, { continueSending: true });
+    // The window showed no held message at the head, so it says so (DD 7126847151).
+    expect(input.resume).toHaveBeenCalledWith(sid, { continueSending: true, agySwitchHeldMessage: null });
     expect(input.retryLastError).toHaveBeenCalledWith(sid);
     expect(input.clearError).toHaveBeenCalledWith(sid);
     expect(legacySend).not.toHaveBeenCalled();

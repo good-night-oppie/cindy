@@ -15167,7 +15167,8 @@ function resumeQueue(sessionId: string): void {
     ? preResumeState.pendingQueue[0].agySwitchHoldId : undefined;
   const boundaryOpts = {
     ...(getRemoteInputClearBoundaryOpts(sessionId) ?? {}), continueSending: true as const,
-    ...(pausedAtHeld ? { agySwitchHeldMessage: pausedAtHeld } : {}),
+    // Always said: null when the window shows no held message at the head (DD 7126847151).
+    agySwitchHeldMessage: pausedAtHeld ?? null,
   };
   runAgentDispatchProjectionOperation(sessionId, (input) => input.resume(sessionId, boundaryOpts))
     .then(({ projection }) => {

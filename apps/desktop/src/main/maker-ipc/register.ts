@@ -21500,7 +21500,22 @@ export function registerMakerIpc(maker: Maker, options: RegisterMakerIpcOptions)
     }
     const heldMessage = !!opts && typeof opts === 'object' && !Array.isArray(opts)
       ? (opts as { agySwitchHeldMessage?: unknown }).agySwitchHeldMessage : undefined;
-    return inputCoordinator.resume(sid, { continueSending, ...(typeof heldMessage === 'string' ? { heldMessage } : {}) });
+    // An older phone cannot say which message its window showed. While the queue is paused at a
+    // message held for a switch into Antigravity, its click changes nothing and says so in the
+    // error it can show (QQ 7126975529, T1). Newer clients always send the field.
+    const namesNoTarget = !(!!opts && typeof opts === 'object' && !Array.isArray(opts)
+      && Object.prototype.hasOwnProperty.call(opts, 'agySwitchHeldMessage'));
+    if (isDeviceLinkInvoke() && namesNoTarget) {
+      const projection = inputCoordinator.getProjection(sid);
+      if (projection.queuePaused && projection.pendingQueue[0]?.awaitsAgySwitchConfirmation === true) {
+        // Draft wording, to be replaced by JJ's.
+        throwIpcError('PRECONDITION_FAILED', 'This message waits for you to confirm the switch to Antigravity. Update the Cindy app on this device, or confirm it on your computer.');
+      }
+    }
+    // A newer client always names the held message its window shows, or null when the window shows
+    // none; only an older client leaves the field out (DD 7126847151).
+    return inputCoordinator.resume(sid, { continueSending,
+      ...(typeof heldMessage === 'string' || heldMessage === null ? { heldMessage } : {}) });
   });
 
   ipcMain.handle(MAKER_INVOKE.IMAGES_RETRY, async (event, sessionId: unknown, imageId: unknown) => {
@@ -21521,6 +21536,13 @@ export function registerMakerIpc(maker: Maker, options: RegisterMakerIpcOptions)
       // Which held message the retry is about, when it is one held for a switch into Antigravity.
       const heldMessage = opts && typeof opts === 'object' && !Array.isArray(opts)
         ? (opts as { agySwitchHeldMessage?: unknown }).agySwitchHeldMessage : undefined;
+      // A remote retry that names no held message, while a switch into Antigravity is still
+      // pending, could send another message on the agreement given on this computer. It retries
+      // nothing; once the switch is withdrawn, the same retry works as before (QQ 7126975529, T3a).
+      if (isDeviceLinkInvoke() && typeof heldMessage !== 'string'
+        && agentSwitchPending.get(sid)?.targetAgentKind === 'agy') {
+        return inputCoordinator.getProjection(sid);
+      }
       return inputCoordinator.retryLastError(sid, typeof heldMessage === 'string' ? heldMessage : undefined);
     },
   );

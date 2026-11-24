@@ -3538,7 +3538,7 @@ export class AgentInputCoordinator {
    * queue; every other caller (an answer to a question card, a supplementary answer) only needs
    * the queue to move and says nothing about a message held for a switch into Antigravity.
    */
-  resume(sessionId: string, opts?: { continueSending?: boolean; heldMessage?: string }): AgentInputProjection {
+  resume(sessionId: string, opts?: { continueSending?: boolean; heldMessage?: string | null }): AgentInputProjection {
     assertSharedTaskQueueMutation(getDeviceLinkInvokeContext()?.sharedTask, sessionId, 'input.send');
     const state = this.getState(sessionId);
     const wasPaused = state.queuePaused;
@@ -3568,7 +3568,9 @@ export class AgentInputCoordinator {
     const pausedAt = state.pendingQueue[0];
     // When the click says which held message the window showed the queue stopped at, it lets go
     // that one only: another window may have reordered the queue before the click arrived.
-    const namesAnother = typeof opts?.heldMessage === 'string' && opts.heldMessage !== pausedAt?.agySwitchHoldId;
+    // A click that names no held message (null: the window showed none at the head) or another one
+    // lets nothing held go. Only a click without the field (an older client) keeps the old rule.
+    const namesAnother = opts?.heldMessage !== undefined && opts.heldMessage !== pausedAt?.agySwitchHoldId;
     if (opts?.continueSending === true && wasPaused && pausedAt?.awaitsAgySwitchConfirmation === true && !namesAnother) {
       // A row stored by a version that did not name holds.
       if (!pausedAt.agySwitchHoldId) pausedAt.agySwitchHoldId = crypto.randomUUID();

@@ -6629,7 +6629,7 @@ interface ElectronAPI {
       ) => Promise<import('../shared/agentInputQueue').AgentInputProjection>;
       resume: (
         sessionId: string,
-        opts?: { expectedClearBoundaryMs?: number | null; continueSending?: boolean; answerClientId?: string; agySwitchHeldMessage?: string },
+        opts?: { expectedClearBoundaryMs?: number | null; continueSending?: boolean; answerClientId?: string; agySwitchHeldMessage?: string | null },
       ) => Promise<import('../shared/agentInputQueue').AgentInputProjection>;
       retryImageDelivery: (sessionId: string, imageId: string) => Promise<void>;
       retryLastError: (

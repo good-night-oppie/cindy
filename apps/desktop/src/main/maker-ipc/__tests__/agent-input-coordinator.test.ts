@@ -4,7 +4,7 @@ import { drizzle } from 'drizzle-orm/better-sqlite3';
 import type { DbClient } from '../../localDb/client/DbClient.js';
 import { setCurrentDbClient, clearCurrentDbClient } from '../../localDb/client/current.js';
 import { saveAgentInputQueueSnapshot, awaitAgentInputQueueSnapshotPersistence, readInputDeliveryReceipts, loadAgentInputQueueSnapshot, saveCancelledInputDelivery } from '../../localDb/agentInputQueueSnapshots.js';
-import { createInputEnqueueHarness, createInputStopHarness, createSavedQuotaRestoreHarness } from './inputEnqueueHarness.js';
+import { createInputResumeRetryHarness, createInputEnqueueHarness, createInputStopHarness, createSavedQuotaRestoreHarness } from './inputEnqueueHarness.js';
 import { getMainClassicalStyle, getResolvedMainLocale } from '../../i18n.desktop.js';
 import { mcpAppModelContext } from '../../mcp-apps/runtime.js';
 import { FORWARDED_REQUEST_RECEIPT } from '../../../shared/forwardedRequest.js';
@@ -6838,6 +6838,51 @@ describe('AgentInputCoordinator send transaction', () => {
       expect(host.dispatched).toEqual(['third', 'second']);
     });
 
+    // QQ 7126975529 (T1, T3a), from the remote IPC entry as registered. T1: an older phone's
+    // "Continue sending" says no target; over a queue paused at a held message it changes nothing
+    // and gets an error it can show. T3a: while a switch into Antigravity is pending, a remote
+    // Retry that names no held message retries nothing; once the switch is withdrawn it goes on
+    // to the ordinary retry.
+    it('an older phone’s Continue sending over a held message keeps the queue paused and gets an error it can show', async () => {
+      const sid = 'old-phone-continue';
+      const { host } = await twoQueuedFirstHeld(sid);
+      const { h } = host;
+      await host.confirmWithoutSending();
+      h.coordinator.clearError(sid);
+      await host.settle();
+      expect(h.coordinator.getProjection(sid).queuePaused).toBe(true);
+      const ipc = createInputResumeRetryHarness(h.coordinator, { remote: () => true, agentSwitchPending: host.pendingSwitches });
+      for (const opts of [undefined, { continueSending: true }]) {
+        await expect(ipc.resume(sid, opts)).rejects.toMatchObject({ code: 'PRECONDITION_FAILED' });
+        await host.settle();
+        expect(h.coordinator.getProjection(sid).queuePaused).toBe(true);
+        expect(host.dispatched).toEqual([]);
+      }
+      // A newer phone names the message its window shows, and that one goes.
+      await ipc.resume(sid, { continueSending: true, agySwitchHeldMessage: h.coordinator.getProjection(sid).pendingQueue[0]?.agySwitchHoldId });
+      await host.settle();
+      expect(host.dispatched[0]).toBe('first');
+    });
+
+    it('a remote Retry naming no held message retries nothing while a switch into Antigravity is pending, and goes on once it is withdrawn', async () => {
+      const sid = 'remote-retry-unnamed-pending';
+      const { host } = await twoQueuedFirstHeld(sid);
+      const { h } = host;
+      await host.confirmWithoutSending();
+      await host.settle();
+      expect(host.pendingSwitches.get(sid)?.targetAgentKind).toBe('agy');
+      const forwarded = vi.spyOn(h.coordinator, 'retryLastError');
+      const ipc = createInputResumeRetryHarness(h.coordinator, { remote: () => true, agentSwitchPending: host.pendingSwitches });
+      await ipc.retry(sid);
+      await host.settle();
+      expect(forwarded).not.toHaveBeenCalled();
+      expect(host.dispatched).toEqual([]);
+      host.pendingSwitches.clear(sid);
+      await ipc.retry(sid);
+      expect(forwarded).toHaveBeenCalledExactlyOnceWith(sid, undefined);
+      forwarded.mockRestore();
+    });
+
     // The review of 812f91cd on the remote Retry. A computer controlling the task cannot agree
     // to the permission change; its Retry on the banner of a held message is the user's "send
     // this one", naming the hold. With the agreement recorded on the task's own computer (from
@@ -6959,6 +7004,29 @@ describe('AgentInputCoordinator send transaction', () => {
       h.coordinator.resume(sid, { continueSending: true, heldMessage: h.coordinator.getProjection(sid).pendingQueue[0]?.agySwitchHoldId });
       await host.settle();
       expect(host.dispatched).toEqual(['other held']);
+    });
+
+    // DD 7126847151 (DD_T1): the window showed an ordinary message at the head, so it named no held
+    // message (null); another window had put the held one back first before the click arrived.
+    it('Continue sending from a window that showed no held message at the head lets nothing held go', async () => {
+      const sid = 'continue-sending-names-none';
+      const { host } = await twoQueuedFirstHeld(sid);
+      const { h } = host;
+      await host.confirmWithoutSending();
+      h.coordinator.clearError(sid);
+      await host.settle();
+      h.coordinator.move(sid, 'q-2', 0);
+      await host.settle();
+      expect(h.coordinator.getProjection(sid).pendingQueue[0]?.clientId).toBe('q-2');
+      h.coordinator.move(sid, 'q-1', 0);
+      await host.settle();
+      h.coordinator.resume(sid, { continueSending: true, heldMessage: null });
+      await host.settle();
+      expect(host.dispatched).toEqual([]);
+      expect(h.coordinator.getProjection(sid).queuePaused).toBe(true);
+      h.coordinator.resume(sid, { continueSending: true, heldMessage: h.coordinator.getProjection(sid).pendingQueue[0]?.agySwitchHoldId });
+      await host.settle();
+      expect(host.dispatched[0]).toBe('first');
     });
 
     it('a guest of a shared task cannot use an answer\u2019s name to put somebody else\u2019s queued message first', async () => {
