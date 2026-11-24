@@ -7966,7 +7966,7 @@ function SessionScreenContent({ beforeSessionSwitchRef, newSessionActionRef }: S
   const dismissTransientNotice = useCallback(() => setTransientNotice(null), []);
 
   const resumeQueue = () => {
-    void runQueueAction(() => maker.input.resume(sessionId));
+    void runQueueAction(() => maker.input.resume(sessionId, { continueSending: true }));
   };
 
   const steerQueueItem = useCallback((item: QueuedRemoteMessage) => {

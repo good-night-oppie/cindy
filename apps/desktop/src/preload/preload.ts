@@ -8380,7 +8380,7 @@ contextBridge.exposeInMainWorld('electronAPI', {
         ipcRenderer.invoke('maker:input:stop', sessionId, opts),
       resume: (
         sessionId: string,
-        opts?: { expectedClearBoundaryMs?: number | null },
+        opts?: { expectedClearBoundaryMs?: number | null; continueSending?: boolean; answerClientId?: string },
       ): Promise<import('../shared/agentInputQueue').AgentInputProjection> =>
         ipcRenderer.invoke('maker:input:resume', sessionId, opts),
       retryImageDelivery: (sessionId: string, imageId: string): Promise<void> =>

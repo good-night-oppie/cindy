@@ -3496,9 +3496,35 @@ export class AgentInputCoordinator {
     return this.getProjection(sessionId);
   }
 
-  resume(sessionId: string): AgentInputProjection {
+  /**
+   * An answer to a question card was queued while the queue was paused, and the queue is to move
+   * so that the answer reaches the agent. The answer is not "Continue sending": a message held
+   * for a switch into Antigravity stays held. The answer is placed ahead of the held messages
+   * (it answers the agent's question; it was not typed behind them) and the pause is lifted for
+   * it alone: it goes, and the queue stops again at the first held message.
+   */
+  resumeForQueuedAnswer(sessionId: string, answerClientId: string): AgentInputProjection {
+    const state = this.getState(sessionId);
+    const firstHeld = state.pendingQueue.findIndex(item => item.awaitsAgySwitchConfirmation === true);
+    const at = state.pendingQueue.findIndex(item => item.clientId === answerClientId);
+    if (firstHeld >= 0 && at > firstHeld) {
+      const next = [...state.pendingQueue];
+      const [answer] = next.splice(at, 1);
+      next.splice(firstHeld, 0, answer!);
+      state.pendingQueue = next;
+    }
+    return this.resume(sessionId);
+  }
+
+  /**
+   * Lifts the queue's pause. `continueSending` is the user's "Continue sending" on the paused
+   * queue; every other caller (an answer to a question card, a supplementary answer) only needs
+   * the queue to move and says nothing about a message held for a switch into Antigravity.
+   */
+  resume(sessionId: string, opts?: { continueSending?: boolean }): AgentInputProjection {
     assertSharedTaskQueueMutation(getDeviceLinkInvokeContext()?.sharedTask, sessionId, 'input.send');
     const state = this.getState(sessionId);
+    const wasPaused = state.queuePaused;
     state.orcaReportsStopped = false;
     const recovery = state.recovery;
     const pausedQueueHeadRecoveryClientId =
@@ -3509,15 +3535,19 @@ export class AgentInputCoordinator {
         : null;
     state.queuePaused = false;
     state.heldSwitchPause = false;
-    // "Continue sending" is the user's own action on the queue as it is now: every message held
-    // for a switch into Antigravity that is in it may go, in the hold it is in.
+    // "Continue sending" on a queue paused in front of a held message lets that one message go:
+    // the one the user sees the queue stopped at. Not the held messages behind it, at each of
+    // which the queue stops again; not when the queue was not paused (a window showing an old
+    // state); and not on a resume that is not the user's "Continue sending" (an answer to a
+    // question card lifted the pause and sent the held message ahead of the answer: DD
+    // 7107111403, item 1).
     state.agySwitchLetGo = null;
     state.agySwitchHoldsLetGo = new Set();
-    for (const queued of state.pendingQueue) {
-      if (queued.awaitsAgySwitchConfirmation !== true) continue;
+    const pausedAt = state.pendingQueue[0];
+    if (opts?.continueSending === true && wasPaused && pausedAt?.awaitsAgySwitchConfirmation === true) {
       // A row stored by a version that did not name holds.
-      if (!queued.agySwitchHoldId) queued.agySwitchHoldId = crypto.randomUUID();
-      state.agySwitchHoldsLetGo.add(queued.agySwitchHoldId);
+      if (!pausedAt.agySwitchHoldId) pausedAt.agySwitchHoldId = crypto.randomUUID();
+      state.agySwitchHoldsLetGo.add(pausedAt.agySwitchHoldId);
     }
     state.queuePausedByRestore = false;
     state.uncertainDeliveryClientId = null;
@@ -4323,6 +4353,15 @@ export class AgentInputCoordinator {
     if (fromIndex === insertIndex) return this.getProjection(sessionId);
     next.splice(insertIndex, 0, entry);
     state.pendingQueue = next;
+    // The banner of a held message is about the first message in the queue. With another moved
+    // ahead of it the banner could neither send (its answer names a message that is not first)
+    // nor be closed, and the queue did not move: nothing on screen led out (DD 7107111403, item
+    // 2). It is taken down as closing it does, and the paused queue shows "Continue sending".
+    if (this.takeDownHeldBannerLeftBehind(state)) {
+      state.queuePaused = true;
+      state.queuePausedByRestore = false;
+      state.heldSwitchPause = true;
+    }
     // 拖拽重排后等待中的消息不再是队首 → 等待态失效(横幅/自动重发都以队首为目标)。
     // 清掉并重新 drain:新队首仍撞 busy 会带自己的 clientId 重建等待,不撞则直接派发。
     if (
@@ -5597,6 +5636,24 @@ export class AgentInputCoordinator {
     for (const queued of state.pendingQueue) {
       if (queued.awaitsAgySwitchConfirmation === true) queued.agySwitchHoldId = crypto.randomUUID();
     }
+  }
+
+  /**
+   * The banner showing is that of a message held for a switch into Antigravity, and that message
+   * is no longer first in the queue. Takes the banner down (error and recovery) and ends the
+   * questions asked on it; returns whether it did. The message keeps its mark and its place.
+   */
+  private takeDownHeldBannerLeftBehind(state: SessionInputState): boolean {
+    const recovery = state.recovery;
+    if (recovery?.kind !== 'queue-head') return false;
+    const held = state.pendingQueue.find(item => item.clientId === recovery.clientId);
+    if (!held || held.awaitsAgySwitchConfirmation !== true || state.pendingQueue[0] === held) return false;
+    state.error = null;
+    clearErrorProjectionSignals(state);
+    state.stickyError = null;
+    state.recovery = null;
+    this.endAgySwitchQuestions(state);
+    return true;
   }
 
   /**
@@ -7101,6 +7158,10 @@ export class AgentInputCoordinator {
     this.clearSteeringMarker(state, item.clientId);
     state.queueEditLocks = state.queueEditLocks.filter((id) => id !== item.clientId);
     this.movePreparedItemToQueueFront(state, item, removeFromQueue);
+    // Interjected in front of a held message whose banner was showing: the banner would keep the
+    // queue from moving, so the interjected message was reported as interjected and never sent.
+    // The banner is taken down; this message goes, and the queue then stops at the held one.
+    this.takeDownHeldBannerLeftBehind(state);
     this.emit(sessionId);
     this.scheduleDrain(sessionId, 'steer-fallback');
   }

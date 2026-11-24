@@ -20122,7 +20122,7 @@ export function registerMakerIpc(maker: Maker, options: RegisterMakerIpcOptions)
     // An answer submitted after Stop explicitly resumes; a newer Stop still wins the race.
     // An ACK-uncertain steer keeps its protective pause: only an explicit user decision may re-dispatch it.
     if (pausedBeforeAnswer && inputCoordinator.getProjection(session.id).queuePaused &&
-      !inputCoordinator.isPausedForUncertainDelivery(session.id)) inputCoordinator.resume(session.id);
+      !inputCoordinator.isPausedForUncertainDelivery(session.id)) inputCoordinator.resumeForQueuedAnswer(session.id, item.clientId);
   };
 
   explicitStopImpl = async (sessionId, options) => {
@@ -21487,7 +21487,18 @@ export function registerMakerIpc(maker: Maker, options: RegisterMakerIpcOptions)
   ipcMain.handle(MAKER_INVOKE.INPUT_RESUME, async (_e, sessionId: unknown, opts?: unknown) => {
     const sid = requireSessionId(sessionId);
     await assertRemoteInputControlBoundary(sid, isDeviceLinkInvoke(), opts);
-    return inputCoordinator.resume(sid);
+    // Only the user's "Continue sending" says so; other callers of this channel lift the pause
+    // and let no held message go.
+    const continueSending = !!opts && typeof opts === 'object' && !Array.isArray(opts)
+      && (opts as { continueSending?: unknown }).continueSending === true;
+    // A supplementary answer to a question card queued its text and resumes for it: the answer
+    // goes ahead of any held message, which stays held.
+    const answerClientId = !!opts && typeof opts === 'object' && !Array.isArray(opts)
+      ? (opts as { answerClientId?: unknown }).answerClientId : undefined;
+    if (!continueSending && typeof answerClientId === 'string' && answerClientId.length > 0) {
+      return inputCoordinator.resumeForQueuedAnswer(sid, answerClientId);
+    }
+    return inputCoordinator.resume(sid, { continueSending });
   });
 
   ipcMain.handle(MAKER_INVOKE.IMAGES_RETRY, async (event, sessionId: unknown, imageId: unknown) => {

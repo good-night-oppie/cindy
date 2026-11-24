@@ -15159,10 +15159,10 @@ function resumeQueue(sessionId: string): void {
   if (preResumeHeadClientId) {
     markLocalSentUserMessage(sessionId, preResumeHeadClientId);
   }
-  const boundaryOpts = getRemoteInputClearBoundaryOpts(sessionId);
-  runAgentDispatchProjectionOperation(sessionId, (input) =>
-    boundaryOpts ? input.resume(sessionId, boundaryOpts) : input.resume(sessionId),
-  )
+  // This is the "Continue sending" button: the host lets the held message the queue is paused at
+  // go only when told so. Other callers of resume (answers to question cards) do not say it.
+  const boundaryOpts = { ...(getRemoteInputClearBoundaryOpts(sessionId) ?? {}), continueSending: true as const };
+  runAgentDispatchProjectionOperation(sessionId, (input) => input.resume(sessionId, boundaryOpts))
     .then(({ projection }) => {
       if (
         preResumeHeadClientId &&
@@ -17966,7 +17966,9 @@ async function sendProtectedQuestionSupplement(sessionId: string, requestId: str
     });
     if (!current()) return;
     if (projection.queuePaused && (state.turnStoppedByUser || state.queuePaused)) {
-      projection = await operation.api.input.resume(sessionId, getRemoteInputClearBoundaryOpts(sessionId));
+      projection = await operation.api.input.resume(sessionId, {
+        ...(getRemoteInputClearBoundaryOpts(sessionId) ?? {}), answerClientId: queued.clientId,
+      });
     }
     if (!current()) return;
     applyInputProjectionOperationResponse(sessionId, operation, projection);

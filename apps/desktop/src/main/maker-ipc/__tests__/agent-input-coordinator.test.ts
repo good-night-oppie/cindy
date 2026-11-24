@@ -474,7 +474,7 @@ describe('MCP App queued message grants', () => {
     await h.coordinator.ensureQueueRestored(sid);
     expect(h.coordinator.getProjection(sid).pendingQueue.map(item => item.clientId)).toEqual(['following']);
     expect(h.onDiscardedQueuedMessage).toHaveBeenCalledExactlyOnceWith(sid, restored);
-    h.coordinator.resume(sid);
+    h.coordinator.resume(sid, { continueSending: true });
     await flush();
     expect(h.dispatched).toHaveBeenCalledOnce();
     expect(h.sendToAgent.mock.calls[0]![3].persistUserMessage?.clientId).toBe('following');
@@ -707,7 +707,7 @@ describe('INPUT_ENQUEUE crash-restored remote Worker pause', () => {
     expect(latestSnapshotClientIds(h.persistQueueSnapshot)).toEqual(['restored', 'lead-input']);
     expect(h.sendToAgent).not.toHaveBeenCalled();
 
-    h.coordinator.resume(sid);
+    h.coordinator.resume(sid, { continueSending: true });
     await flush();
     expect(h.sendToAgent).toHaveBeenCalledOnce();
     expect(h.sendToAgent.mock.calls[0]?.[1]).toEqual({ type: 'user', content: 'old assignment' });
@@ -929,7 +929,7 @@ describe('AgentInputCoordinator Orca priority queue transactions', () => {
     await h.coordinator.ensureQueueRestored(sid);
     h.coordinator.enqueue(sid, makeItem('first', 'first'), { resumeRestorePausedQueue: true });
     h.coordinator.enqueue(sid, makeItem('second', 'second'));
-    h.coordinator.resume(sid);
+    h.coordinator.resume(sid, { continueSending: true });
     await flush();
     expect(h.coordinator.isQueuePaused(sid)).toBe(true);
     expect(h.coordinator.shouldQueueNewTurn(sid)).toBe(true);
@@ -1173,7 +1173,7 @@ describe('AgentInputCoordinator Orca priority queue transactions', () => {
     h.coordinator.enqueue(sid, makeItem('sharedTask-input', 'hello', { sharedTaskAuthor: author, userName: author.displayName }));
     expect(h.coordinator.getProjection(sid).pendingQueue[0].sharedTaskAuthor).toEqual(author);
     h.setRunning(false);
-    h.coordinator.resume(sid);
+    h.coordinator.resume(sid, { continueSending: true });
     await flush();
     expect(h.sendToAgent).toHaveBeenCalledWith(
       sid, expect.anything(), expect.anything(),
@@ -2285,7 +2285,7 @@ describe('agent-chosen control steering', () => {
     h.coordinator.onTurnEvent(sid, 'done');
     await flush();
     expect(h.sendToAgent).not.toHaveBeenCalled();
-    h.coordinator.resume(sid);
+    h.coordinator.resume(sid, { continueSending: true });
     expect(h.coordinator.isPausedForUncertainDelivery(sid)).toBe(false);
   });
   it('reports screened rejection without reviving blocked content as ordinary input', async () => {
@@ -2978,7 +2978,7 @@ describe('AgentInputCoordinator send transaction', () => {
       restarted.setRunning(true);
       return sendSuccess();
     });
-    restarted.coordinator.resume(sid);
+    restarted.coordinator.resume(sid, { continueSending: true });
     await flush();
     expect(restarted.sendToAgent).toHaveBeenCalledOnce();
     expect(restarted.coordinator.isActiveTaskCoordination(sid)).toBe(true);
@@ -3761,7 +3761,7 @@ describe('AgentInputCoordinator send transaction', () => {
       expect(projection.pendingQueue.map((q) => q.clientId)).toEqual(['q-1']);
 
       h.setRunning(true);
-      h.coordinator.resume(sid);
+      h.coordinator.resume(sid, { continueSending: true });
       await flush();
       expect(h.sendToAgent).not.toHaveBeenCalled();
 
@@ -6108,7 +6108,7 @@ describe('AgentInputCoordinator send transaction', () => {
     });
 
     // The ordinary "Continue sending" of a queue paused by the restart.
-    restarted.coordinator.resume(sid);
+    restarted.coordinator.resume(sid, { continueSending: true });
     await flush();
     await flush();
     expect(dispatched).toEqual([]);
@@ -6297,7 +6297,7 @@ describe('AgentInputCoordinator send transaction', () => {
       await flush();
       expect(h.sendToAgent).toHaveBeenCalledTimes(1);
       expect(h.coordinator.getProjection(sid).queuePaused).toBe(true);
-      h.coordinator.resume(sid);
+      h.coordinator.resume(sid, { continueSending: true });
     } else {
       expect(h.coordinator.wakeHeldForAgySwitch(sid, holdAtHead(h.coordinator, sid))).toBe(true);
       // The window that asked also retries once the answer is recorded; the two make one send.
@@ -6421,7 +6421,7 @@ describe('AgentInputCoordinator send transaction', () => {
     const kept = h.coordinator.getProjection(sid);
     expect(kept.pendingQueue.map((q) => [q.clientId, q.awaitsAgySwitchConfirmation])).toEqual([['q-1', true]]);
     expect(kept.queuePaused).toBe(true);
-    h.coordinator.resume(sid);
+    h.coordinator.resume(sid, { continueSending: true });
     await host.settle();
     expect(host.dispatched).toEqual(['held']);
     await host.turnEnds();
@@ -6471,7 +6471,7 @@ describe('AgentInputCoordinator send transaction', () => {
     expect(h.coordinator.getProjection(sid)).toMatchObject({ queuePaused: true, error: null });
     expect(h.coordinator.getProjection(sid).pendingQueue.map((q) => q.clientId)).toEqual(['q-1']);
 
-    h.coordinator.resume(sid);
+    h.coordinator.resume(sid, { continueSending: true });
     await host.settle();
     expect(host.dispatched).toEqual(['held']);
     await host.turnEnds();
@@ -6500,7 +6500,7 @@ describe('AgentInputCoordinator send transaction', () => {
     }
     // The new mode was never stored. The user continues: the send step looks at the stored mode.
     h.coordinator.clearError(sid);
-    h.coordinator.resume(sid);
+    h.coordinator.resume(sid, { continueSending: true });
     await host.settle();
     expect(host.dispatched).toEqual([]);
     const held = h.coordinator.getProjection(sid);
@@ -6510,7 +6510,7 @@ describe('AgentInputCoordinator send transaction', () => {
     // Once the mode they agreed to is the stored one, Continue sending sends it, once.
     host.row.permissionMode = 'acceptEdits';
     h.coordinator.clearError(sid);
-    h.coordinator.resume(sid);
+    h.coordinator.resume(sid, { continueSending: true });
     await host.settle();
     expect(host.dispatched).toEqual(['held']);
     await host.turnEnds();
@@ -6546,7 +6546,7 @@ describe('AgentInputCoordinator send transaction', () => {
       h.setRunning(true);
       return sendSuccess();
     });
-    h.coordinator.resume(sid);
+    h.coordinator.resume(sid, { continueSending: true });
     await host.settle();
     expect(host.dispatched).toEqual([]);
     expect(h.coordinator.getProjection(sid).recovery).toEqual({ kind: 'queue-head', clientId: 'q-1' });
@@ -6688,34 +6688,163 @@ describe('AgentInputCoordinator send transaction', () => {
       // that names it. A banner that is showing answers with the hold it reads now; with none
       // showing the user continues the queue.
       if (host.h.coordinator.getProjection(sid).recovery) await host.confirmToSend();
-      else host.h.coordinator.resume(sid);
+      else host.h.coordinator.resume(sid, { continueSending: true });
       await host.settle();
       expect(host.dispatched).toEqual(['first\nsecond']);
     });
 
-    it('another message is moved ahead while the question is open: the answer sends neither; with the held one first again, it goes', async () => {
-      const sid = 'answer-about-message-moved-back';
+    // DD 7107111403, item 2. With the banner of the held message showing, another message was
+    // put ahead of it (moved, or interjected with no turn running). The banner stayed: its
+    // answer named a message that was no longer first, so it sent nothing; it could not be
+    // closed; the queue did not move and was not paused, so nothing offered "Continue sending".
+    // The banner is now taken down as closing it does.
+    it('another message is moved ahead while the question is open: the banner comes down and the queue is paused; the late answer sends nothing; Continue sending sends the moved message, stops at the held one, and sends that on the next', async () => {
+      const sid = 'held-message-moved-behind';
       const { host, about } = await twoQueuedFirstHeld(sid);
-      host.h.coordinator.move(sid, 'q-2', 0);
+      const { h } = host;
+      h.coordinator.move(sid, 'q-2', 0);
       await host.settle();
-      expect(queued(host, sid)).toEqual(['q-2', 'q-1']);
+      const moved = h.coordinator.getProjection(sid);
+      expect(moved.pendingQueue.map((q) => q.clientId)).toEqual(['q-2', 'q-1']);
+      expect(moved.error).toBeNull();
+      expect(moved.recovery).toBeNull();
+      expect(moved.queuePaused).toBe(true);
 
-      const sentBefore = host.dispatched.length;
       await host.confirmToSend(undefined, about);
       await host.retry(about);
       await host.settle();
-      expect(host.dispatched.length).toBe(sentBefore);
-      expect(host.dispatched).not.toContain('first');
+      expect(host.dispatched).toEqual([]);
       expect(host.pendingSwitches.get(sid)?.agyPermissionAgreementForSend).toBeUndefined();
-      expect(queued(host, sid)).toEqual(['q-2', 'q-1']);
+      expect(h.coordinator.getProjection(sid).queuePaused).toBe(true);
 
-      // Moved back unchanged, it is the message the question was about, in the same hold.
-      host.h.coordinator.move(sid, 'q-1', 0);
+      h.coordinator.resume(sid, { continueSending: true });
       await host.settle();
-      expect(host.heldMessage()).toBe(about);
-      await host.confirmToSend(undefined, about);
+      expect(host.dispatched).toEqual(['second']);
+      await host.turnEnds();
+      // The held message is not let go by the "Continue sending" that was about the other one.
+      expect(host.dispatched).toEqual(['second']);
+      const stopped = h.coordinator.getProjection(sid);
+      expect(stopped.pendingQueue.map((q) => q.clientId)).toEqual(['q-1']);
+      expect(stopped.queuePaused).toBe(true);
+      h.coordinator.resume(sid, { continueSending: true });
       await host.settle();
-      expect(host.dispatched).toEqual(['first']);
+      expect(host.dispatched).toEqual(['second', 'first']);
+    });
+
+    it('another message is interjected, with no turn running, while the banner is showing: it is sent, once; the queue then stops at the held one, which Continue sending sends', async () => {
+      const sid = 'held-message-interjected-over';
+      const { host } = await twoQueuedFirstHeld(sid);
+      const { h } = host;
+      // The permission change is agreed to from the task's entry: recorded, nothing sent.
+      await host.confirmWithoutSending();
+      await host.settle();
+      expect(host.dispatched).toEqual([]);
+      const interject = createInputEnqueueHarness(h.coordinator, { remote: false }).steer;
+      await expect(interject({}, sid, makeItem('q-2', 'second'), { removeFromQueue: true })).resolves.toBe(true);
+      await host.settle();
+      expect(host.dispatched).toEqual(['second']);
+      await host.turnEnds();
+      expect(host.dispatched).toEqual(['second']);
+      const stopped = h.coordinator.getProjection(sid);
+      expect(stopped.pendingQueue.map((q) => q.clientId)).toEqual(['q-1']);
+      expect(stopped.queuePaused).toBe(true);
+      expect(stopped.error).toBeNull();
+      expect(stopped.recovery).toBeNull();
+      h.coordinator.resume(sid, { continueSending: true });
+      await host.settle();
+      expect(host.dispatched).toEqual(['second', 'first']);
+    });
+
+    // DD 7107111403, item 1. The queue is paused in front of a held message (its banner was
+    // closed) and the permission agreement is on record from the task's entry. The user answers
+    // a question card. The host queued the answer and called the same resume as "Continue
+    // sending": the held message went out, ahead of the answer. The answer now goes and the held
+    // message stays; the same for a resume that does not say it is "Continue sending".
+    it('answering a question card over a queue paused at a held message sends the answer, once, and leaves the held message held; Continue sending then sends it', async () => {
+      const sid = 'answer-over-held-message';
+      const { host } = await twoQueuedFirstHeld(sid);
+      const { h } = host;
+      h.coordinator.remove(sid, 'q-2');
+      h.coordinator.clearError(sid);
+      await host.confirmWithoutSending();
+      await host.settle();
+      expect(h.coordinator.getProjection(sid).queuePaused).toBe(true);
+      expect(host.dispatched).toEqual([]);
+
+      // What register.ts does for an answer given while the queue is paused.
+      h.coordinator.enqueue(sid, makeItem('answer-1', 'the answer'));
+      h.coordinator.resumeForQueuedAnswer(sid, 'answer-1');
+      await host.settle();
+      expect(host.dispatched).toEqual(['the answer']);
+      await host.turnEnds();
+      expect(host.dispatched).toEqual(['the answer']);
+      const stopped = h.coordinator.getProjection(sid);
+      expect(stopped.pendingQueue.map((q) => q.clientId)).toEqual(['q-1']);
+      expect(stopped.queuePaused).toBe(true);
+
+      // A resume that is not the user's "Continue sending" (a supplementary answer, an older
+      // phone) lifts the pause and lets nothing held go.
+      h.coordinator.resume(sid);
+      await host.settle();
+      expect(host.dispatched).toEqual(['the answer']);
+      expect(h.coordinator.getProjection(sid).queuePaused).toBe(true);
+
+      h.coordinator.resume(sid, { continueSending: true });
+      await host.settle();
+      expect(host.dispatched).toEqual(['the answer', 'first']);
+    });
+
+    // "Continue sending" lets go the one held message the queue is paused at, not every held
+    // message in the queue, and nothing when the queue is not paused (DD 7107111403, item 4 and
+    // the question about two held messages).
+    it('with two held messages, Continue sending sends the first and stops at the second; a second Continue sending sends that one', async () => {
+      const sid = 'two-held-messages';
+      const { host } = await twoQueuedFirstHeld(sid);
+      const { h } = host;
+      // The second is held in its turn: the first is moved behind it and back.
+      h.coordinator.remove(sid, 'q-1');
+      await host.settle();
+      expect(h.coordinator.getProjection(sid).recovery).toEqual({ kind: 'queue-head', clientId: 'q-2' });
+      h.coordinator.clearError(sid);
+      h.coordinator.enqueue(sid, makeItem('q-3', 'third'));
+      await host.settle();
+      h.coordinator.resume(sid, { continueSending: true });
+      await host.settle();
+      // No agreement on record: tried, refused and held again by the send step; nothing sent.
+      expect(host.dispatched).toEqual([]);
+      h.coordinator.clearError(sid);
+      h.coordinator.move(sid, 'q-3', 0);
+      await host.settle();
+      h.coordinator.resume(sid, { continueSending: true });
+      await host.settle();
+      expect(host.dispatched).toEqual([]);
+      const both = h.coordinator.getProjection(sid).pendingQueue;
+      // q-3 was tried at the head and is held now too; q-2 behind it was held before.
+      expect(both.map((q) => [q.clientId, q.awaitsAgySwitchConfirmation === true])).toEqual([['q-3', true], ['q-2', true]]);
+      h.coordinator.clearError(sid);
+      await host.confirmWithoutSending();
+      await host.settle();
+
+      h.coordinator.resume(sid, { continueSending: true });
+      await host.settle();
+      expect(host.dispatched).toEqual(['third']);
+      await host.turnEnds();
+      expect(host.dispatched).toEqual(['third']);
+      expect(h.coordinator.getProjection(sid).queuePaused).toBe(true);
+      h.coordinator.resume(sid, { continueSending: true });
+      await host.settle();
+      expect(host.dispatched).toEqual(['third', 'second']);
+    });
+
+    it('Continue sending from a window showing an old state, on a queue that is not paused, lets nothing held go', async () => {
+      const sid = 'continue-sending-not-paused';
+      const { host } = await twoQueuedFirstHeld(sid);
+      const { h } = host;
+      await host.confirmWithoutSending();
+      h.coordinator.resume(sid, { continueSending: true });
+      await host.settle();
+      expect(host.dispatched).toEqual([]);
+      expect(h.coordinator.getProjection(sid).recovery).toEqual({ kind: 'queue-head', clientId: 'q-1' });
     });
 
     it('a window that names no message (one from before holds had names) has its agreement recorded and sends nothing, by answer or by retry', async () => {
@@ -6922,7 +7051,7 @@ describe('AgentInputCoordinator send transaction', () => {
       expect(host.dispatched).toEqual([]);
       expect(h.coordinator.getProjection(sid).queuePaused).toBe(true);
 
-      h.coordinator.resume(sid);
+      h.coordinator.resume(sid, { continueSending: true });
       await host.settle();
       expect(host.dispatched).toEqual(['first']);
       await host.turnEnds();
@@ -7012,7 +7141,7 @@ describe('AgentInputCoordinator send transaction', () => {
     expect(kept.queuePaused).toBe(true);
     expect(host.dispatched).toEqual([]);
 
-    h.coordinator.resume(sid);
+    h.coordinator.resume(sid, { continueSending: true });
     await host.settle();
     expect(host.dispatched).toEqual(['held']);
     await host.turnEnds();
@@ -7092,7 +7221,7 @@ describe('AgentInputCoordinator send transaction', () => {
     expect(h.sendToAgent).toHaveBeenCalledTimes(1);
     expect(h.coordinator.getProjection(sid).queuePaused).toBe(true);
     // The user's own Continue sending.
-    h.coordinator.resume(sid);
+    h.coordinator.resume(sid, { continueSending: true });
     await flush();
     await flush();
     expect(h.sendToAgent).toHaveBeenCalledTimes(2);
@@ -7158,7 +7287,7 @@ describe('AgentInputCoordinator send transaction', () => {
     expect(h.coordinator.wakeHeldForAgySwitch(sid, holdAtHead(h.coordinator, sid))).toBe(false);
     await flush();
     expect(h.sendToAgent).toHaveBeenCalledTimes(1);
-    h.coordinator.resume(sid);
+    h.coordinator.resume(sid, { continueSending: true });
     await flush();
     await flush();
     expect(h.sendToAgent).toHaveBeenCalledTimes(2);
@@ -7227,7 +7356,7 @@ describe('AgentInputCoordinator send transaction', () => {
     expect(again.error).toBeNull();
 
     // "Continue sending": it goes out, once.
-    h.coordinator.resume(sid);
+    h.coordinator.resume(sid, { continueSending: true });
     await flush();
     await flush();
     expect(h.sendToAgent).toHaveBeenCalledTimes(2);
@@ -7277,7 +7406,7 @@ describe('AgentInputCoordinator send transaction', () => {
     expect(held.recovery).toBeNull();
     expect(held.error).toBeNull();
 
-    h.coordinator.resume(sid);
+    h.coordinator.resume(sid, { continueSending: true });
     await host.settle();
     expect(host.dispatched).toEqual(['held']);
     await host.turnEnds();
@@ -7309,7 +7438,7 @@ describe('AgentInputCoordinator send transaction', () => {
     expect(h.sendToAgent).toHaveBeenCalledTimes(1);
 
     // Continue sending while nothing has changed: held again, with its banner back.
-    h.coordinator.resume(sid);
+    h.coordinator.resume(sid, { continueSending: true });
     await flush();
     await flush();
     const heldAgain = h.coordinator.getProjection(sid);
@@ -7320,7 +7449,7 @@ describe('AgentInputCoordinator send transaction', () => {
     // Closed again; this time the user has picked the engine and agreed before continuing.
     h.coordinator.clearError(sid);
     h.sendToAgent.mockImplementation(async () => { h.setRunning(true); return sendSuccess(); });
-    h.coordinator.resume(sid);
+    h.coordinator.resume(sid, { continueSending: true });
     await flush();
     await flush();
     expect(h.sendToAgent).toHaveBeenCalledTimes(3);
@@ -8006,7 +8135,7 @@ describe('AgentInputCoordinator send transaction', () => {
     );
     expect(h.onRejectedUserTurn).not.toHaveBeenCalled();
 
-    h.coordinator.resume(sid);
+    h.coordinator.resume(sid, { continueSending: true });
     await flush();
 
     projection = latestProjection(h.projections);
@@ -8034,7 +8163,7 @@ describe('AgentInputCoordinator send transaction', () => {
     await persisted.promise;
     h.coordinator.enqueue(sid, second);
     h.coordinator.stop(sid, { keepQueue: true, pauseQueue: true });
-    h.coordinator.resume(sid);
+    h.coordinator.resume(sid, { continueSending: true });
     h.setRunning(false);
     h.coordinator.onSessionClosed(sid);
     await flush();
@@ -8076,7 +8205,7 @@ describe('AgentInputCoordinator send transaction', () => {
     await persisted.promise;
     h.coordinator.enqueue(sid, second);
     h.coordinator.stop(sid, { keepQueue: true, pauseQueue: true });
-    h.coordinator.resume(sid);
+    h.coordinator.resume(sid, { continueSending: true });
     h.setRunning(false);
     h.coordinator.onSessionClosed(sid);
     await flush();
@@ -8127,7 +8256,7 @@ describe('AgentInputCoordinator send transaction', () => {
     await flush();
     expect(dispatched).toEqual([]);
     expect(latestProjection(h.projections)).toMatchObject({ pendingQueue: [tail], recovery: null, error: null });
-    h.coordinator.resume(sid);
+    h.coordinator.resume(sid, { continueSending: true });
     await flush();
     expect(dispatched).toEqual([{ type: 'user', content: 'second' }]);
   });
@@ -8162,7 +8291,7 @@ describe('AgentInputCoordinator send transaction', () => {
     expect(projection.error).toBeNull();
     expect(projection.recovery).toBeNull();
 
-    h.coordinator.resume(sid);
+    h.coordinator.resume(sid, { continueSending: true });
     await flush();
 
     projection = latestProjection(h.projections);
@@ -8215,7 +8344,7 @@ describe('AgentInputCoordinator send transaction', () => {
       'cancelled',
     );
 
-    h.coordinator.resume(sid);
+    h.coordinator.resume(sid, { continueSending: true });
     await flush();
 
     projection = latestProjection(h.projections);
@@ -8526,7 +8655,7 @@ describe('AgentInputCoordinator stop and drain boundaries', () => {
 
     // A mechanical duplicate resume must not retry an unpaused recovery. Only
     // the visible paused-queue Continue action owns the recovery transition.
-    h.coordinator.resume(sid);
+    h.coordinator.resume(sid, { continueSending: true });
     await flush();
     let projection = latestProjection(h.projections);
     expect(h.sendToAgent).toHaveBeenCalledTimes(1);
@@ -8543,7 +8672,7 @@ describe('AgentInputCoordinator stop and drain boundaries', () => {
 
     // A stale recovery must never retry through a different queue head.
     h.coordinator.move(sid, 'q-2', 0);
-    h.coordinator.resume(sid);
+    h.coordinator.resume(sid, { continueSending: true });
     await flush();
     projection = latestProjection(h.projections);
     expect(h.sendToAgent).toHaveBeenCalledTimes(1);
@@ -8556,7 +8685,7 @@ describe('AgentInputCoordinator stop and drain boundaries', () => {
     expect(projection.pendingQueue.map((item) => item.clientId)).toEqual(['q-1', 'q-2']);
 
     h.sendToAgent.mockResolvedValueOnce(sendSuccess());
-    h.coordinator.resume(sid);
+    h.coordinator.resume(sid, { continueSending: true });
     await flush();
 
     projection = latestProjection(h.projections);
@@ -8610,7 +8739,7 @@ describe('AgentInputCoordinator stop and drain boundaries', () => {
       queueAbortPending: true,
     });
 
-    h.coordinator.resume(sid);
+    h.coordinator.resume(sid, { continueSending: true });
     await flush();
 
     expect(h.sendToAgent).toHaveBeenCalledTimes(1);
@@ -8641,7 +8770,7 @@ describe('AgentInputCoordinator stop and drain boundaries', () => {
       return true;
     });
     h.coordinator.stop(sid, { keepQueue: true, pauseQueue: true });
-    h.coordinator.resume(sid);
+    h.coordinator.resume(sid, { continueSending: true });
     await flush();
 
     expect(h.reconcileTurnIdle).toHaveBeenCalledWith(sid);
@@ -8672,7 +8801,7 @@ describe('AgentInputCoordinator stop and drain boundaries', () => {
       return true;
     });
     h.coordinator.stop(sid, { keepQueue: true, pauseQueue: true });
-    h.coordinator.resume(sid);
+    h.coordinator.resume(sid, { continueSending: true });
     await flush();
 
     expect(h.reconcileTurnIdle).toHaveBeenCalledWith(sid);
@@ -8711,7 +8840,7 @@ describe('AgentInputCoordinator stop and drain boundaries', () => {
       await flush();
 
       h.coordinator.stop(sid, { keepQueue: true, pauseQueue: true });
-      h.coordinator.resume(sid);
+      h.coordinator.resume(sid, { continueSending: true });
       abort.resolve();
       await flush();
 
@@ -8745,7 +8874,7 @@ describe('AgentInputCoordinator stop and drain boundaries', () => {
       await flush();
 
       h.coordinator.stop(sid, { keepQueue: true, pauseQueue: true });
-      h.coordinator.resume(sid);
+      h.coordinator.resume(sid, { continueSending: true });
       h.setRunning(false);
       await flush();
 
@@ -8871,7 +9000,7 @@ describe('AgentInputCoordinator stop and drain boundaries', () => {
     await flush();
 
     h.coordinator.stop(sid, { keepQueue: true, pauseQueue: true });
-    h.coordinator.resume(sid);
+    h.coordinator.resume(sid, { continueSending: true });
     await flush();
 
     abort.resolve();
@@ -8905,7 +9034,7 @@ describe('AgentInputCoordinator stop and drain boundaries', () => {
     await flush();
 
     h.coordinator.stop(sid, { keepQueue: true, pauseQueue: true });
-    h.coordinator.resume(sid);
+    h.coordinator.resume(sid, { continueSending: true });
     await flush();
 
     expect(h.sendToAgent).toHaveBeenCalledTimes(1);
@@ -11227,7 +11356,7 @@ describe('AgentInputCoordinator steer transaction', () => {
     expect(h.sendToAgent).toHaveBeenCalledTimes(1);
 
     h.coordinator.stop(sid, { keepQueue: true, pauseQueue: true });
-    h.coordinator.resume(sid);
+    h.coordinator.resume(sid, { continueSending: true });
     await flush();
     expect(latestProjection(h.projections).queueAbortPending).toBe(true);
 
@@ -12921,7 +13050,7 @@ describe('AgentInputCoordinator crash-recovery queue snapshots (issue #761)', ()
       expect(reader.coordinator.getQueueControlSnapshot(sid).pendingQueue).toEqual([]);
       expect(reader.onDiscardedQueuedMessage).toHaveBeenCalledWith(sid, expect.objectContaining({ clientId: oldId }));
       expect(latestSnapshotClientIds(reader.persistQueueSnapshot)).toEqual([]);
-      reader.coordinator.resume(sid);
+      reader.coordinator.resume(sid, { continueSending: true });
       await flush();
       expect(reader.sendToAgent).not.toHaveBeenCalled();
       const freshId = BOT_GROUP_CLIENT_ID.memberTurn('room', 'new-execution', 'bot');
@@ -12962,7 +13091,7 @@ describe('AgentInputCoordinator crash-recovery queue snapshots (issue #761)', ()
     expect((restored.origin as Record<PropertyKey, unknown>)[TRUSTED_DESKTOP_QUEUE_ORIGIN])
       .toEqual(expect.objectContaining({ clientId: restored.clientId, text: command }));
 
-    h.coordinator.resume(sid);
+    h.coordinator.resume(sid, { continueSending: true });
     await flush();
     const dispatchPersist = h.sendToAgent.mock.calls[0]?.[3]?.persistUserMessage;
     expect((dispatchPersist?.origin as Record<PropertyKey, unknown>)[TRUSTED_DESKTOP_QUEUE_ORIGIN])
@@ -13136,7 +13265,7 @@ describe('AgentInputCoordinator crash-recovery queue snapshots (issue #761)', ()
     // 重启后不自动替用户发送。
     expect(h.sendToAgent).not.toHaveBeenCalled();
 
-    h.coordinator.resume(sid);
+    h.coordinator.resume(sid, { continueSending: true });
     await flush();
     expect(h.sendToAgent).toHaveBeenCalledTimes(1);
     expect(h.sendToAgent.mock.calls[0]?.[1]).toEqual({ type: 'user', content: 'first' });
@@ -17990,7 +18119,7 @@ describe('usage-limit wait (ordinary tasks)', () => {
     await restarted.coordinator.ensureQueueRestored(sid);
     await flush();
     expect(restarted.sendToAgent).not.toHaveBeenCalled();
-    if (release === 'resume') restarted.coordinator.resume(sid);
+    if (release === 'resume') restarted.coordinator.resume(sid, { continueSending: true });
     else restarted.coordinator.enqueue(sid, makeItem('next', 'next task'), { resumeRestorePausedQueue: true });
     await flush();
     expect(restarted.sendToAgent).toHaveBeenCalledOnce();

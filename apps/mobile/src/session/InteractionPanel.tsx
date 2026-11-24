@@ -625,7 +625,9 @@ function InteractionItem({
             let projection = await maker.input.enqueue(sessionId, queued, { sendAtMs: Date.now() });
             if (!current()) return;
             if (projection.queuePaused && inputProjection.queuePaused) {
-              projection = await maker.input.resume(sessionId);
+              // The answer goes ahead of a message the computer holds for a switch into
+              // Antigravity; that message stays held.
+              projection = await maker.input.resume(sessionId, { answerClientId: queued.clientId });
             }
             if (!current()) return;
             remoteSessionStore.setInputProjection(sessionId, projection);

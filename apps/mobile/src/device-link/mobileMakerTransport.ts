@@ -883,7 +883,8 @@ export interface MobileMakerTransport {
       sessionId: string,
       opts?: { keepQueue?: boolean; pauseQueue?: boolean },
     ): Promise<InputProjection>;
-    resume(sessionId: string): Promise<InputProjection>;
+    /** `continueSending`: the user's "Continue sending"; an answer to a question card resumes without it. */
+    resume(sessionId: string, opts?: { continueSending?: boolean; answerClientId?: string }): Promise<InputProjection>;
     retryImageDelivery(sessionId: string, imageId: string): Promise<void>;
     /** `agySwitchHeldMessage`: which held message the retry is about (agySwitchHeldMessageOf). */
     retryLastError(sessionId: string, agySwitchHeldMessage?: string | null): Promise<InputProjection>;
@@ -1571,7 +1572,9 @@ export function createMobileMakerTransport({
         return call("maker:input:steer", [sessionId, expanded, opts]);
       },
       stop: (sessionId, opts) => call("maker:input:stop", [sessionId, opts]),
-      resume: (sessionId) => call("maker:input:resume", [sessionId]),
+      resume: (sessionId, opts) => call("maker:input:resume", opts?.continueSending
+        ? [sessionId, { continueSending: true }]
+        : opts?.answerClientId ? [sessionId, { answerClientId: opts.answerClientId }] : [sessionId]),
       retryImageDelivery: (sessionId, imageId) => call("maker:images:retry", [sessionId, imageId]),
       retryLastError: (sessionId, agySwitchHeldMessage) =>
         call("maker:input:retry-last-error", agySwitchHeldMessage ? [sessionId, { agySwitchHeldMessage }] : [sessionId]),
