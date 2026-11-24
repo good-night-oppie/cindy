@@ -409,6 +409,8 @@ describe('take over', () => {
       expect(t.calls.filter(call => call.method !== 'GET')).toEqual(writes);
       expect(t.local.host.createProfile).not.toHaveBeenCalled();
       expect(t.local.host.updateProfile).not.toHaveBeenCalled();
+      expect(await t.runtime.switchHome('bot_mia', 'desk')).toMatchObject({ ok: false, profileFailure: { field: 'identitySource' } });
+      expect(t.calls.filter(call => call.method !== 'GET')).toEqual(writes);
       soul = 'x'.repeat(12000);
       if (retry === 'automatic') {
         await vi.advanceTimersByTimeAsync(60_000);
@@ -421,6 +423,7 @@ describe('take over', () => {
       expect(t.runtime.profileFailure('bot_mia')).toBeUndefined();
       expect(t.state.isDemoted('bot_mia')).toBe(false);
       expect(t.local.host.createProfile).toHaveBeenCalledOnce();
+      expect(vi.mocked(t.local.host.createProfile).mock.calls[0]?.[1]).toMatchObject({ selfDeviceId: 'desk' });
     } finally { runtime?.dispose(); vi.useRealTimers(); }
   });
 
