@@ -3511,14 +3511,24 @@ export class AgentInputCoordinator {
    * it alone: it goes, and the queue stops again at the first held message.
    */
   resumeForQueuedAnswer(sessionId: string, answerClientId: string): AgentInputProjection {
+    // Checked before anything is moved. A guest of a shared task may send but may not reorder:
+    // the message named here is moved only if it is the guest's own, or the name would be a way
+    // to put anybody's queued message first (DD 7119951458).
+    const sharedTask = getDeviceLinkInvokeContext()?.sharedTask;
+    assertSharedTaskQueueMutation(sharedTask, sessionId, 'input.send');
     const state = this.getState(sessionId);
     const firstHeld = state.pendingQueue.findIndex(item => item.awaitsAgySwitchConfirmation === true);
     const at = state.pendingQueue.findIndex(item => item.clientId === answerClientId);
-    if (firstHeld >= 0 && at > firstHeld) {
+    const author = at >= 0 ? state.pendingQueue[at]!.sharedTaskAuthor : undefined;
+    const callersOwn = !sharedTask || (!!author && author.sharedTaskId === sharedTask.author.sharedTaskId
+      && author.memberId === sharedTask.author.memberId);
+    if (firstHeld >= 0 && at > firstHeld && callersOwn) {
       const next = [...state.pendingQueue];
       const [answer] = next.splice(at, 1);
       next.splice(firstHeld, 0, answer!);
       state.pendingQueue = next;
+      // A banner still up for the held message would keep the answer from going.
+      this.takeDownHeldBannerLeftBehind(state);
     }
     return this.resume(sessionId);
   }
@@ -3528,7 +3538,7 @@ export class AgentInputCoordinator {
    * queue; every other caller (an answer to a question card, a supplementary answer) only needs
    * the queue to move and says nothing about a message held for a switch into Antigravity.
    */
-  resume(sessionId: string, opts?: { continueSending?: boolean }): AgentInputProjection {
+  resume(sessionId: string, opts?: { continueSending?: boolean; heldMessage?: string }): AgentInputProjection {
     assertSharedTaskQueueMutation(getDeviceLinkInvokeContext()?.sharedTask, sessionId, 'input.send');
     const state = this.getState(sessionId);
     const wasPaused = state.queuePaused;
@@ -3548,13 +3558,21 @@ export class AgentInputCoordinator {
     // state); and not on a resume that is not the user's "Continue sending" (an answer to a
     // question card lifted the pause and sent the held message ahead of the answer: DD
     // 7107111403, item 1).
-    state.agySwitchLetGo = null;
-    state.agySwitchHoldsLetGo = new Set();
+    // On a queue that was not paused nothing is let go and nothing that was let go is taken
+    // back: a "Continue sending" from a window showing an old state must not undo a confirmation
+    // just given on the banner (DD 7119951458).
+    if (wasPaused) {
+      state.agySwitchLetGo = null;
+      state.agySwitchHoldsLetGo = new Set();
+    }
     const pausedAt = state.pendingQueue[0];
-    if (opts?.continueSending === true && wasPaused && pausedAt?.awaitsAgySwitchConfirmation === true) {
+    // When the click says which held message the window showed the queue stopped at, it lets go
+    // that one only: another window may have reordered the queue before the click arrived.
+    const namesAnother = typeof opts?.heldMessage === 'string' && opts.heldMessage !== pausedAt?.agySwitchHoldId;
+    if (opts?.continueSending === true && wasPaused && pausedAt?.awaitsAgySwitchConfirmation === true && !namesAnother) {
       // A row stored by a version that did not name holds.
       if (!pausedAt.agySwitchHoldId) pausedAt.agySwitchHoldId = crypto.randomUUID();
-      state.agySwitchHoldsLetGo.add(pausedAt.agySwitchHoldId);
+      (state.agySwitchHoldsLetGo ??= new Set()).add(pausedAt.agySwitchHoldId);
     }
     state.queuePausedByRestore = false;
     state.uncertainDeliveryClientId = null;

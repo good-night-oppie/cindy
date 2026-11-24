@@ -7966,7 +7966,10 @@ function SessionScreenContent({ beforeSessionSwitchRef, newSessionActionRef }: S
   const dismissTransientNotice = useCallback(() => setTransientNotice(null), []);
 
   const resumeQueue = () => {
-    void runQueueAction(() => maker.input.resume(sessionId, { continueSending: true }));
+    const pausedAt = inputProjection.pendingQueue[0] as { awaitsAgySwitchConfirmation?: unknown; agySwitchHoldId?: unknown } | undefined;
+    const agySwitchHeldMessage = pausedAt?.awaitsAgySwitchConfirmation === true && typeof pausedAt.agySwitchHoldId === 'string'
+      ? pausedAt.agySwitchHoldId : undefined;
+    void runQueueAction(() => maker.input.resume(sessionId, { continueSending: true, agySwitchHeldMessage }));
   };
 
   const steerQueueItem = useCallback((item: QueuedRemoteMessage) => {

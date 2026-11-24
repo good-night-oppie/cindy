@@ -31,7 +31,7 @@ function harness() {
     getInputAbortSignal: () => inputBoundary.signal,
     isPausedForUncertainDelivery: () => uncertain,
     steerControlInput: vi.fn(async () => 'not-attempted'),
-    enqueue: vi.fn(), resume: vi.fn(),
+    enqueue: vi.fn(), resume: vi.fn(), resumeForQueuedAnswer: vi.fn(),
   };
   const build = vi.fn(async (params: unknown) => params);
   const identityDeps = { getDeviceLinkInvokeContext: () => undefined, stampSharedTaskInput: (item: unknown) => item,
@@ -51,6 +51,7 @@ it.each(['steered', 'queued'])('does not replay or unpause a %s answer', async (
   await h.run();
   expect(h.coordinator.enqueue).not.toHaveBeenCalled();
   expect(h.coordinator.resume).not.toHaveBeenCalled();
+  expect(h.coordinator.resumeForQueuedAnswer).not.toHaveBeenCalled();
 });
 
 it('enqueues an idle answer with stable identity and the task execution settings', async () => {
@@ -63,6 +64,7 @@ it('enqueues an idle answer with stable identity and the task execution settings
   expect(isAnsweredAsyncQuestionClientId(h.coordinator.enqueue.mock.calls[0][1].clientId)).toBe(true);
   expect(h.coordinator.enqueue.mock.calls[0][1].clientId).toBe(h.coordinator.enqueue.mock.calls[1][1].clientId);
   expect(h.coordinator.resume).not.toHaveBeenCalled();
+  expect(h.coordinator.resumeForQueuedAnswer).not.toHaveBeenCalled();
 });
 
 it('resumes an answer explicitly submitted after Stop', async () => {
@@ -70,7 +72,11 @@ it('resumes an answer explicitly submitted after Stop', async () => {
   await h.run();
   expect(h.coordinator.steerControlInput).not.toHaveBeenCalled();
   expect(h.coordinator.enqueue).toHaveBeenCalledOnce();
-  expect(h.coordinator.resume).toHaveBeenCalledWith('task');
+  // The answer is not "Continue sending": the host resumes for this answer, naming it, so that a
+  // message held for a switch into Antigravity stays held (cindy#19, DD 7107111403 item 1).
+  const queued = h.coordinator.enqueue.mock.calls[0]?.[1] as { clientId: string };
+  expect(h.coordinator.resumeForQueuedAnswer).toHaveBeenCalledExactlyOnceWith('task', queued.clientId);
+  expect(h.coordinator.resume).not.toHaveBeenCalled();
 });
 
 it('keeps the protective pause of an ACK-uncertain steer when another answer is submitted', async () => {
@@ -79,6 +85,7 @@ it('keeps the protective pause of an ACK-uncertain steer when another answer is 
   expect(h.coordinator.steerControlInput).not.toHaveBeenCalled();
   expect(h.coordinator.enqueue).toHaveBeenCalledOnce();
   expect(h.coordinator.resume).not.toHaveBeenCalled();
+  expect(h.coordinator.resumeForQueuedAnswer).not.toHaveBeenCalled();
 });
 
 it.each(['restore', 'build'])('does not override a newer Stop during %s', async (stage) => {
@@ -88,6 +95,7 @@ it.each(['restore', 'build'])('does not override a newer Stop during %s', async 
   await expect(h.run()).rejects.toThrow('Question session changed');
   expect(h.coordinator.enqueue).not.toHaveBeenCalled();
   expect(h.coordinator.resume).not.toHaveBeenCalled();
+  expect(h.coordinator.resumeForQueuedAnswer).not.toHaveBeenCalled();
 });
 
 it('does not enqueue an answer when Stop lands while steering reports not-attempted', async () => {
@@ -96,6 +104,7 @@ it('does not enqueue an answer when Stop lands while steering reports not-attemp
   await expect(h.run()).rejects.toThrow('Question session changed');
   expect(h.coordinator.enqueue).not.toHaveBeenCalled();
   expect(h.coordinator.resume).not.toHaveBeenCalled();
+  expect(h.coordinator.resumeForQueuedAnswer).not.toHaveBeenCalled();
 });
 
 it.each(['rejected', 'error', 'held'])('leaves %s admission unconsumed', async (mode) => {
@@ -106,4 +115,5 @@ it.each(['rejected', 'error', 'held'])('leaves %s admission unconsumed', async (
   await expect(h.run()).rejects.toThrow();
   expect(h.coordinator.enqueue).not.toHaveBeenCalled();
   expect(h.coordinator.resume).not.toHaveBeenCalled();
+  expect(h.coordinator.resumeForQueuedAnswer).not.toHaveBeenCalled();
 });

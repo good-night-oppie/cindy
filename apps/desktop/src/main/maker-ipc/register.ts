@@ -21498,7 +21498,9 @@ export function registerMakerIpc(maker: Maker, options: RegisterMakerIpcOptions)
     if (!continueSending && typeof answerClientId === 'string' && answerClientId.length > 0) {
       return inputCoordinator.resumeForQueuedAnswer(sid, answerClientId);
     }
-    return inputCoordinator.resume(sid, { continueSending });
+    const heldMessage = !!opts && typeof opts === 'object' && !Array.isArray(opts)
+      ? (opts as { agySwitchHeldMessage?: unknown }).agySwitchHeldMessage : undefined;
+    return inputCoordinator.resume(sid, { continueSending, ...(typeof heldMessage === 'string' ? { heldMessage } : {}) });
   });
 
   ipcMain.handle(MAKER_INVOKE.IMAGES_RETRY, async (event, sessionId: unknown, imageId: unknown) => {

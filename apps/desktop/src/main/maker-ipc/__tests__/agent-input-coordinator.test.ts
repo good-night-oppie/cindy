@@ -6919,6 +6919,84 @@ describe('AgentInputCoordinator send transaction', () => {
       expect(host.dispatched).toEqual(['stored']);
     });
 
+    // DD 7119951458.
+    it('a Continue sending that arrives on a queue that is not paused does not undo a confirmation just given on the banner', async () => {
+      const sid = 'stale-continue-after-confirmation';
+      const { host, about } = await twoQueuedFirstHeld(sid);
+      const { h } = host;
+      // A turn is running, so the confirmed message cannot go at once.
+      h.setRunning(true);
+      await host.confirmToSend(undefined, about);
+      h.coordinator.resume(sid, { continueSending: true });
+      await host.settle();
+      expect(host.dispatched).toEqual([]);
+      await host.turnEnds();
+      expect(host.dispatched).toEqual(['first']);
+    });
+
+    it('Continue sending that names the held message the window showed lets go that one only: with another moved first meanwhile, nothing held goes', async () => {
+      const sid = 'continue-sending-names-its-message';
+      const { host } = await twoQueuedFirstHeld(sid);
+      const { h } = host;
+      await host.confirmWithoutSending();
+      h.coordinator.clearError(sid);
+      await host.settle();
+      const shown = h.coordinator.getProjection(sid).pendingQueue[0]?.agySwitchHoldId;
+      expect(shown).toEqual(expect.any(String));
+      // Another window puts a second held message first before the click arrives.
+      h.coordinator.remove(sid, 'q-2');
+      h.coordinator.enqueue(sid, { ...makeItem('q-9', 'other held'), awaitsAgySwitchConfirmation: true, agySwitchHoldId: 'hold-of-q-9' } as never);
+      h.coordinator.move(sid, 'q-9', 0);
+      await host.settle();
+      expect(h.coordinator.getProjection(sid).pendingQueue.map((q) => q.clientId)).toEqual(['q-9', 'q-1']);
+
+      h.coordinator.resume(sid, { continueSending: true, heldMessage: shown });
+      await host.settle();
+      expect(host.dispatched).toEqual([]);
+      expect(h.coordinator.getProjection(sid).queuePaused).toBe(true);
+
+      // The click on what the window shows now.
+      h.coordinator.resume(sid, { continueSending: true, heldMessage: h.coordinator.getProjection(sid).pendingQueue[0]?.agySwitchHoldId });
+      await host.settle();
+      expect(host.dispatched).toEqual(['other held']);
+    });
+
+    it('a guest of a shared task cannot use an answer\u2019s name to put somebody else\u2019s queued message first', async () => {
+      const sid = 'guest-names-another-message';
+      const { host } = await twoQueuedFirstHeld(sid);
+      const { h } = host;
+      h.coordinator.clearError(sid);
+      await host.settle();
+      const guest = { author: { sessionId: sid, sharedTaskId: 'shared-1', memberId: 'guest-1', accountId: 'acct-guest' },
+        isCurrent: () => true, authorize: () => true };
+      runDeviceLinkInvokeContext({ controllerDeviceId: 'guest-device', channel: MAKER_INVOKE.INPUT_RESUME, sharedTask: guest } as never,
+        () => h.coordinator.resumeForQueuedAnswer(sid, 'q-2'));
+      await host.settle();
+      // q-2 is not the guest's: it stays behind the held message, and nothing is sent.
+      expect(h.coordinator.getProjection(sid).pendingQueue.map((q) => q.clientId)).toEqual(['q-1', 'q-2']);
+      expect(host.dispatched).toEqual([]);
+    });
+
+    it('an answer queued while a held message\u2019s banner is still up over a paused queue goes, and the banner comes down', async () => {
+      const sid = 'answer-with-banner-left-up';
+      const { host } = await twoQueuedFirstHeld(sid);
+      const { h } = host;
+      h.coordinator.remove(sid, 'q-2');
+      await host.confirmWithoutSending();
+      await host.settle();
+      expect(h.coordinator.getProjection(sid).recovery).toEqual({ kind: 'queue-head', clientId: 'q-1' });
+      h.coordinator.enqueue(sid, makeItem('answer-1', 'the answer'));
+      h.coordinator.resumeForQueuedAnswer(sid, 'answer-1');
+      await host.settle();
+      expect(host.dispatched).toEqual(['the answer']);
+      await host.turnEnds();
+      expect(host.dispatched).toEqual(['the answer']);
+      const stopped = h.coordinator.getProjection(sid);
+      expect(stopped.pendingQueue.map((q) => q.clientId)).toEqual(['q-1']);
+      expect(stopped.queuePaused).toBe(true);
+      expect(stopped.recovery).toBeNull();
+    });
+
     it('Continue sending from a window showing an old state, on a queue that is not paused, lets nothing held go', async () => {
       const sid = 'continue-sending-not-paused';
       const { host } = await twoQueuedFirstHeld(sid);

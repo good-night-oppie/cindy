@@ -15161,7 +15161,14 @@ function resumeQueue(sessionId: string): void {
   }
   // This is the "Continue sending" button: the host lets the held message the queue is paused at
   // go only when told so. Other callers of resume (answers to question cards) do not say it.
-  const boundaryOpts = { ...(getRemoteInputClearBoundaryOpts(sessionId) ?? {}), continueSending: true as const };
+  // With the held message this window shows the queue stopped at, so that the host lets go that
+  // one and not another that was moved first meanwhile.
+  const pausedAtHeld = preResumeState?.pendingQueue[0]?.awaitsAgySwitchConfirmation === true
+    ? preResumeState.pendingQueue[0].agySwitchHoldId : undefined;
+  const boundaryOpts = {
+    ...(getRemoteInputClearBoundaryOpts(sessionId) ?? {}), continueSending: true as const,
+    ...(pausedAtHeld ? { agySwitchHeldMessage: pausedAtHeld } : {}),
+  };
   runAgentDispatchProjectionOperation(sessionId, (input) => input.resume(sessionId, boundaryOpts))
     .then(({ projection }) => {
       if (
