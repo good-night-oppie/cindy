@@ -17,7 +17,7 @@
  *     fallback to another runtime.
  */
 import { realpathSync } from 'node:fs';
-import { mkdir, mkdtemp, rm, stat } from 'node:fs/promises';
+import { mkdir, mkdtemp, rm } from 'node:fs/promises';
 import os from 'node:os';
 import path from 'node:path';
 import { pathToFileURL } from 'node:url';
@@ -117,12 +117,6 @@ export interface AgyAgentDeps extends AgentDeps {
     /** Expose the CLI's existing Google sign-in file read-only inside the sandbox (see system-sandbox). */
     shareCliLogin?: boolean;
   };
-  /**
-   * Whether the CLI's own sign-in, the one shared by the whole user, exists right now (existence
-   * only). The account check proves something only while it does; see
-   * assertAgyAccountSignInIsSeparate. Absent means unknown.
-   */
-  agyOwnCliSignedIn?: () => boolean;
   /** UI locale for agy user notices (JJ's wording exists in zh-CN and en). */
   uiLocale?: () => string | null | undefined;
 }
@@ -165,8 +159,6 @@ export class AgyAgent extends BaseAgent {
   }>();
   private disposed = false;
   private probePromise: Promise<void> | null = null;
-  /** Launches (build path, command and arguments -> file identity) seen to keep an account's sign-in separate. */
-  private accountSignInChecked = new Map<string, string>();
 
   constructor(protected override deps: AgyAgentDeps) {
     super(deps);
@@ -213,29 +205,20 @@ export class AgyAgent extends BaseAgent {
    * the whole user (the system credential store), and a task for one account would silently run
    * on another: refuse, and start nothing with the account. Anything else also starts nothing.
    *
-   * "Not signed in" proves the sign-in is separate only while the shared sign-in exists; with an
-   * empty credential store every build answers the same. So a pass is remembered (per build and
-   * launch arguments) only when the host says the shared sign-in exists; otherwise the check runs
-   * before every such start, and a start right after it can at worst find no sign-in at all.
+   * This is a check of the moment, not a proof about the build: with an empty credential store
+   * every build answers "not signed in". So nothing is remembered. The check runs before every
+   * such start, and the start that follows it at once can then at worst find no sign-in at all
+   * (QQ, cindy#24 7123632378: a remembered pass taken while the shared store was empty would
+   * let a later start through after the shared sign-in appeared).
    */
-  private async assertAgyAccountSignInIsSeparate(binaryPath: string,
+  private async assertAgyAccountSignInIsSeparate(
     launch: { command: string; args: readonly string[]; env: NodeJS.ProcessEnv }, mcpServers: readonly unknown[]): Promise<void> {
-    let build = '';
-    try { const info = await stat(binaryPath); build = `${info.mtimeMs}:${info.size}`; } catch { /* injected transport */ }
     const emptyAccountDir = realpathSync(await mkdtemp(path.join(os.tmpdir(), 'cindy-agy-account-check-')));
     let checkArgs: string[];
     try { checkArgs = agyArgsForAccountDir(launch.args, emptyAccountDir); } catch (error) {
       await rm(emptyAccountDir, { recursive: true, force: true }).catch(() => {});
       throw new AgyAccountSignInNotSeparateError('check-failed', error);
     }
-    // The remembered pass belongs to this build started with exactly these arguments.
-    const remembered = JSON.stringify([binaryPath, launch.command, agyArgsForAccountDir(launch.args, '')]);
-    if (build && this.accountSignInChecked.get(remembered) === build) {
-      await rm(emptyAccountDir, { recursive: true, force: true }).catch(() => {});
-      return;
-    }
-    let sharedSignInExists = false;
-    try { sharedSignInExists = this.deps.agyOwnCliSignedIn?.() === true; } catch { /* unknown */ }
     let signedIn = false;
     try {
       const cwd = path.join(emptyAccountDir, 'task');
@@ -270,7 +253,6 @@ export class AgyAgent extends BaseAgent {
       }
     }
     if (signedIn) throw new AgyAccountSignInNotSeparateError('signed-in-without-account');
-    if (build && sharedSignInExists) this.accountSignInChecked.set(remembered, build);
   }
 
   /** Discover the catalog in an empty task directory with the normal isolation policy. */
@@ -796,7 +778,7 @@ export class AgyAgent extends BaseAgent {
         this.deps.logger.debug('agy binary accepted', { version });
       }
       if (hostLaunchAccountDir) {
-        await this.assertAgyAccountSignInIsSeparate(this.deps.binaryPath, launch, mcpServers);
+        await this.assertAgyAccountSignInIsSeparate(launch, mcpServers);
         assertCurrent();
       }
       // The account may have been removed or signed out while this start was being prepared.

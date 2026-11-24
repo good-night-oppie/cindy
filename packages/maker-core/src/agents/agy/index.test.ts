@@ -713,25 +713,21 @@ describe('AgyAgent started with an account the host chose', () => {
     } finally { await handle.close(); }
   });
 
-  it('remembers a pass only for the same build and arguments, and only while the shared sign-in exists', async () => {
+  // QQ, cindy#24 7123632378: a pass taken while the shared credential store was empty must not let
+  // a later start through once the shared sign-in is there. Nothing is remembered, so the second
+  // start is checked again and refused.
+  it('checks before every start: a pass does not let a later start through when the shared sign-in has appeared', async () => {
     const binaryPath = (await import('node:fs')).realpathSync(process.execPath);
-    let shared = false;
-    const prepare = vi.fn(async () => ({ mcpBridge: { token: 'fixture', servers: [{ name: 'helper', url: 'http://127.0.0.1:9000/mcp' }] } }));
-    const order = [
-      notSignedIn(), new FakeAgy(), // 1: nothing shared to tell apart, so nothing is remembered
-      notSignedIn(), new FakeAgy(), // 2: checked again; the shared sign-in exists now, so remembered
-      new FakeAgy(),                // 3: same build, same arguments: no check
-      notSignedIn(), new FakeAgy(), // 4: worker mode is another launch: checked
-    ];
-    const { seen, start } = launches(order, { binaryPath, agyOwnCliSignedIn: () => shared,
-      preparePiExtraSpawnConfig: prepare as unknown as AgyAgentDeps['preparePiExtraSpawnConfig'] });
-    const run = async (options = {}) => { await (await start({ [NATIVE_SUBSCRIPTION_ACCOUNT]: accountOf(), ...options })).close(); return seen.length; };
-    expect(await run()).toBe(2);
-    shared = true;
-    expect(await run()).toBe(4);
-    expect(await run()).toBe(5);
-    expect(await run({ sessionId: 'fixture-task' })).toBe(7);
-    expect(seen[5]!.args).toContain('--process-per-session');
+    const sharedSignInNowAnswers = new FakeAgy();
+    const neverStarted = new FakeAgy();
+    const { seen, start } = launches([notSignedIn(), new FakeAgy(), sharedSignInNowAnswers, neverStarted], { binaryPath });
+    await (await start({ [NATIVE_SUBSCRIPTION_ACCOUNT]: accountOf() })).close();
+    expect(seen).toHaveLength(2);
+    const refused = await start({ [NATIVE_SUBSCRIPTION_ACCOUNT]: accountOf() }).then(() => undefined, error => error);
+    expect(String(refused)).toContain(new AgyAccountSignInNotSeparateError('signed-in-without-account').message);
+    expect(seen).toHaveLength(3);
+    expect(seen[2]!.args[3]).not.toBe(joinPath(accountDir, 'gemini'));
+    expect(neverStarted.written).toHaveLength(0);
   });
 
   it.each([

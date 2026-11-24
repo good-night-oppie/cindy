@@ -152,7 +152,6 @@ import {
 } from '../maker-ipc/register.js';
 import { MAKER_PUSH } from '../maker-ipc/channels.js';
 import { setAntigravityModelSource } from './antigravity-models.js';
-import { hasAntigravityCliLogin } from './antigravity-cli-login.js';
 import { readProviderGroupBinding } from '../provider-group/bindings.desktop.js';
 import { createSubscriptionFastPolicy } from './subscription-fast-policy.js';
 import { getProviderGroupGuestSwitch } from '../provider-group/guestSwitch.js';
@@ -2110,8 +2109,6 @@ export function getMaker(): Maker {
       // shareCliLogin: the Google Gemini provider is connected through the CLI's own sign-in, so the
       // sandboxed CLI is shown that one token file read-only (owner decision 2026-11-18, cindy#1).
       agySandbox: { allowWithoutSystemSandbox: process.platform !== 'linux', shareCliLogin: true },
-      // Existence only; lets the account check tell a proof from an empty credential store.
-      agyOwnCliSignedIn: () => hasAntigravityCliLogin(),
     });
 
     setAntigravityModelSource({

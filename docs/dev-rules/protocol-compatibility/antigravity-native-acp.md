@@ -102,11 +102,11 @@ and the host starts nothing with the account (`AgyAccountSignInNotSeparateError`
 other outcome, including an authentication error before a session was asked for, also
 starts nothing.
 
-"Not signed in" proves separation only while the shared sign-in exists: with an empty
-credential store every build answers the same. A pass is therefore remembered (per CLI
-build - path, modification time, size - and launch arguments, for this app run) only when
-the host reports that the computer's own sign-in exists. Otherwise the check runs before
-every account start; a start right after it can then at worst find no sign-in at all.
+This is a check of the moment, not a proof about the build: with an empty credential
+store every build answers "not signed in". Nothing is therefore remembered. The check
+runs before every account start outside the sandbox (one extra CLI start each time),
+and the start that follows it at once can then at worst find no sign-in at all. The
+provider's "connected" state is a display fact and is not used for this.
 
 Known limits:
 
@@ -117,7 +117,6 @@ Known limits:
 - Token refresh inside an account directory over days was not observed.
 - The CLI has no usage or reset-time interface, so an account's remaining quota cannot
   be shown, and no interface to ask which account is signed in.
-- The CLI updates itself; the check runs again for the new build.
 
 ## MCP and other capability gaps
 
