@@ -16,6 +16,7 @@ import { beforeEach, describe, expect, it, vi } from 'vitest';
 import type { Session } from '@/lib/ccAgent.types';
 import { resolveManualCompactChannel } from '@/hooks/useAgentCapabilities';
 import { createSessionScopedRequestGuard } from '@/features/cc-agent/sessionScopedRequestGuard';
+import { isSessionSwitchTargetAgentKind } from '../../shared/agentKindConversion';
 
 const sess = (id: string): Session => ({ id }) as unknown as Session;
 
@@ -104,6 +105,81 @@ describe('makerChatStore.mirrorAgentSwitchIntent', () => {
     });
     // 展示槽独立:真实 reducer 路由不受影响。
     expect(makerChatStore.getSnapshot(s).agentKind).toBe('claude-code');
+  });
+
+  // cindy#19: the picker can register a switch to Antigravity, but the mirror accepted three
+  // engines only. The host's copy (read back when the task is opened, and echoed after it is
+  // registered) was treated as "no switch pending": the composer showed the old engine and asked
+  // nothing, while the next message still switched. Seen on Win11 after a window reload.
+  it('keeps a pending switch to Antigravity that the host reports, and does not let its echo clear the local one', async () => {
+    const { makerChatStore } = await import('@/lib/makerChatStore');
+    const reopened = sid();
+    makerChatStore.mirrorAgentSwitchIntent(reopened, { targetAgentKind: 'agy', model: 'gemini-test', providerId: null });
+    expect(makerChatStore.getAgentSwitchIntent(reopened)).toEqual({ target: 'agy', model: 'gemini-test', providerId: null });
+
+    const registeredHere = sid();
+    makerChatStore.noteAgentSwitchIntent(registeredHere, 'agy', { model: 'gemini-test', providerId: null });
+    makerChatStore.mirrorAgentSwitchIntent(registeredHere, { targetAgentKind: 'agy', model: 'gemini-test', providerId: null });
+    expect(makerChatStore.getAgentSwitchIntent(registeredHere)?.target).toBe('agy');
+  });
+
+  // cindy#19 (QQ's ruling on the desktop entry): the task shows its confirmation entry from what
+  // the host has recorded as agreed for the pending switch. The host reports it with the switch;
+  // it changes when the user agrees, without the switch being another selection, so the revision
+  // that guards selections in flight must not move.
+  it('carries what the host has recorded as agreed, and updates it without counting a new selection', async () => {
+    const { makerChatStore } = await import('@/lib/makerChatStore');
+    const s = sid();
+    const pending = { targetAgentKind: 'agy', model: 'gemini-test', providerId: null };
+    makerChatStore.mirrorAgentSwitchIntent(s, { ...pending, agyPermissionAgreement: null });
+    expect(makerChatStore.getAgentSwitchIntent(s)).toMatchObject({ target: 'agy', agyPermissionAgreement: null });
+    const rev = makerChatStore.getAgentSwitchIntentRev(s);
+
+    // The host stamps the registration the agreement was written to; the window keeps it to send back.
+    makerChatStore.mirrorAgentSwitchIntent(s, { ...pending, agyPermissionAgreement: { change: 'fromFullAccess', mode: 'auto' }, agyPermissionRevision: 12 });
+    expect(makerChatStore.getAgentSwitchIntent(s)?.agyPermissionAgreement).toEqual({ change: 'fromFullAccess', mode: 'auto' });
+    expect(makerChatStore.getAgentSwitchIntent(s)?.agyPermissionRevision).toBe(12);
+    expect(makerChatStore.getAgentSwitchIntentRev(s)).toBe(rev);
+
+    // A value this window cannot read is "nothing agreed", never an agreement.
+    makerChatStore.mirrorAgentSwitchIntent(s, { ...pending, agyPermissionAgreement: { change: 'anything', mode: 'auto' } });
+    expect(makerChatStore.getAgentSwitchIntent(s)?.agyPermissionAgreement).toBeNull();
+    // A host that does not say leaves what is known alone, and an unknown stays unknown.
+    makerChatStore.mirrorAgentSwitchIntent(s, pending);
+    expect(makerChatStore.getAgentSwitchIntent(s)?.agyPermissionAgreement).toBeNull();
+    const silentHost = sid();
+    makerChatStore.mirrorAgentSwitchIntent(silentHost, pending);
+    expect(makerChatStore.getAgentSwitchIntent(silentHost)).toEqual({ target: 'agy', model: 'gemini-test', providerId: null });
+  });
+
+  // DD 7082445534, points a and b, and the window's end of item 5.
+  it('does not let a report read before an agreement was written take it away, fills in what the host says after a local registration, and keeps "staged by configuration"', async () => {
+    const { makerChatStore } = await import('@/lib/makerChatStore');
+    const pending = { targetAgentKind: 'agy', model: 'gemini-test', providerId: null };
+    // a. Agreed in this window; a read sent earlier comes back late saying "none" for the same registration.
+    const late = sid();
+    makerChatStore.mirrorAgentSwitchIntent(late, { ...pending, agyPermissionAgreement: null, agyPermissionRevision: 5 });
+    makerChatStore.mirrorAgentSwitchIntent(late, { ...pending, agyPermissionAgreement: { change: 'fromFullAccess', mode: 'auto' }, agyPermissionRevision: 5 });
+    makerChatStore.mirrorAgentSwitchIntent(late, { ...pending, agyPermissionAgreement: null, agyPermissionRevision: 5 });
+    expect(makerChatStore.getAgentSwitchIntent(late)?.agyPermissionAgreement).toEqual({ change: 'fromFullAccess', mode: 'auto' });
+    // Registered again (another revision), "none" is the truth and is taken.
+    makerChatStore.mirrorAgentSwitchIntent(late, { ...pending, agyPermissionAgreement: null, agyPermissionRevision: 6 });
+    expect(makerChatStore.getAgentSwitchIntent(late)).toMatchObject({ agyPermissionAgreement: null, agyPermissionRevision: 6 });
+
+    // b. Registered from this window before the host's echo: unknown until the echo, then the host's word.
+    const local = sid();
+    makerChatStore.noteAgentSwitchIntent(local, 'agy', { model: 'gemini-test', providerId: null });
+    expect(makerChatStore.getAgentSwitchIntent(local)).not.toHaveProperty('agyPermissionAgreement');
+    makerChatStore.mirrorAgentSwitchIntent(local, { ...pending, agyPermissionAgreement: null, agyPermissionRevision: 2 });
+    expect(makerChatStore.getAgentSwitchIntent(local)).toMatchObject({ agyPermissionAgreement: null, agyPermissionRevision: 2 });
+
+    // 5. The task's entry is hidden in a partner conversation only for a switch staged by configuration.
+    const staged = sid();
+    makerChatStore.mirrorAgentSwitchIntent(staged, { ...pending, agyPermissionAgreement: null, configStaged: true });
+    expect(makerChatStore.getAgentSwitchIntent(staged)?.configStaged).toBe(true);
+    const picked = sid();
+    makerChatStore.mirrorAgentSwitchIntent(picked, { ...pending, agyPermissionAgreement: null, configStaged: 'yes' });
+    expect(makerChatStore.getAgentSwitchIntent(picked)).not.toHaveProperty('configStaged');
   });
 
   it('幂等:同值回声不重建快照(不与本端乐观登记打架)', async () => {
@@ -910,6 +986,7 @@ describe("ChatInput 的入口门控与调用路由", () => {
     const switchAgent = vi.fn(async () => true);
     const bindings = { sessionOrcaRole, settingsLocked: false, sessionId: 's1',
       sessionAgentSwitchSupported: true, remoteHostId: null, runtimeAgentKind: 'codex',
+      isSessionSwitchTargetAgentKind, sessionRunsOnThisComputer: true,
       makerChatStore: { getAgentSwitchIntent: () => null }, performAgentSwitch: switchAgent,
       effectiveSourceId: 'provider-old', activeModel: 'model-old' };
     function callback(name: string) {

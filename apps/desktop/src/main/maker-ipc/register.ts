@@ -1195,6 +1195,8 @@ import {
 } from '../../shared/orcaRemoteWorker.js';
 import {
   applyPendingAgentSwitchIfIdle,
+  assertMessageHeldForAgySwitchMayGo,
+  holdAgySwitchForConfirmation,
   createPendingAgentSwitchRegistry,
   isUserPendingAgentSwitchIntent,
   performSessionAgentSwitch,
@@ -11340,7 +11342,20 @@ export function registerMakerIpc(maker: Maker, options: RegisterMakerIpcOptions)
   });
 
   // turn 运行中登记的切换意图(下一条消息发送时刻由 send 事务 apply)。
-  const agentSwitchPending = createPendingAgentSwitchRegistry();
+  const agentSwitchPending = createPendingAgentSwitchRegistry({
+    // A held restore was replaced or withdrawn (an applied one retires its saved model itself,
+    // awaited, in onScheduledRestoreLanded). Not awaited, and its failure is not the failure of
+    // whatever replaced the switch.
+    onScheduledRestoreSettled: (sessionId) => {
+      void Promise.resolve().then(() => updateScheduledPreference(sessionId, null)).then((retired) => {
+        if (!retired) log.warn('the saved model of a settled scheduled restore was not retired: it changed meanwhile', { sessionId });
+      }).catch((error) => {
+        log.warn('failed to retire the saved model of a settled scheduled restore', {
+          sessionId, error: error instanceof Error ? error.message : String(error),
+        });
+      });
+    },
+  });
   // User send intent owns the next route boundary, including automatic requests
   // that read the runtime generation after the picker accepted that intent.
   const canApplyAutomaticRuntimeSelection = (sessionId: string, expectedGeneration?: number): boolean =>
@@ -11484,6 +11499,19 @@ export function registerMakerIpc(maker: Maker, options: RegisterMakerIpcOptions)
     onPendingSwitchChanged: (sessionId, intent) => {
       if (intent) recordUserSessionRuntimeMutation(sessionId);
       broadcastSessionPatched(sessionId, { agentSwitchIntent: intent });
+    },
+    // Only what the windows show changes. Not recordUserSessionRuntimeMutation: agreeing to a
+    // permission change is not choosing a route, and must not detach a task from what it follows.
+    onPendingSwitchAgreementChanged: (sessionId, intent) => {
+      broadcastSessionPatched(sessionId, { agentSwitchIntent: intent });
+    },
+    // The message held for this very agreement goes on (it is refused again if it does not fit).
+    onPendingSwitchAgreed: (sessionId, heldMessage) => agentInputCoordinatorHolder?.wakeHeldForAgySwitch(sessionId, heldMessage) ?? false,
+    // Awaited by the apply step: a schedule about to run reads the saved model right after.
+    onScheduledRestoreLanded: async (sessionId) => {
+      if (!(await updateScheduledPreference(sessionId, null))) {
+        log.warn('the saved model of an applied scheduled restore was not retired: it changed meanwhile', { sessionId });
+      }
     },
     // 用户选择落地 → 给 IM 任务打「脱离跟随」标记(同值重选也永久脱离, PR #5155)。
     onUserRouteSelectionLanded: async (sessionId) => {
@@ -11795,6 +11823,9 @@ export function registerMakerIpc(maker: Maker, options: RegisterMakerIpcOptions)
   const scheduledModelScope = createScheduledModelScope({
     createId,
     ownerEpoch: captureSessionRuntimeControlOwnerEpoch,
+    holdBaselineForConfirmation: (sessionId, baseline, current) => baseline.agentKind === 'agy'
+      && holdAgySwitchForConfirmation(agentSwitchDeps, sessionId, baseline, current.agentDeviceId),
+    baselineAwaitsPendingSwitch: (sessionId, baseline) => baseline.agentKind === 'agy' && !!agentSwitchPending.get(sessionId),
     prepareBaseline: async (sessionId) => {
       await reconcileBotModelRoute(sessionId, true);
       // Reconciliation applies idle companion choices through the normal switch
@@ -18312,6 +18343,10 @@ export function registerMakerIpc(maker: Maker, options: RegisterMakerIpcOptions)
     applyPendingAgentSwitch: async (sessionId, options) => {
       if (!options?.scheduled) await scheduledModelScope.restore(sessionId);
       await applyPendingAgentSwitchIfIdle(agentSwitchDeps, sessionId);
+      const dispatchedClientId = options?.clientId;
+      await assertMessageHeldForAgySwitchMayGo(agentSwitchDeps, sessionId, !!dispatchedClientId
+        && (agentInputCoordinatorHolder?.hasQueuedItemWhere(sessionId,
+          item => item.clientId === dispatchedClientId && item.awaitsAgySwitchConfirmation === true) ?? false));
       if (!options?.scheduled) await recoverRenamedSessionModelOnSend(sessionId);
       // 桌面发送也是「消息真正发出去」的边界：回合中登记、随后被模型选择器取消的预算
       // 重建必须在这里补一次（调用方已持 send 锁）。
@@ -20087,7 +20122,7 @@ export function registerMakerIpc(maker: Maker, options: RegisterMakerIpcOptions)
     // An answer submitted after Stop explicitly resumes; a newer Stop still wins the race.
     // An ACK-uncertain steer keeps its protective pause: only an explicit user decision may re-dispatch it.
     if (pausedBeforeAnswer && inputCoordinator.getProjection(session.id).queuePaused &&
-      !inputCoordinator.isPausedForUncertainDelivery(session.id)) inputCoordinator.resume(session.id);
+      !inputCoordinator.isPausedForUncertainDelivery(session.id)) inputCoordinator.resumeForQueuedAnswer(session.id, item.clientId);
   };
 
   explicitStopImpl = async (sessionId, options) => {
@@ -21452,7 +21487,35 @@ export function registerMakerIpc(maker: Maker, options: RegisterMakerIpcOptions)
   ipcMain.handle(MAKER_INVOKE.INPUT_RESUME, async (_e, sessionId: unknown, opts?: unknown) => {
     const sid = requireSessionId(sessionId);
     await assertRemoteInputControlBoundary(sid, isDeviceLinkInvoke(), opts);
-    return inputCoordinator.resume(sid);
+    // Only the user's "Continue sending" says so; other callers of this channel lift the pause
+    // and let no held message go.
+    const continueSending = !!opts && typeof opts === 'object' && !Array.isArray(opts)
+      && (opts as { continueSending?: unknown }).continueSending === true;
+    // A supplementary answer to a question card queued its text and resumes for it: the answer
+    // goes ahead of any held message, which stays held.
+    const answerClientId = !!opts && typeof opts === 'object' && !Array.isArray(opts)
+      ? (opts as { answerClientId?: unknown }).answerClientId : undefined;
+    if (!continueSending && typeof answerClientId === 'string' && answerClientId.length > 0) {
+      return inputCoordinator.resumeForQueuedAnswer(sid, answerClientId);
+    }
+    const heldMessage = !!opts && typeof opts === 'object' && !Array.isArray(opts)
+      ? (opts as { agySwitchHeldMessage?: unknown }).agySwitchHeldMessage : undefined;
+    // An older phone cannot say which message its window showed. While the queue is paused at a
+    // message held for a switch into Antigravity, its click changes nothing and says so in the
+    // error it can show (QQ 7126975529, T1). Newer clients always send the field.
+    const namesNoTarget = !(!!opts && typeof opts === 'object' && !Array.isArray(opts)
+      && Object.prototype.hasOwnProperty.call(opts, 'agySwitchHeldMessage'));
+    if (isDeviceLinkInvoke() && namesNoTarget) {
+      const projection = inputCoordinator.getProjection(sid);
+      if (projection.queuePaused && projection.pendingQueue[0]?.awaitsAgySwitchConfirmation === true) {
+        // Draft wording, to be replaced by JJ's.
+        throwIpcError('PRECONDITION_FAILED', 'This message waits for you to confirm the switch to Antigravity. Update the Cindy app on this device, or confirm it on your computer.');
+      }
+    }
+    // A newer client always names the held message its window shows, or null when the window shows
+    // none; only an older client leaves the field out (DD 7126847151).
+    return inputCoordinator.resume(sid, { continueSending,
+      ...(typeof heldMessage === 'string' || heldMessage === null ? { heldMessage } : {}) });
   });
 
   ipcMain.handle(MAKER_INVOKE.IMAGES_RETRY, async (event, sessionId: unknown, imageId: unknown) => {
@@ -21470,7 +21533,17 @@ export function registerMakerIpc(maker: Maker, options: RegisterMakerIpcOptions)
     async (_e, sessionId: unknown, opts?: unknown) => {
       const sid = requireSessionId(sessionId);
       await assertRemoteInputControlBoundary(sid, isDeviceLinkInvoke(), opts);
-      return inputCoordinator.retryLastError(sid);
+      // Which held message the retry is about, when it is one held for a switch into Antigravity.
+      const heldMessage = opts && typeof opts === 'object' && !Array.isArray(opts)
+        ? (opts as { agySwitchHeldMessage?: unknown }).agySwitchHeldMessage : undefined;
+      // A remote retry that names no held message, while a switch into Antigravity is still
+      // pending, could send another message on the agreement given on this computer. It retries
+      // nothing; once the switch is withdrawn, the same retry works as before (QQ 7126975529, T3a).
+      if (isDeviceLinkInvoke() && typeof heldMessage !== 'string'
+        && agentSwitchPending.get(sid)?.targetAgentKind === 'agy') {
+        return inputCoordinator.getProjection(sid);
+      }
+      return inputCoordinator.retryLastError(sid, typeof heldMessage === 'string' ? heldMessage : undefined);
     },
   );
 

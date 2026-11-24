@@ -2822,6 +2822,47 @@ describe('MakerScheduleRunner queued dispatch: slot accounting and wait cap', ()
     }
   });
 
+  // cindy#19 (QQ's ruling on heartbeats): a heartbeat queued on a busy task can end up held at
+  // the queue's head because the task's pending switch into Antigravity waits for the user's
+  // confirmation. It is tracked and never accepted. When its wait runs out, the run is not
+  // "failed" and not sent anywhere: the prompt is withdrawn and the fire is handed back to the
+  // engine with a retry delay, so the work is owned by the next fire (the engine side of that
+  // hand-over is scheduler.test.ts "deferred fire ..."). The next fire queues it again, which is
+  // the state the user sees in the task. Fake clock, the real runner and its real deferral path;
+  // the queue is the stand-in, shaped like the coordinator holding the head.
+  it('hands a heartbeat held for an unconfirmed switch back to the engine when its wait runs out, sends nothing, and queues it again on the next fire', async () => {
+    vi.useFakeTimers();
+    try {
+      const harness = createSessionHarness(async () => ({ accepted: true }));
+      // Held at the head: still in the queue, so it is tracked, and the coordinator never accepts it.
+      const queue = createQueueHarness({ busy: true, tracked: () => true });
+      const { runner } = createRunnerHarness(harness.session, queue.deps);
+
+      const first = runner.fire(heartbeatSchedule(), createFireContext());
+      await vi.waitFor(() => expect(queue.enqueueCalls.length).toBe(1));
+      await vi.advanceTimersByTimeAsync(QUEUED_DISPATCH_MAX_WAIT_MS - QUEUED_DISPATCH_TRACK_POLL_MS);
+      expect(queue.removeCalls).toEqual([]);
+      await vi.advanceTimersByTimeAsync(2 * QUEUED_DISPATCH_TRACK_POLL_MS);
+
+      const handedBack = await first;
+      expect(handedBack).toMatchObject({ sessionId: SESSION_ID, deferred: true });
+      expect((handedBack as { deferRetryMs?: number }).deferRetryMs).toBeGreaterThan(0);
+      expect(queue.removeCalls).toEqual([{ sessionId: SESSION_ID, clientId: 'client-1' }]);
+      expect(harness.send).not.toHaveBeenCalled();
+      expect(harness.session.abort).not.toHaveBeenCalled();
+
+      // The engine fires again after the delay; the task is still busy, the switch still unconfirmed.
+      const second = runner.fire(heartbeatSchedule(), createFireContext());
+      await vi.waitFor(() => expect(queue.enqueueCalls.length).toBe(2));
+      expect(harness.send).not.toHaveBeenCalled();
+      await vi.advanceTimersByTimeAsync(QUEUED_DISPATCH_MAX_WAIT_MS + QUEUED_DISPATCH_TRACK_POLL_MS);
+      await expect(second).resolves.toMatchObject({ deferred: true });
+      expect(harness.send).not.toHaveBeenCalled();
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
   it('等派发超过上限 → 撤项并顺延(recurring 任务下次到点重新排队)', async () => {
     vi.useFakeTimers();
     try {

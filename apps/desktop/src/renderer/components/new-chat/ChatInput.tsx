@@ -165,12 +165,19 @@ import { captureComposerSendSnapshot, isComposerSendSnapshotCurrent } from './co
 import { useRemoteSessionConnection } from '@/features/cc-agent/hooks/useRemoteSessionConnection';
 
 import {
+  agreeToPendingAgySwitchPermission,
+  agyPermissionChangeTitle,
+  agySwitchPermissionNotice,
   confirmAgentSwitchRisk,
+  forgetAgySwitchPermissionAgreed,
+  noteAgySwitchPermissionAgreed,
+  readAgySwitchPermissionAgreed,
   isAgentSwitchEchoConfigConsistent,
   isAgentSwitchResponseFresh,
   relocationDescriptionKey,
   resolveAgentSwitchAckAction,
 } from './agentSwitchConfirmation';
+import { agySwitchAgreementPurposeOfComposerDialog, recordAgySwitchPermissionAgreementWithHost } from './agySwitchPermissionHost';
 import {
   beginAgentSwitchOperation,
   getAgentSwitchWriteSeq,
@@ -330,7 +337,9 @@ import type { Effort, PermissionMode } from '@/lib/userPreferences.types';
 import { getAppShortcutCombos } from '@/lib/appShortcutStore';
 import { getNextPermissionMode } from '@/lib/permissionModeCycle';
 import { matchesKeyboardEvent } from '../../../shared/appShortcuts';
-import { isLaunchableMakerAgentKind, makerToDbAgentKind } from '../../../shared/agentKindConversion';
+import {
+  isLaunchableMakerAgentKind, isSessionSwitchTargetAgentKind, makerToDbAgentKind,
+} from '../../../shared/agentKindConversion';
 import {
   getComposerSendShortcutPreference,
   getComposerSendShortcutLabel,
@@ -2071,6 +2080,9 @@ export function ChatInput({
   const sessionAgentSwitchSupported =
     sessionOrcaRole !== undefined && runtimeAgentKind != null &&
     (!deviceLinkDeviceId || ccSupportsSessionAgentSwitch || codexSupportsSessionAgentSwitch);
+  // Antigravity runs only on the computer that hosts the task: a task on this computer may switch
+  // to it; a task reached through device link or SSH may not.
+  const sessionRunsOnThisComputer = !deviceLinkDeviceId && !remoteHostId;
 
   // 切换写入的串行链与写序号都按 session 存在**模块级**协调层(agentSwitchCoordinator),
   // 不放组件 ref:用户切走再切回时旧组件已卸载但 invoke 仍在飞,新组件若另起空队列 /
@@ -5735,6 +5747,11 @@ export function ChatInput({
   const dispatchSendRef = useRef<(deliveryMode?: MessageDeliveryMode) => void | Promise<void>>(
     () => {},
   );
+  /** Assigned below, next to the switch dialog; a send or change that races the open dialog is dropped. */
+  const confirmPendingAgySwitchPermissionRef = useRef<(sourceSessionId: string) => Promise<boolean>>(async () => true);
+  const confirmPermissionChangeDuringAgySwitchRef = useRef<
+    (sourceSessionId: string, newMode: PermissionMode) => Promise<boolean>
+  >(async () => true);
   const dispatchSend = useCallback(
     async (deliveryMode: MessageDeliveryMode = 'queue') => {
       if (!editor) return;
@@ -5744,6 +5761,12 @@ export function ChatInput({
       // React 的 disabled 状态可能尚未完成下一帧渲染；同步读协调器兜住点击、快捷键、
       // 语音发送等所有入口，确保 host 已登记切换意图后才允许 maker:send。
       if (sessionId && hasPendingAgentSendDispatch(sessionId)) return;
+      // A send already on its way owns this draft; asking here would confirm a send that is then dropped.
+      if (dispatchSendInFlightKeysRef.current.has(storageKey ?? sessionId ?? '__draft__')) return;
+      // A pending switch into Antigravity changes the task's permissions when this message applies
+      // it. A change of mode is agreed to when it is made; this covers a lost record (window
+      // reload, a switch registered elsewhere): state the actual change, and send only on agreement.
+      if (sessionId && !(await confirmPendingAgySwitchPermissionRef.current(sessionId))) return;
       const sourceSessionId = sessionId;
       const sourceRemoteGhosts = deviceLinkDeviceId ? composerGhostsRef.current : null;
       const sourceStorageKey = storageKey;
@@ -7422,8 +7445,74 @@ export function ChatInput({
       expectedRevision?: number,
     ) => void | boolean | Promise<void | boolean>;
   }>({ byProvider: () => {}, byModel: () => {} });
-  const confirmAgentBrowseSwitch = useCallback(
-    (targetAgent: 'claude-code' | 'codex' | 'pi' | null) =>
+  const agySwitchPermissionPromptOpenRef = useRef(false);
+  const confirmAgySwitchPermissionWhilePending = async (
+    sourceSessionId: string, permissionMode: PermissionMode, about: 'sendConfirmation' | 'permissionConfirmation',
+  ) => {
+    // The host takes an agreement only from the computer the task runs on. A dialog here would ask
+    // for a confirmation it then discards; the host holds the switch and its banner says where to confirm.
+    if (deviceLinkDeviceId) return true;
+    if (agySwitchPermissionPromptOpenRef.current) return false;
+    agySwitchPermissionPromptOpenRef.current = true;
+    try {
+      return await agreeToPendingAgySwitchPermission({
+        sessionId: sourceSessionId,
+        intent: agentSwitchIntent,
+        runningAgent: runtimeAgentKind,
+        permissionMode,
+        confirm: confirmDialog,
+        copy: {
+          title: about === 'permissionConfirmation' ? (() => {
+            const title = agyPermissionChangeTitle(t, runtimeAgentKind, permissionMode,
+              activeAgentCapabilities?.permissionModes.find(option => option.id === permissionMode)?.displayName);
+            return { fromFullAccess: title, fromUnsupported: title };
+          })() : {
+            fromFullAccess: t('newChat.chatInput.agentSwitch.sendConfirmation.titleFromFullAccess'),
+            fromUnsupported: t('newChat.chatInput.agentSwitch.sendConfirmation.titleFromUnsupported'),
+          },
+          ...(about === 'permissionConfirmation' ? {
+            statement: {
+              fromFullAccess: t('newChat.chatInput.agentSwitch.permissionConfirmation.bodyFromFullAccess'),
+              fromUnsupported: t('newChat.chatInput.agentSwitch.permissionConfirmation.bodyFromUnsupported'),
+            },
+          } : {}),
+          confirmText: t(`newChat.chatInput.agentSwitch.${about}.confirm`),
+          cancelText: t(`newChat.chatInput.agentSwitch.${about}.cancel`),
+        },
+        t,
+        registerWithHost: (intent, agreement) =>
+          // Agreeing in order to send lets a message held for this go; an ordinary change of
+          // the permission mode only records the agreement.
+          recordAgySwitchPermissionAgreementWithHost(sourceSessionId, intent, agreement,
+            agySwitchAgreementPurposeOfComposerDialog(about),
+            // The permission menu asks before the new mode is stored: the host is told which
+            // change this is, from the mode the task is in to the one being chosen.
+            about === 'permissionConfirmation' ? { to: permissionMode, from: activePermissionModeRef.current } : undefined),
+        currentIntent: () => makerChatStore.getAgentSwitchIntent(sourceSessionId),
+      });
+    } catch (err) {
+      // If the host has no record of the agreement, the mode is not stored and the message not queued.
+      log.warn('agy switch permission agreement was not recorded by the host:', err);
+      toast.error(t('newChat.chatInput.agentSwitch.permissionAgreementNotRecorded'));
+      return false;
+    } finally {
+      agySwitchPermissionPromptOpenRef.current = false;
+    }
+  };
+  confirmPendingAgySwitchPermissionRef.current = sourceSessionId =>
+    confirmAgySwitchPermissionWhilePending(sourceSessionId, activePermissionModeRef.current, 'sendConfirmation');
+  // A queued message, an IM message or another entry applies the pending switch without passing
+  // the composer, with whatever mode is stored then. So a mode the switch would rewrite is agreed
+  // to before it is stored: the store never holds a rewrite the user was not told about here.
+  confirmPermissionChangeDuringAgySwitchRef.current = (sourceSessionId, newMode) =>
+    confirmAgySwitchPermissionWhilePending(sourceSessionId, newMode, 'permissionConfirmation');
+  const pendingAgySwitch = agentSwitchIntent?.target === 'agy';
+  useEffect(() => {
+    // What was agreed belongs to one pending switch; it must not vouch for a later one.
+    if (sessionId && !pendingAgySwitch) forgetAgySwitchPermissionAgreed(sessionId);
+  }, [sessionId, pendingAgySwitch]);
+  const confirmAgentBrowseSwitchRisk = useCallback(
+    (targetAgent: 'claude-code' | 'codex' | 'pi' | 'agy' | null) =>
       confirmAgentSwitchRisk({
         // 不必再问的两种:回原引擎(same-engine no-op),或点的就是已经确认过的意图目标
         // Harness(只换模型,不换引擎)。换到第三家仍要问(Chris 2026-08-20:Claude 任务里
@@ -7442,12 +7531,31 @@ export function ChatInput({
           cancelText: t('newChat.chatInput.agentSwitch.confirmation.cancel'),
           dontShowAgainLabel: t('newChat.chatInput.agentSwitch.confirmation.dontShowAgain'),
         },
+        ...agySwitchPermissionNotice(targetAgent, runtimeAgentKind, activePermissionMode, t),
       }),
-    [sessionId, runtimeAgentKind, agentSwitchIntent?.target, confirmDialog, t],
+    [sessionId, runtimeAgentKind, agentSwitchIntent?.target, confirmDialog, t, activePermissionMode],
+  );
+  /** The task whose engine-pick dialog was just answered "yes", until the registration it led to is sent. */
+  const agyAgreedInPickDialogRef = useRef<string | null>(null);
+  const confirmAgentBrowseSwitch = useCallback(
+    async (targetAgent: 'claude-code' | 'codex' | 'pi' | 'agy' | null) => {
+      // Picking another Gemini model while the switch is already pending shows no dialog, so it
+      // must not replace what the user agreed to; the send gate compares against that.
+      const firstPickOfAntigravity = targetAgent === 'agy' && runtimeAgentKind !== 'agy' && !pendingAgySwitch;
+      const modeAtPick = activePermissionMode;
+      const proceed = await confirmAgentBrowseSwitchRisk(targetAgent);
+      if (proceed && firstPickOfAntigravity && sessionId) {
+        noteAgySwitchPermissionAgreed(sessionId, modeAtPick);
+        // The registration that follows this dialog carries the answer; no later one does.
+        agyAgreedInPickDialogRef.current = sessionId;
+      }
+      return proceed;
+    },
+    [confirmAgentBrowseSwitchRisk, runtimeAgentKind, pendingAgySwitch, activePermissionMode, sessionId],
   );
   const performAgentSwitch = useCallback(
     async (
-      targetAgentKind: 'claude-code' | 'codex' | 'pi',
+      targetAgentKind: 'claude-code' | 'codex' | 'pi' | 'agy',
       newModelId: string,
       providerId: string | null = null,
       // 意图期内的档位/Fast/思考开关改动经此显式覆盖(用户手选优先于记忆/默认解析)。
@@ -7473,6 +7581,12 @@ export function ChatInput({
       // 分支末尾的 isAgentSwitchEchoConfigConsistent)同样返 false —— 三元组落了不等于
       // 这份完整配置落了,调用方挂在 true 上的持久化收尾(清 override / 提交・删除收藏
       // 编辑 / 写收藏锚点)一律不做。只有完整配置原样成为权威意图 / 已应用才返 true。
+      // "The user has just agreed in this pick's dialog" belongs to this one call. It is read and
+      // cleared here, before anything below can return: left set by a call that stopped early (the
+      // settings lock, a send in flight, a declined context check), it would ride along with a
+      // later registration that showed no dialog (DD 7091620535, item 4).
+      const agreedInPickDialog = !!sessionId && agyAgreedInPickDialogRef.current === sessionId;
+      agyAgreedInPickDialogRef.current = null;
       if (!sessionId || settingsLocked) return false;
       // 发送的引用水合 / 预检也可能 await。以同步登记的 session 级发送 token 为准，
       // 防止「先点发送、后选引擎」被异步准备反转成先登记切换再 maker:send。
@@ -7565,7 +7679,9 @@ export function ChatInput({
               ? codexCaps.capabilities
               : targetAgentKind === 'pi'
                 ? piCaps.capabilities
-                : ccCaps.capabilities,
+                : targetAgentKind === 'agy'
+                  ? agyCaps.capabilities
+                  : ccCaps.capabilities,
           providerId,
           modelId: newModelId,
           agentKind: targetAgentKind,
@@ -7592,9 +7708,19 @@ export function ChatInput({
         const switchApi = deviceLinkDeviceId
           ? makerApiForDevice(deviceLinkDeviceId)
           : makerApiFor(sourceSessionId);
+        // The host applies the switch from any entry and checks the stored mode against this.
+        // Sent only with the registration that the pick's own dialog led to. Picking another
+        // Gemini model, an effort, Fast or thinking afterwards shows no dialog and sends none:
+        // what this window remembers may come from the task's entry or the permission menu. The
+        // host decides what stands: for the same switch (only the effort, Fast or thinking
+        // changed) it keeps its own record; for another model it starts with none and the next
+        // message that needs an agreement asks.
+        const agreedInThisPick = targetAgentKind === 'agy' && !deviceLinkDeviceId && agreedInPickDialog;
+        const agyPermissionAgreement = agreedInThisPick ? readAgySwitchPermissionAgreed(sourceSessionId) : undefined;
         const switchOptions = {
           ...(relocateTo !== undefined ? { agentDeviceId: relocateTo } : {}),
           ...(!deviceLinkDeviceId && confirmedContextWindow !== undefined ? { confirmedContextWindow } : {}),
+          ...(agyPermissionAgreement ? { agyPermissionAgreement, agyPermissionAgreedWithThisPick: true } : {}),
         };
         const result = Object.keys(switchOptions).length > 0
           ? await switchApi.switchSessionAgent(
@@ -7737,7 +7863,9 @@ export function ChatInput({
                     ? 'Codex'
                     : targetAgentKind === 'pi'
                       ? 'Pi'
-                      : 'Claude Code',
+                      : targetAgentKind === 'agy'
+                        ? 'Antigravity'
+                        : 'Claude Code',
                 model: newModelId,
               }),
               { duration: 4000 },
@@ -7899,8 +8027,8 @@ export function ChatInput({
         fast?: boolean | 'ultrafast';
         favoriteUid?: string | null;
       }): Promise<boolean> => {
-        // agy 只保留历史身份,不是可切换目标;显式拒绝,选择器留在原地。
-        if (!isLaunchableMakerAgentKind(targetAgent)) return false;
+        // Antigravity 只在任务所在的这台电脑上跑:本机任务可以切过去,远程任务显式拒绝,选择器留在原地。
+        if (!isSessionSwitchTargetAgentKind(targetAgent, sessionRunsOnThisComputer)) return false;
         // 取消 = 什么都不改;返回 false 让选择器留在原地(用户还能挑别的行)。
         // 目标显式传给确认门:同一目标不重复弹,换目标要重新确认(见 confirmAgentBrowseSwitch)。
         if (!(await confirmAgentBrowseSwitch(targetAgent))) return false;
@@ -8203,7 +8331,7 @@ export function ChatInput({
           expectedAgentSwitchRevision === undefined) {
         const intent = makerChatStore.getAgentSwitchIntent(sessionId);
         const switchTarget = intent?.target ?? runtimeAgentKind;
-        if (!isLaunchableMakerAgentKind(switchTarget)) return false;
+        if (!isSessionSwitchTargetAgentKind(switchTarget, sessionRunsOnThisComputer)) return false;
         return performAgentSwitch(switchTarget, newModelId,
           intent ? intent.providerId : effectiveSourceId ?? null);
       }
@@ -8816,7 +8944,7 @@ export function ChatInput({
           expectedAgentSwitchRevision === undefined) {
         const intent = makerChatStore.getAgentSwitchIntent(sessionId);
         const switchTarget = intent?.target ?? runtimeAgentKind;
-        if (!isLaunchableMakerAgentKind(switchTarget)) return false;
+        if (!isSessionSwitchTargetAgentKind(switchTarget, sessionRunsOnThisComputer)) return false;
         return performAgentSwitch(switchTarget,
           reconciledModelId ?? intent?.model ?? activeModel, newProviderId, {
             effort: reconciledEffort,
@@ -9298,6 +9426,7 @@ export function ChatInput({
         });
         if (!confirmed) return;
       }
+      if (sessionId && !(await confirmPermissionChangeDuringAgySwitchRef.current(sessionId, newMode))) return;
       try {
         if (sessionId) {
           if (getSessionDeviceId(sessionId)) {

@@ -65,6 +65,84 @@ markers to disguise the launch context. Login and unlock remain explicit owner
 operations. Record only environment-variable presence and process identities for
 diagnostics, never arbitrary environment values or command lines.
 
+## Switching an existing task into Antigravity
+
+How this differs from switching a task to Codex, and what the user is told (cindy#19).
+
+- Only a task that runs on this computer can be switched: Antigravity runs where the
+  task is hosted. A window that controls the task on another computer, and the phone,
+  do not offer it and cannot agree to it.
+- The switch is registered and applied when the next message is sent, as for other
+  engines. Unlike them, a switch the user makes from the model picker can rewrite the
+  task's permission mode. Antigravity has no "accept edits" or "plan" mode. Where it
+  runs inside the Linux sandbox, its Full access removes the file and network isolation
+  the sandbox gives; on Windows and macOS it is started without that isolation in every
+  mode, so this difference does not apply there. The rule is the same on all three:
+
+  | Mode before the switch | Mode after | Asked first |
+  | --- | --- | --- |
+  | Ask, Default, Auto | unchanged | no |
+  | Full access | Auto (Cindy reviews the approval requests) | yes |
+  | any other (accept edits, plan, ...) | Ask | yes |
+
+  Full access is not what a task is switched into; the user can choose it in the task
+  afterwards.
+- The host checks the user's agreement to that change where the switch is applied, not
+  where it was asked. A message that would apply the switch without it is not sent on
+  either engine. What happens to it depends on where it came from: a message already in
+  the task's queue stays first in the queue, marked as held, with a banner; an entry
+  that does not queue (a message from IM, for one) is refused before it is sent and
+  says so, and there is no queue head or banner for it.
+- A held message is sent by one of two actions of the user's on it and by nothing else:
+  confirming on its own banner, or "Continue sending". Picking the engine or a model
+  again, changing effort, Fast, thinking or the permission mode, confirming from the
+  task's entry, sending or interjecting another message, and a restart all record or
+  change settings and send nothing held. When any of them sets the queue moving, the
+  queue is paused again in front of the held message.
+- A confirmation to send is about one message in one hold. The host names each hold;
+  the window reads the name when its question opens and sends it back with the answer
+  and the retry. The hold gets a new name when the message is held again or its content
+  changes (an edit that leaves the content as it was keeps it), and when the user closes
+  the message's banner, stops the queue or goes back in the task's history, in any
+  window. An answer or retry that names an earlier hold, or none, sends nothing. After
+  the banner was closed or the queue paused, no answer lifts the pause, whichever hold
+  it names: "Continue sending" is the way on.
+- Such an answer may still record the agreement about the permissions, for no send, and
+  only if it passes the same checks as any other: it comes from this computer, names
+  the registration that is still pending, and is about the conversion the task's stored
+  mode would get now. An answer about a switch that was withdrawn or replaced, or about
+  another conversion, records nothing.
+- An agreement is about one pending switch and one permission conversion, and the host
+  keeps it. Changing only the effort, Fast or thinking registers the same switch again
+  (the same engine, model and provider): the agreement on record stays, as long as it
+  is still the conversion the task's stored mode would get, and the user is not asked
+  again. Another model, provider or engine, or a switch withdrawn and made again, starts
+  with none, except for the conversion the user has just agreed to in the dialog of
+  that very pick, which is written with the registration it led to. What a window sends
+  along with a later pick is never taken. Keeping an agreement never keeps a permission
+  to send: changing a setting sends nothing. Not every entry that sends the next message
+  can ask; one that cannot is refused as above.
+- A held message cannot be interjected into the running turn: that would deliver it to
+  the engine it was not written for, without the send step that applies the switch.
+- The mark on a held message is stored with the queue, the pending switch is not. After
+  a restart the queue is paused with the message in it. "Continue sending" tries it;
+  with no switch pending it is held again and its banner says that the switch is no
+  longer pending. The user picks the engine again, or removes the message.
+
+Evidence. Earlier runs of the switch on Windows 11 are recorded on cindy#19 and stand
+for what they covered. What was added after them has not been run on a real app: the
+binding of a confirmation to one message and one hold; the rules for a closed banner,
+Stop and going back, including the case of two windows; the banner giving way over a
+paused queue; answers to question cards, moves and interjections around a held message;
+the banner of a task that already runs Antigravity; and the kept agreement. Those are
+covered by tests of the host's switch handler joined to the real queue through
+register.ts's own wiring, with a stand-in engine, and by component tests of the window's
+question with the real banner; "two windows" and "a controlling computer" there are
+series of calls to one host. Not executed by any test: the lines that pass the hold's
+name from the desktop task view and from the phone's task page, the task view's own
+lines for the paused queue and for "already runs Antigravity", and the host lines that
+route an answer to a question card. Nothing here was seen on a phone.
+
 ## MCP and other capability gaps
 
 The official guide documents HTTP MCP with --process-per-session. The current

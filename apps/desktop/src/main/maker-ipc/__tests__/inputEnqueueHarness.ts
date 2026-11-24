@@ -20,6 +20,15 @@ const compiled = transpileModule(`return (${handler});`, {
   compilerOptions: { target: ScriptTarget.ES2022 },
 }).outputText;
 
+// The queue menu's "Interject" (INPUT_STEER), the same way.
+const steerStart = source.indexOf('    MAKER_INVOKE.INPUT_STEER,');
+const steerHandlerStart = source.indexOf('    async (event, sessionId: unknown, item: unknown, opts?: unknown) => {', steerStart);
+const steerHandlerEnd = source.indexOf('\n  );', steerHandlerStart);
+if (steerStart < 0 || steerHandlerStart < steerStart || steerHandlerEnd < steerHandlerStart) throw new Error('INPUT_STEER handler not found');
+const compiledSteer = transpileModule(`return (${source.slice(steerHandlerStart, steerHandlerEnd).trim().replace(/,$/, '')});`, {
+  compilerOptions: { target: ScriptTarget.ES2022 },
+}).outputText;
+
 const stopStart = source.indexOf('  ipcMain.handle(MAKER_INVOKE.INPUT_STOP,');
 const stopEnd = source.indexOf('  ipcMain.handle(MAKER_INVOKE.INPUT_RESUME,', stopStart);
 if (stopStart < 0 || stopEnd < stopStart) throw new Error('INPUT_STOP handler not found');
@@ -144,7 +153,8 @@ export function createInputEnqueueHarness(coordinator: AgentInputCoordinator, op
     stampMobileClientOrigin,
     isAutomaticInputOriginKind,
     prepareDeviceLinkAutoTitle: async () => noop,
-    queuedAttachmentOwnership: { activateCurrentOwner: noop },
+    queuedAttachmentOwnership: { activateCurrentOwner: noop, restoreCurrentOwner: noop },
+    trustedDesktopSteerText: { run: <T>(_text: string, fn: () => T) => fn() },
     throwIpcError: (code: string, message: string) => { throw Object.assign(new Error(message), { code }); },
     ...Object.fromEntries([
       'assertReviewExternalInputAllowed', 'assertTrustedAppRendererEvent', 'withSessionPermissionChange',
@@ -156,5 +166,38 @@ export function createInputEnqueueHarness(coordinator: AgentInputCoordinator, op
   };
   const enqueue = new Function(...Object.keys(bindings), compiled)(...Object.values(bindings)) as
     (event: object, sid: string, item: AgentInputQueuedMessage, opts?: unknown) => Promise<AgentInputProjection>;
-  return { enqueue, acceptedCallbacks, preparations };
+  const steer = new Function(...Object.keys(bindings), compiledSteer)(...Object.values(bindings)) as
+    (event: object, sid: string, item: AgentInputQueuedMessage, opts?: unknown) => Promise<boolean>;
+  return { enqueue, steer, acceptedCallbacks, preparations };
+}
+
+// "Continue sending" (INPUT_RESUME) and Retry (INPUT_RETRY_LAST_ERROR) as they are registered,
+// with only the host services injected (QQ 7126975529: regressions from the remote IPC entry).
+const resumeStart = source.indexOf('  ipcMain.handle(MAKER_INVOKE.INPUT_RESUME,');
+const resumeEnd = source.indexOf('  ipcMain.handle(MAKER_INVOKE.INPUT_CLEAR_ERROR,', resumeStart);
+if (resumeStart < 0 || resumeEnd < resumeStart) throw new Error('INPUT_RESUME / INPUT_RETRY_LAST_ERROR handlers not found');
+const compiledResumeRetry = transpileModule(source.slice(resumeStart, resumeEnd), {
+  compilerOptions: { target: ScriptTarget.ES2022 },
+}).outputText;
+
+export function createInputResumeRetryHarness(coordinator: AgentInputCoordinator, options: {
+  remote: () => boolean;
+  agentSwitchPending: { get(sessionId: string): { targetAgentKind?: string } | undefined };
+}) {
+  const handlers = new Map<string, (event: object, sid: string, opts?: unknown) => Promise<AgentInputProjection>>();
+  const bindings = {
+    ipcMain: { handle: (name: string, fn: (event: object, sid: string, opts?: unknown) => Promise<AgentInputProjection>) => { handlers.set(name, fn); } },
+    MAKER_INVOKE: { INPUT_RESUME: 'maker:input:resume', INPUT_RETRY_LAST_ERROR: 'maker:input:retry-last-error' },
+    inputCoordinator: coordinator,
+    requireSessionId: (sid: string) => sid,
+    isDeviceLinkInvoke: options.remote,
+    assertRemoteInputControlBoundary: async () => {},
+    agentSwitchPending: options.agentSwitchPending,
+    throwIpcError: (code: string, message: string) => { throw Object.assign(new Error(message), { code }); },
+  };
+  new Function(...Object.keys(bindings), compiledResumeRetry)(...Object.values(bindings));
+  return {
+    resume: (sid: string, opts?: unknown) => handlers.get('maker:input:resume')!({}, sid, opts),
+    retry: (sid: string, opts?: unknown) => handlers.get('maker:input:retry-last-error')!({}, sid, opts),
+  };
 }

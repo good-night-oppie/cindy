@@ -199,6 +199,7 @@ describe('desktop send outcome helper', () => {
       'SEND_FAILED',
       'PLUGIN_TURN_SKIPPED',
       'PLUGIN_TURN_BLOCKED',
+      'AGENT_SWITCH_PERMISSION_UNCONFIRMED',
     ]);
     for (const code of HOST_SEND_FAILURE_CODES) {
       const err = new Error(code) as Error & { code?: string };

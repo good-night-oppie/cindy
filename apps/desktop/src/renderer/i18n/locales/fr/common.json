@@ -13147,6 +13147,7 @@
         },
         "turn": {
           "groupApprovalOwnerDm": "🔐 Une tâche dans une discussion de groupe nécessite votre autorisation. La carte d'autorisation n'est pas publiée dans le groupe : confirmez ici.",
+          "agentSwitchPermissionUnconfirmed": "⏸ Ce message n'a pas été traité. Cette tâche est sur le point de passer à Antigravity, ce qui modifiera ses autorisations ; la personne qui gère la tâche doit donc d'abord l'ouvrir dans Cindy sur son ordinateur et confirmer. Ensuite, merci de renvoyer ce message.",
           "agentStartFailed": "❌ Impossible de démarrer l'Agent : {{reason}}",
           "personalBotLabel": "bot personnel {{channel}}",
           "error": "❌ Erreur : {{message}}"
@@ -14308,6 +14309,8 @@
       "pluginSenderFallback": "Plugin",
       "botRowAria": "Message en file d'attente de l’ami « {{sender}} »",
       "dragAria": "Faire glisser le message en file d'attente {{index}} pour le réordonner",
+      "steerHeldForAgySwitch": "Ce message attend que vous confirmiez le changement d'autorisations ; d'ici là, « Réorienter » n'est pas disponible.",
+      "steerHeldForAgySwitchRemote": "Ce message attend que le changement d'autorisations soit confirmé sur l'ordinateur où la tâche s'exécute ; d'ici là, « Réorienter » n'est pas disponible pour lui.",
       "steerAction": "Réorienter",
       "steerRunningTip": "Réorienter la tâche en cours d'exécution avec ce message, sans l'interrompre ; il sera traité une fois l'action en cours terminée",
       "steerPausedTip": "Reprendre la tâche en traitant d'abord ce message",
@@ -14459,7 +14462,29 @@
           "description": "Le nouveau moteur de l'Agent reprend à partir d'un résumé de transfert : il n'est donc pas garanti que le raisonnement et les autres contenus soient parfaitement conservés. Revenir en arrière vous permet toujours de poursuivre la session du moteur d'origine. Le changement interrompt aussi une fois le cache du prompt et peut augmenter la consommation de jetons.",
           "confirm": "Changer d'Agent",
           "cancel": "Conserver l'Agent actuel",
-          "dontShowAgain": "Ne plus me le rappeler"
+          "dontShowAgain": "Ne plus me le rappeler",
+          "antigravityFromFullAccess": "Après le changement, les autorisations de cette tâche passent de « Accès complet » à « Revue auto » : Cindy examine automatiquement les demandes d'approbation envoyées par Antigravity, sans vous solliciter. « Accès complet » n'est pas repris dans Antigravity. Vous pourrez ensuite modifier les autorisations dans le menu des autorisations de la tâche ; il explique aussi ce que permet chaque niveau.",
+          "antigravityFromUnsupported": "Après le changement, les autorisations de cette tâche passent à « Autorisations par défaut » : vous décidez des demandes d'approbation envoyées par Antigravity. Antigravity n'a pas votre niveau d'autorisation actuel ; les règles propres à ce niveau (comme les limites du mode Plan) ne sont donc pas reprises. Vous pourrez ensuite modifier les autorisations dans le menu des autorisations de la tâche ; il explique aussi ce que permet chaque niveau."
+        },
+        "sendConfirmation": {
+          "titleFromFullAccess": "Envoyer avec « Revue auto » ?",
+          "titleFromUnsupported": "Envoyer avec « Autorisations par défaut » ?",
+          "cancel": "Ne pas envoyer pour le moment",
+          "confirm": "Confirmer et envoyer"
+        },
+        "permissionAgreementNotRecorded": "Cette confirmation n'a pas été enregistrée, rien n'a donc encore changé. Réessayez.",
+        "permissionEntry": {
+          "notice": "Le passage à Antigravity modifiera les autorisations de cette tâche, et cette modification attend encore votre confirmation. Sélectionnez « Vérifier et confirmer » ; confirmer ici accepte uniquement la modification et n'envoie aucun message.",
+          "titleFromFullAccess": "Accepter le passage à « Revue auto » ?",
+          "titleFromUnsupported": "Accepter le passage à « Autorisations par défaut » ?",
+          "note": "La confirmation n'envoie aucun message."
+        },
+        "permissionConfirmation": {
+          "bodyFromFullAccess": "Après le changement, l'« Accès complet » que vous venez de choisir passe à « Revue auto » : Cindy examine automatiquement les demandes d'approbation envoyées par Antigravity, sans vous solliciter. « Accès complet » n'est pas repris dans Antigravity. Vous pourrez ensuite modifier les autorisations dans le menu des autorisations de la tâche ; il explique aussi ce que permet chaque niveau.",
+          "bodyFromUnsupported": "Après le changement, les autorisations de cette tâche passent à « Autorisations par défaut » : vous décidez des demandes d'approbation envoyées par Antigravity. Antigravity n'a pas le niveau que vous venez de choisir ; ses règles propres (comme les limites du mode Plan) ne sont donc pas reprises. Vous pourrez ensuite modifier les autorisations dans le menu des autorisations de la tâche ; il explique aussi ce que permet chaque niveau.",
+          "title": "Passer à « {{mode}} » ?",
+          "cancel": "Ne pas modifier pour le moment",
+          "confirm": "Confirmer la modification"
         }
       },
       "agentRelocation": {
@@ -15068,6 +15093,15 @@
       "gatewayQuotaExhausted": "Votre solde Cindy AI est épuisé. Ajoutez des fonds pour continuer.",
       "viewBalance": "Voir le solde",
       "viewBalanceTitle": "Ouvrir Facturation pour consulter votre solde et ajouter des fonds",
+      "agentSwitchPermissionUnconfirmed": "Ce message n'a pas encore été envoyé. Le passage à Antigravity modifiera les autorisations de cette tâche, et cette modification attend encore votre confirmation. Sélectionnez « Vérifier et confirmer » ; Cindy ne bascule et n'envoie ce message qu'après votre confirmation.",
+      "agentSwitchPermissionUnconfirmedRemote": "Ce message n'a pas encore été envoyé. Le passage à Antigravity modifiera les autorisations de cette tâche, et cette modification doit être confirmée sur l'ordinateur où la tâche s'exécute avant que Cindy bascule et l'envoie. Une fois la confirmation faite là-bas, sélectionnez « Réessayer » si ce message n'a toujours pas été envoyé.",
+      "agentSwitchPermissionUnconfirmedRemoteNamed": "Ce message n'a pas encore été envoyé. Le passage à Antigravity modifiera les autorisations de cette tâche, et cette modification doit être confirmée sur « {{device}} », l'ordinateur où la tâche s'exécute, avant que Cindy bascule et l'envoie. Une fois la confirmation faite là-bas, sélectionnez « Réessayer » si ce message n'a toujours pas été envoyé.",
+      "agentSwitchPermissionKept": "Ce message n'a pas encore été envoyé. Le passage à Antigravity ne change pas les autorisations de cette tâche ; sélectionnez « Envoyer » pour que ce message soit envoyé.",
+      "agentSwitchPermissionKeptSend": "Envoyer",
+      "agentSwitchPermissionAlreadySwitched": "Ce message n'a pas encore été envoyé. Cette tâche est déjà passée à Antigravity ; sélectionnez « Envoyer » pour que ce message soit envoyé.",
+      "agentSwitchPermissionAlreadySwitchedRemote": "Ce message n'a pas encore été envoyé. Cette tâche est déjà passée à Antigravity ; sélectionnez « Réessayer » pour que ce message soit envoyé.",
+      "agentSwitchPermissionSwitchGone": "Ce message n'a pas encore été envoyé. Il attendait que la tâche passe à Antigravity, mais ce passage n'est plus en attente. Pour changer, choisissez de nouveau un modèle Antigravity, sélectionnez « Changer d'Agent », puis confirmez l'envoi lorsque cela vous est demandé ; ce n'est qu'alors que ce message est envoyé. Si vous ne voulez pas changer, sélectionnez « En file d'attente » à côté de ce message et choisissez « Annuler l'envoi » ; le message est supprimé, saisissez-le donc de nouveau et envoyez-le.",
+      "agentSwitchPermissionReview": "Vérifier et confirmer",
       "credentialSwitchBusy": "Une autre tâche Codex est toujours en cours d'exécution : le fournisseur de cette session ne peut donc pas encore être appliqué (le processus Codex partagé doit redémarrer). Réessayez une fois ces tâches terminées.",
       "accountBoundaryPending": "Cindy est encore en train de changer l'état du compte : cette tâche ne peut donc pas encore démarrer. Patientez un instant, puis cliquez sur Réessayer. Si le problème persiste, redémarrez Cindy.",
       "codexThreadStale": "Le mode d'authentification Codex a changé : cette session ne peut pas continuer. Démarrez une nouvelle session pour l'appliquer.",

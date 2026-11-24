@@ -1,6 +1,7 @@
 import type { PermissionMode, PermissionModeDescriptor } from '@cindy/maker-core';
 import { requiresFullAccessConfirmation } from '@cindy/maker-shared/permission-mode';
 import { getCurrentDbClientSnapshot } from '../../localDb/client/current.js';
+import { isAgyFullAccessDeferred } from '../../maker-ipc/agyPermissionLifecycle.js';
 import { withSessionPermissionChange } from '../../maker-ipc/sessionPermissionChange.js';
 
 import type { ImUiTextPack } from './types';
@@ -70,7 +71,8 @@ export async function changeSessionPermissionMode(args: {
     let changedLive = false;
     const commit = async () => {
       assertCurrent();
-      const live = args.getLiveSession();
+      const current = args.getLiveSession();
+      const live = isAgyFullAccessDeferred(current, args.mode) ? null : current;
       if (live) await live.setPermissionMode(args.mode);
       try {
         assertCurrent();

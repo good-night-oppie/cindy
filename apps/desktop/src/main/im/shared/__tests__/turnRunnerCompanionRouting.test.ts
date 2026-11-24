@@ -84,6 +84,7 @@ vi.mock('../pendingInteractions', () => ({
 vi.mock('../apiKey', () => ({ readXdGatewayApiKey: mocks.readXdGatewayApiKey }));
 
 import { createTurnRunner, type ImTurnRunner } from '../turnRunner';
+import { AgentSwitchPermissionUnconfirmedError } from '../../../maker-ipc/agentSwitchPermissionAgreement';
 import type { ImCardBuilders } from '../cardBuilders';
 import type { ImSessionRepo, ImSessionRow } from '../sessionRepo';
 import type { ImChannelAdapter } from '../types';
@@ -799,6 +800,37 @@ describe('turnRunner: connection handed to a companion bot', () => {
     const warnings = mocks.logger.warn.mock.calls.filter(([msg]) =>
       String(msg).includes('falling back to the channel'));
     expect(warnings).toHaveLength(1);
+  });
+
+  // cindy#19 (QQ's ruling): an IM message reaches the task without the composer or the queue, and
+  // applies the task's pending switch on the way. When the host refuses that switch because its
+  // permission rewrite was not agreed to, nothing has been stored for this message, so the sender
+  // (who still has it in the chat) is the one holding it: they must be told what to do, the
+  // message must not reach either engine, and sending it again after confirming must work.
+  it('tells the IM sender to confirm on the computer when the pending switch is held, sends nothing, and delivers the resent message', async () => {
+    const release = vi.fn();
+    acquirePendingAgentSwitch.mockRejectedValueOnce(new AgentSwitchPermissionUnconfirmedError());
+    acquirePendingAgentSwitch.mockResolvedValue(release);
+    botRows.set('mimi-main', rowFor('mimi-main', {}));
+    mocks.dbSelect.mockImplementation(() => ({ from: () => ({ where: () => ({
+      limit: async () => [{ ...botRows.get('mimi-main'), status: 'active' }],
+    }) }) }));
+    runner = createTurnRunner(fakeAdapter, fakeRepo, fakeCards, {
+      companion: companion as unknown as ImCompanionRouteDeps, acquirePendingAgentSwitch,
+      prepareUnhealthySession: vi.fn(async () => undefined),
+    });
+
+    await runTurn(OWNER);
+    expect(harnesses.get('mimi-main')?.send ?? vi.fn()).not.toHaveBeenCalled();
+    expect(mocks.persistUserMessage).not.toHaveBeenCalled();
+    const replies = mocks.im.sendText.mock.calls.filter(call => call[0] === OWNER).map(call => String(call[1]));
+    expect(replies).toHaveLength(1);
+    expect(replies[0]).toContain('Antigravity');
+    expect(replies[0]).not.toContain('AGENT_SWITCH_PERMISSION_UNCONFIRMED');
+
+    // The owner confirmed in Cindy and sent the message again.
+    await runTurn(OWNER, 'hello again');
+    expect(harnesses.get('mimi-main')?.send).toHaveBeenCalledOnce();
   });
 
   it('replies with a notice and does not send when the bot guard blocks the turn', async () => {

@@ -23,12 +23,12 @@ import { join, resolve } from 'node:path';
 import { existsSync, mkdirSync, promises as fsPromises, readFileSync, rmSync, writeFileSync } from 'node:fs';
 
 import { drizzle } from 'drizzle-orm/better-sqlite3';
-import { afterAll, beforeEach, describe, expect, it, vi } from 'vitest';
+import { afterAll, beforeEach, describe, expect, it, onTestFinished, vi } from 'vitest';
 import { BOT_TEMPLATE_PRESET_IDENTITIES } from '../../../../shared/botTemplatePreset';
 import { createBotModelRouteReconciler } from '../../../maker-ipc/botModelRouteReconciler';
 import { configureBotModelSelectionCoordinator, createBotModelSelectionCoordinator } from '../../../maker-ipc/botModelSelectionCoordinator';
 import { createScheduledModelScope, writeScheduledModelBaselineIfProfileCurrent, ScheduledModelSelectionBusyError, type ScheduledModelSelection } from '../../../maker-ipc/scheduledModelSelection';
-import { acquireSendToSessionLock, withSendToSessionLock } from '../../../maker-ipc/sendToSessionLock';
+import { acquireSendToSessionLock, sendToSessionLocks, withSendToSessionLock } from '../../../maker-ipc/sendToSessionLock';
 import type { BotModelRoute } from '../../../../shared/botModelChain';
 import type { AgentKind } from '@cindy/maker-core';
 import { createBotCapabilityService, type BotCapabilityUpdate } from '../../../maker-ipc/botCapabilityService';
@@ -99,6 +99,7 @@ const h = await vi.hoisted(async () => {
   remove: vi.fn(async (_path: import('node:fs').PathLike, _options?: import('node:fs').RmOptions) => undefined),
   ensureGit: vi.fn(async () => undefined),
   closeSession: vi.fn(async () => undefined),
+  closeSessionIfCurrent: vi.fn(async (_live: unknown, _reason: string, _options: unknown): Promise<'deferred' | void> => undefined),
   getSession: vi.fn((_id?: string) => null as {
     capabilities?: { manualCompact?: { supported?: boolean } };
     isTurnRunning?: () => boolean;
@@ -205,6 +206,7 @@ vi.mock('../../../maker-host/index.js', () => ({
     listAvailableAgents: () => ['claude-code', 'codex', 'pi'],
     isSessionAlive: h.isSessionAlive,
     closeSession: h.closeSession,
+    closeSessionIfCurrent: h.closeSessionIfCurrent,
     getSession: h.getSession,
   }),
 }));
@@ -1410,7 +1412,7 @@ describe('Bot canonical Session lifecycle', () => {
     expect(updated.invitation.stage).toBe('avatar');
   });
 
-  it('keeps the saved bot profile and every linked mode until the last Full access runtime has exited', async () => {
+  it.each([false, true])('keeps the saved bot profile and every linked mode until Full access exits (reply in progress: %s)', async (busy) => {
     const profile = await invoke('local-db:bots:update', { id: 'bot-1', capabilities: { permissions: 'trusted' } });
     const chat = await invoke('local-db:bots:create-canonical-session', {
       botId: 'bot-1', expectedCanonicalSessionId: null, expectedProfileVersion: profile.currentVersion,
@@ -1418,10 +1420,11 @@ describe('Bot canonical Session lifecycle', () => {
     const lane = await ensureBotChannelLaneSession({ botId: 'bot-1', routeKey: 'im:feishu:fixture:g:1', title: 'Fixture' });
     if (!lane.ok) throw new Error(lane.message);
     const ids = [chat.session.id, lane.sessionId];
+    h.sqlite!.prepare("UPDATE sessions SET agent_kind = 'agy' WHERE id IN (?, ?)").run(...ids);
     const modes = () => h.sqlite!.prepare('SELECT permission_mode FROM sessions WHERE id IN (?, ?)').pluck().all(...ids);
     const status = Object.getOwnPropertyDescriptor(process, 'platform')!;
     const live = { agentKind: 'agy', stablePermissionModeState: { mode: 'bypassPermissions' },
-      isTurnRunning: () => false, compactSession: vi.fn(), setPermissionMode: vi.fn() };
+      isTurnRunning: () => busy, abort: vi.fn(), compactSession: vi.fn(), setPermissionMode: vi.fn() };
     const running = new Set(ids);
     h.getSession.mockImplementation(id => id && running.has(id) ? live : null);
     h.closeSession.mockRejectedValueOnce(new Error('Fixture close unconfirmed'));
@@ -1439,11 +1442,98 @@ describe('Bot canonical Session lifecycle', () => {
       });
       await change();
       expect(running.size).toBe(0);
+      expect(live.abort).toHaveBeenCalledTimes(busy ? 3 : 0);
       expect(modes()).toEqual(['ask', 'ask']);
       expect((await invoke('local-db:bots:get', 'bot-1')).capabilities.permissions).toBe('ask');
     } finally {
       Object.defineProperty(process, 'platform', status);
       h.closeSession.mockReset().mockResolvedValue(undefined);
+    }
+  });
+
+  it('widens an agy partner after its busy lane closes and refreshes both saved lanes', async () => {
+    const profile = await invoke('local-db:bots:update', { id: 'bot-1', capabilities: { permissions: 'ask' } });
+    const chat = await invoke('local-db:bots:create-canonical-session', {
+      botId: 'bot-1', expectedCanonicalSessionId: null, expectedProfileVersion: profile.currentVersion,
+    });
+    const lane = await ensureBotChannelLaneSession({ botId: 'bot-1', routeKey: 'im:feishu:fixture:g:1', title: 'Fixture' });
+    if (!lane.ok) throw new Error(lane.message);
+    const ids = [chat.session.id, lane.sessionId];
+    h.sqlite!.prepare("UPDATE sessions SET agent_kind = 'agy' WHERE id IN (?, ?)").run(...ids);
+    const modes = () => h.sqlite!.prepare('SELECT permission_mode FROM sessions WHERE id IN (?, ?)').pluck().all(...ids);
+    const runtime = (busy: boolean) => ({
+      agentKind: 'agy', stablePermissionModeState: { mode: 'ask' },
+      isTurnRunning: () => busy, compactSession: vi.fn(), setPermissionMode: vi.fn(),
+    });
+    const busy = runtime(true);
+    const live = new Map([[chat.session.id as string, runtime(false)], [lane.sessionId, busy]]);
+    h.getSession.mockImplementation(id => id ? live.get(id) ?? null : null);
+    h.closeSession.mockImplementation(async (...args: unknown[]) => { live.delete(args[0] as string); });
+    h.closeSessionIfCurrent.mockImplementationOnce(async (handle, reason, options) => {
+      expect(handle).toBe(busy);
+      expect(reason).toBe('runtime-refresh');
+      expect(options).toEqual({ afterCurrentTurn: true });
+      expect(modes()).toEqual(['ask', 'ask']);
+      live.delete(lane.sessionId);
+    });
+    const platform = Object.getOwnPropertyDescriptor(process, 'platform')!;
+    Object.defineProperty(process, 'platform', { ...platform, value: 'linux' });
+    try {
+      await invoke('local-db:bots:update', { id: 'bot-1', capabilities: { permissions: 'trusted' } });
+      expect(live.size).toBe(0);
+      expect(modes()).toEqual(['bypassPermissions', 'bypassPermissions']);
+      expect((await invoke('local-db:bots:get', 'bot-1')).capabilities.permissions).toBe('trusted');
+    } finally {
+      Object.defineProperty(process, 'platform', platform);
+      h.closeSession.mockReset().mockResolvedValue(undefined);
+      h.closeSessionIfCurrent.mockReset().mockResolvedValue(undefined);
+    }
+  });
+
+  it.each(['first', 'last', 'canonical'] as const)('keeps the %s busy agy runtime isolated while publishing every widened lane', async position => {
+    const profile = await invoke('local-db:bots:update', { id: 'bot-1', capabilities: { permissions: 'ask' } });
+    const chat = await invoke('local-db:bots:create-canonical-session', {
+      botId: 'bot-1', expectedCanonicalSessionId: null, expectedProfileVersion: profile.currentVersion,
+    });
+    const ids: string[] = [chat.session.id];
+    // Put noncanonical lanes on both sides of session-1 in the actual lock order.
+    for (const counter of [-1, 7, 8]) {
+      h.nextSession = counter;
+      const lane = await ensureBotChannelLaneSession({ botId: 'bot-1', routeKey: 'im:fixture:' + counter, title: 'Fixture' });
+      if (!lane.ok) throw new Error(lane.message);
+      ids.push(lane.sessionId);
+    }
+    const ordered = [...ids].sort();
+    const busyId = position === 'canonical' ? ids[0]! : position === 'first' ? ordered[0]! : ordered[3]!;
+    if (position !== 'canonical') expect(busyId).not.toBe(chat.session.id);
+    const sqlIds = '(?, ?, ?, ?)';
+    h.sqlite!.prepare("UPDATE sessions SET agent_kind = 'agy' WHERE id IN " + sqlIds).run(...ids);
+    const live = new Map(ids.map(id => [id, {
+      agentKind: 'agy', stablePermissionModeState: { mode: 'ask' },
+      isTurnRunning: () => id === busyId, compactSession: vi.fn(), setPermissionMode: vi.fn(),
+    }]));
+    const busy = live.get(busyId)!;
+    h.getSession.mockImplementation(id => id ? live.get(id) ?? null : null);
+    h.closeSession.mockImplementation(async (...args: unknown[]) => { live.delete(args[0] as string); });
+    h.closeSessionIfCurrent.mockResolvedValue('deferred');
+    const patched = vi.spyOn(await import('../sessions'), 'broadcastSessionPatched');
+    const platform = Object.getOwnPropertyDescriptor(process, 'platform')!;
+    Object.defineProperty(process, 'platform', { ...platform, value: 'linux' });
+    try {
+      await invoke('local-db:bots:update', { id: 'bot-1', capabilities: { permissions: 'trusted' } });
+      expect(h.closeSessionIfCurrent).toHaveBeenCalledTimes(1);
+      expect(h.closeSessionIfCurrent).toHaveBeenCalledWith(busy, 'runtime-refresh', { afterCurrentTurn: true });
+      expect([...live.keys()]).toEqual([busyId]);
+      expect(busy.setPermissionMode).not.toHaveBeenCalled();
+      expect(h.sqlite!.prepare('SELECT permission_mode FROM sessions WHERE id IN ' + sqlIds).pluck().all(...ids))
+        .toEqual(ids.map(() => 'bypassPermissions'));
+      for (const id of ids) expect(patched).toHaveBeenCalledWith(id, { permissionMode: 'bypassPermissions' });
+      expect((await invoke('local-db:bots:get', 'bot-1')).capabilities.permissions).toBe('trusted');
+    } finally {
+      Object.defineProperty(process, 'platform', platform);
+      patched.mockRestore();
+      h.closeSession.mockReset().mockResolvedValue(undefined);
+      h.closeSessionIfCurrent.mockReset().mockResolvedValue(undefined);
     }
   });
 
@@ -5275,6 +5365,9 @@ describe('Teammate model selection shares profile persistence and route reconcil
   // real save transaction, send locks, reconciler and baseline writer in both
   // orders, then restore through a fresh scope (no runtime refresh or timers).
   it.each(['save-first', 'automation-first'] as const)('does not resurrect an old route when %s races baseline capture', async (order) => {
+    const platform = Object.getOwnPropertyDescriptor(process, 'platform')!;
+    Object.defineProperty(process, 'platform', { ...platform, value: 'linux' });
+    onTestFinished(() => { Object.defineProperty(process, 'platform', platform); });
     const created = await invoke('local-db:bots:create-canonical-session', {
       botId: 'bot-1', expectedCanonicalSessionId: null, expectedProfileVersion: 1,
     });
@@ -5304,10 +5397,8 @@ describe('Teammate model selection shares profile persistence and route reconcil
         'UPDATE sessions SET scheduled_model_baseline = NULL WHERE id = ? AND scheduled_model_baseline IS ?',
       ).run(id, expected ?? null).changes === 1,
     });
-    let savingReachedLock!: () => void;
-    const waiting = new Promise<void>((resolve) => { savingReachedLock = resolve; });
     configureBotModelSelectionCoordinator(createBotModelSelectionCoordinator({
-      acquireSessionLock: (id) => { savingReachedLock(); return acquireSendToSessionLock(id); },
+      acquireSessionLock: acquireSendToSessionLock,
       cancelRecovery: () => {}, // This fixture has no input coordinator or pending continuation.
       invalidate: reconcile.invalidate,
     }));
@@ -5329,9 +5420,10 @@ describe('Teammate model selection shares profile persistence and route reconcil
     } });
     if (order === 'automation-first') {
       const release = await acquireSendToSessionLock(sessionId);
+      const ownerEntry = sendToSessionLocks.get(sessionId);
       const saving = save();
       try {
-        await waiting;
+        await vi.waitFor(() => expect(sendToSessionLocks.get(sessionId)).not.toBe(ownerEntry));
         await scope.begin(sessionId);
         expect(JSON.parse((await read()).baseline!).model).not.toBe('new-saved-model');
       } finally { release(); }

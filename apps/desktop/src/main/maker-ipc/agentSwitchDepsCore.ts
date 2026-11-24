@@ -29,6 +29,7 @@ export const readAgentSwitchSessionRow: SwitchDeps['getSessionRow'] = async (ses
         workingDir: sessions.workingDir,
         source: sessions.source,
         agentDeviceId: sessions.agentDeviceId,
+        permissionMode: sessions.permissionMode,
       })
       .from(sessions)
       .where(eq(sessions.id, sessionId))

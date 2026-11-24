@@ -12987,6 +12987,7 @@
         },
         "turn": {
           "groupApprovalOwnerDm": "🔐 群聊里的任务需要你授权。授权卡不会发到群里，在这里确认即可。",
+          "agentSwitchPermissionUnconfirmed": "⏸ 这条消息没有处理。这个任务正要切换到 Antigravity，切换会改变它的权限，要由管理这个任务的人先在电脑上的 Cindy 里打开它确认。确认后，请把这条消息再发一次。",
           "agentStartFailed": "❌ 启动 Agent 失败：{{reason}}",
           "personalBotLabel": "{{channel}} 个人 bot",
           "error": "❌ 错误：{{message}}"
@@ -14139,6 +14140,8 @@
       "pluginSenderFallback": "插件",
       "botRowAria": "伙伴「{{sender}}」发来的排队消息",
       "dragAria": "拖动第 {{index}} 条待发送消息排序",
+      "steerHeldForAgySwitch": "这条消息在等你确认权限的改变，确认前不能插话。",
+      "steerHeldForAgySwitchRemote": "这条消息在等任务所在的电脑确认权限的改变，确认前不能插话。",
       "steerAction": "插话",
       "steerRunningTip": "插话到当前任务，不打断正在执行的工作，当前动作完成后优先处理这条消息",
       "steerPausedTip": "继续任务，并优先处理这条消息",
@@ -14289,7 +14292,29 @@
           "description": "新 Agent 引擎会通过交接摘要续接，思考内容等不能保证完美继承；切回时仍可继续原引擎会话。切换还会让 prompt 缓存中断一次，可能增加 Token 消耗。",
           "confirm": "切换 Agent",
           "cancel": "保留当前 Agent",
-          "dontShowAgain": "下次不再提醒"
+          "dontShowAgain": "下次不再提醒",
+          "antigravityFromFullAccess": "切换后，这个任务的权限会从「完全访问」改为「自动审批」：Antigravity 发来的审批请求由 Cindy 自动审批，不再问你。「完全访问」不会带到 Antigravity。切换后可以在任务的权限菜单里再改；各档的具体范围也写在那里。",
+          "antigravityFromUnsupported": "切换后，这个任务的权限会改为「默认权限」：Antigravity 发来的审批请求由你决定。你现在用的权限档位 Antigravity 没有，这个档位自带的规则（比如计划模式的限制）不会带过去。切换后可以在任务的权限菜单里再改；各档的具体范围也写在那里。"
+        },
+        "sendConfirmation": {
+          "titleFromFullAccess": "按「自动审批」发送？",
+          "titleFromUnsupported": "按「默认权限」发送？",
+          "cancel": "暂不发送",
+          "confirm": "确认并发送"
+        },
+        "permissionAgreementNotRecorded": "这次确认没有记下，什么都还没改。请再试一次。",
+        "permissionEntry": {
+          "notice": "切换到 Antigravity 会改变这个任务的权限，这次改变还需要你确认。点「查看并确认」；这里的确认只是同意这次改变，不会发送消息。",
+          "titleFromFullAccess": "同意改成「自动审批」？",
+          "titleFromUnsupported": "同意改成「默认权限」？",
+          "note": "确认后不会发送消息。"
+        },
+        "permissionConfirmation": {
+          "bodyFromFullAccess": "切换后，你刚选的「完全访问」会改为「自动审批」：Antigravity 发来的审批请求由 Cindy 自动审批，不再问你。「完全访问」不会带到 Antigravity。切换后可以在任务的权限菜单里再改；各档的具体范围也写在那里。",
+          "bodyFromUnsupported": "切换后，这个任务的权限会改为「默认权限」：Antigravity 发来的审批请求由你决定。你刚选的这个档位 Antigravity 没有，它自带的规则（比如计划模式的限制）不会带过去。切换后可以在任务的权限菜单里再改；各档的具体范围也写在那里。",
+          "title": "改成「{{mode}}」？",
+          "cancel": "暂不更改",
+          "confirm": "确认更改"
         }
       },
       "agentRelocation": {
@@ -14907,6 +14932,15 @@
       "gatewayQuotaExhausted": "Cindy AI 余额不足，请充值后继续",
       "viewBalance": "查看余额",
       "viewBalanceTitle": "打开「用量和计费」查看余额并充值",
+      "agentSwitchPermissionUnconfirmed": "这条消息还没有发出。切换到 Antigravity 会改变这个任务的权限，这次改变还需要你确认。点「查看并确认」；你确认后才会切换并发送这条消息。",
+      "agentSwitchPermissionUnconfirmedRemote": "这条消息还没有发出。切换到 Antigravity 会改变这个任务的权限，这次改变要在任务所在的那台电脑上确认，确认后才会切换并发送。那边确认后，如果这条消息还没发出，点「重试」。",
+      "agentSwitchPermissionUnconfirmedRemoteNamed": "这条消息还没有发出。切换到 Antigravity 会改变这个任务的权限，这次改变要在任务所在的电脑「{{device}}」上确认，确认后才会切换并发送。那边确认后，如果这条消息还没发出，点「重试」。",
+      "agentSwitchPermissionKept": "这条消息还没有发出。切换到 Antigravity 不会改变这个任务的权限；点「发送」，这条消息才会发出。",
+      "agentSwitchPermissionKeptSend": "发送",
+      "agentSwitchPermissionAlreadySwitched": "这条消息还没有发出。这个任务已经切换到 Antigravity 了；点「发送」，这条消息才会发出。",
+      "agentSwitchPermissionAlreadySwitchedRemote": "这条消息还没有发出。这个任务已经切换到 Antigravity 了；点「重试」，这条消息才会发出。",
+      "agentSwitchPermissionSwitchGone": "这条消息还没有发出。它在等任务切换到 Antigravity，但那次切换已经失效了。要切换的话，重新选一个 Antigravity 的模型，在弹窗里点「切换 Agent」，再按接下来的提示确认发送，这条消息才会发出。不想切换的话，点这条消息旁的「排队中」，选「取消发送」，这条消息会被移除，再重新输入并发送。",
+      "agentSwitchPermissionReview": "查看并确认",
       "credentialSwitchBusy": "其他 Codex 任务仍在运行，暂时无法应用本任务选择的供应商（共享的 Codex 进程需要重启）。等这些任务结束后再点「重试」。",
       "accountBoundaryPending": "Cindy 正在切换账号状态，暂时无法开始这个任务。稍等片刻后点「重试」；如果一直出现，请重启 Cindy。",
       "codexThreadStale": "Codex 鉴权模式已切换，当前任务无法继续。新建任务后即可生效。",

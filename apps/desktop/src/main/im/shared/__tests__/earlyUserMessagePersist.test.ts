@@ -200,6 +200,24 @@ describe('messageHandler early user-message persist', () => {
     expect(delivery.defer).toHaveBeenCalledOnce();
   });
 
+  // cindy#19 (QQ's ruling): a transport with its own queue got "internal error:
+  // AGENT_SWITCH_PERMISSION_U…" when the task's pending switch into Antigravity was waiting for a
+  // confirmation. The reader gets the localized reason without the code, and since the transport
+  // marks the message handled (it is not kept anywhere), the reply is the one that asks to send again.
+  it('tells the sender of a durable input why a held switch refused it, without the code, and does not keep the message', async () => {
+    const h = wire({ withPrepare: false, channel: 'imessage' });
+    const delivery = { awaitPersistence: vi.fn(), defer: vi.fn(), accept: vi.fn() };
+    h.dispatchAgentTurn.mockResolvedValue({ kind: 'rejected', reason: 'AGENT_SWITCH_PERMISSION_UNCONFIRMED' });
+    await h.deliver(makeEvent({ channelName: 'imessage', delivery }));
+    expect(h.sendText).toHaveBeenCalledOnce();
+    const reply = String(h.sendText.mock.calls[0][1]);
+    expect(reply).toContain('Antigravity');
+    expect(reply).not.toContain('AGENT_SWITCH');
+    expect(reply).not.toBe(slackUi.agent.sendInternalError('AGENT_SWITCH_PERMISSION_UNCONFIRMED'));
+    expect(delivery.accept).toHaveBeenCalledOnce();
+    expect(delivery.defer).not.toHaveBeenCalled();
+  });
+
   // Tier 1, #9250: /stop and !stop must also withdraw the external transport queue.
   it.each(['/stop', '!stop'])('cancels durable pending inputs on %s', async text => {
     const h = wire({ withPrepare: false, channel: 'imessage' });

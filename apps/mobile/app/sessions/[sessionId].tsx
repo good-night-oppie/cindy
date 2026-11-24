@@ -455,6 +455,7 @@ import {
   queueComposerAnnotationSubmission,
 } from '@/session/composerAttachmentInbox';
 import {
+  agySwitchHeldMessageOf,
   buildQueuedTextMessage,
   buildQueueRowPresentation,
   createQueueEditTextState,
@@ -7965,7 +7966,10 @@ function SessionScreenContent({ beforeSessionSwitchRef, newSessionActionRef }: S
   const dismissTransientNotice = useCallback(() => setTransientNotice(null), []);
 
   const resumeQueue = () => {
-    void runQueueAction(() => maker.input.resume(sessionId));
+    const pausedAt = inputProjection.pendingQueue[0] as { awaitsAgySwitchConfirmation?: unknown; agySwitchHoldId?: unknown } | undefined;
+    const agySwitchHeldMessage = pausedAt?.awaitsAgySwitchConfirmation === true && typeof pausedAt.agySwitchHoldId === 'string'
+      ? pausedAt.agySwitchHoldId : null;
+    void runQueueAction(() => maker.input.resume(sessionId, { continueSending: true, agySwitchHeldMessage }));
   };
 
   const steerQueueItem = useCallback((item: QueuedRemoteMessage) => {
@@ -8497,7 +8501,10 @@ function SessionScreenContent({ beforeSessionSwitchRef, newSessionActionRef }: S
   const retryQueueError = () => {
     if (queueAvailabilityReason || !inputProjection.errorRetryText || isHistoryRecoveryPending()) return;
     invalidateHistoryRecoveryNavigation();
-    void runQueueAction(() => maker.input.retryLastError(sessionId));
+    // On the banner of a message the computer holds for a switch into Antigravity, the tap is
+    // about that message: the computer retries it only if it still holds that one.
+    const agySwitchHeldMessage = agySwitchHeldMessageOf(inputProjection);
+    void runQueueAction(() => maker.input.retryLastError(sessionId, agySwitchHeldMessage));
   };
 
   const canContinueError = canContinueFailedTurn({

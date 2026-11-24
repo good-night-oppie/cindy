@@ -1,5 +1,6 @@
 import { recordGithubStarPromptSend, recordGithubStarPromptCompletion } from './githubStarPrompt';
 import { parseOutputLimitDetails, type OutputLimitDetails } from '@cindy/maker-shared';
+import { agySwitchHeldMessageOf } from '@cindy/maker-shared/queue';
 import { pendingGhostCardFormDelivery } from '@cindy/maker-shared/ghost-card-form';
 import { applySessionRebalancePreferencePatch } from '@/features/provider-group/sessionRebalanceCache';
 import { isVoiceCallTaskMessage } from '../../shared/voiceConversation';
@@ -2589,7 +2590,7 @@ export type MessageDeliveryMode = 'queue' | 'steer';
 
 /** 仅影响 selector/chip 的乐观展示；agentKind 始终保留真实 reducer 路由。 */
 export interface AgentSwitchIntentRecord {
-  target: 'claude-code' | 'codex' | 'pi';
+  target: 'claude-code' | 'codex' | 'pi' | 'agy';
   model: string;
   providerId: string | null;
   effort?: string;
@@ -2599,6 +2600,17 @@ export interface AgentSwitchIntentRecord {
    * 意图期内模型目录、选中态与 trigger 都按这台电脑显示。
    */
   agentDeviceId?: string | null;
+  /**
+   * Antigravity only, from the host: the permission rewrite it has recorded as agreed for this
+   * switch (null = none). Undefined until the host has said, and for hosts that do not say.
+   */
+  agyPermissionAgreement?: { change: 'fromFullAccess' | 'fromUnsupported' | null; mode: string } | null;
+  /** Antigravity only, from the host: which registration this is. Sent back with an agreement. */
+  agyPermissionRevision?: number;
+  /** From the host: the agreement was given where a message was to go out with it. */
+  agyPermissionAgreementForSend?: true;
+  /** From the host: staged by configuration, not picked by the user in this task. */
+  configStaged?: true;
 }
 
 export type ContinuationInFlightProjectionCapability = 'unknown' | 'supported' | 'legacy';
@@ -15147,10 +15159,18 @@ function resumeQueue(sessionId: string): void {
   if (preResumeHeadClientId) {
     markLocalSentUserMessage(sessionId, preResumeHeadClientId);
   }
-  const boundaryOpts = getRemoteInputClearBoundaryOpts(sessionId);
-  runAgentDispatchProjectionOperation(sessionId, (input) =>
-    boundaryOpts ? input.resume(sessionId, boundaryOpts) : input.resume(sessionId),
-  )
+  // This is the "Continue sending" button: the host lets the held message the queue is paused at
+  // go only when told so. Other callers of resume (answers to question cards) do not say it.
+  // With the held message this window shows the queue stopped at, so that the host lets go that
+  // one and not another that was moved first meanwhile.
+  const pausedAtHeld = preResumeState?.pendingQueue[0]?.awaitsAgySwitchConfirmation === true
+    ? preResumeState.pendingQueue[0].agySwitchHoldId : undefined;
+  const boundaryOpts = {
+    ...(getRemoteInputClearBoundaryOpts(sessionId) ?? {}), continueSending: true as const,
+    // Always said: null when the window shows no held message at the head (DD 7126847151).
+    agySwitchHeldMessage: pausedAtHeld ?? null,
+  };
+  runAgentDispatchProjectionOperation(sessionId, (input) => input.resume(sessionId, boundaryOpts))
     .then(({ projection }) => {
       if (
         preResumeHeadClientId &&
@@ -17197,7 +17217,7 @@ function clearError(sessionId: string): void {
   });
 }
 
-function retryLastError(sessionId: string): Promise<void> {
+function retryLastError(sessionId: string, agySwitchHeldMessage?: string): Promise<void> {
   if (!sessionId) return Promise.resolve();
   disposeLiveErrorPersist(sessionId);
   // 续跑语义在 main:coordinator 判定失败 turn 已有 assistant 产出时,用共享英文
@@ -17241,7 +17261,12 @@ function retryLastError(sessionId: string): Promise<void> {
   if (preRetryQueueHeadClientId) {
     markLocalSentUserMessage(sessionId, preRetryQueueHeadClientId);
   }
-  const boundaryOpts = getRemoteInputClearBoundaryOpts(sessionId);
+  const remoteBoundaryOpts = getRemoteInputClearBoundaryOpts(sessionId);
+  // Which held message this click is about (see getAgySwitchHeldMessage); the host retries a
+  // message held for a switch into Antigravity only when told the hold it is in.
+  const boundaryOpts = agySwitchHeldMessage
+    ? { ...(remoteBoundaryOpts ?? {}), agySwitchHeldMessage }
+    : remoteBoundaryOpts;
   return runAgentDispatchProjectionOperation(sessionId, (input) =>
     boundaryOpts ? input.retryLastError(sessionId, boundaryOpts) : input.retryLastError(sessionId),
   ).then(
@@ -17949,7 +17974,9 @@ async function sendProtectedQuestionSupplement(sessionId: string, requestId: str
     });
     if (!current()) return;
     if (projection.queuePaused && (state.turnStoppedByUser || state.queuePaused)) {
-      projection = await operation.api.input.resume(sessionId, getRemoteInputClearBoundaryOpts(sessionId));
+      projection = await operation.api.input.resume(sessionId, {
+        ...(getRemoteInputClearBoundaryOpts(sessionId) ?? {}), answerClientId: queued.clientId,
+      });
     }
     if (!current()) return;
     applyInputProjectionOperationResponse(sessionId, operation, projection);
@@ -18813,7 +18840,7 @@ function sendUiTrigger(sessionId: string, prompt: string): Promise<void> {
  * sdkSessionId——否则 buildCreateOpts 会把旧引擎的原生会话 id 当 resume 目标
  * (main 侧 reconcileCreateOptsWithDb 是兜底,这里是第一现场收敛)。
  */
-function noteAgentSwitched(sessionId: string, agentKind: 'claude-code' | 'codex' | 'pi'): void {
+function noteAgentSwitched(sessionId: string, agentKind: 'claude-code' | 'codex' | 'pi' | 'agy'): void {
   if (!sessionId) return;
   setState(sessionId, (s) => {
     const nextProviderId = s.agentSwitchIntent ? s.agentSwitchIntent.providerId : s.sessionProviderId;
@@ -18845,7 +18872,7 @@ function noteAgentSwitched(sessionId: string, agentKind: 'claude-code' | 'codex'
  */
 function noteAgentSwitchIntent(
   sessionId: string,
-  target: 'claude-code' | 'codex' | 'pi',
+  target: 'claude-code' | 'codex' | 'pi' | 'agy',
   opts: {
     model: string;
     providerId: string | null;
@@ -18884,6 +18911,18 @@ function getAgentSwitchIntent(sessionId: string): AgentSwitchIntentRecord | null
 }
 
 /**
+ * Which hold of which message the task's banner is about, when that message is one the host
+ * holds for a switch into Antigravity: the host's own name for it (agySwitchHoldId), as this
+ * window shows it now. A window reads it when it asks the user whether the message should go and
+ * sends it back with the answer and the retry, so that the host acts only if the message it
+ * holds then is still that one. Null when no such message is shown, or the host named none.
+ */
+function getAgySwitchHeldMessage(sessionId: string): string | null {
+  const state = sessions.get(sessionId);
+  return state ? agySwitchHeldMessageOf({ pendingQueue: state.pendingQueue, recovery: state.inputRecovery }) : null;
+}
+
+/**
  * 意图的单调修订号(不存在的会话按 0)。异步读回的新鲜度判定读它——值比较会被 ABA
  * (null → 已登记 → null)骗过,修订号不会。
  */
@@ -18901,10 +18940,13 @@ function normalizeAgentSwitchIntent(value: unknown): AgentSwitchIntentRecord | n
   // 轮 42 P1(codex-connector):pi 遗漏 —— main 的 performSessionAgentSwitch 与
   // AgentSwitchIntentRecord.target 都支持 'pi', 这里收窄成 cc/codex 会把
   // 等待下轮的 Pi switch 意图归一化成 null, pending 状态在 renderer 丢失。
+  // Antigravity too (cindy#19): the model picker registers it, and dropping it here left the
+  // composer unaware of a switch the next message still applied, after a reload or its own echo.
   if (
     item.targetAgentKind !== 'claude-code'
     && item.targetAgentKind !== 'codex'
     && item.targetAgentKind !== 'pi'
+    && item.targetAgentKind !== 'agy'
   ) return null;
   if (typeof item.model !== 'string' || item.model.length === 0) return null;
   // providerId 缺失按 null(与 main projectPendingAgentSwitchIntent 的 `?? null` 对齐);
@@ -18924,7 +18966,40 @@ function normalizeAgentSwitchIntent(value: unknown): AgentSwitchIntentRecord | n
     ...(typeof item.effort === 'string' && item.effort.length > 0 ? { effort: item.effort } : {}),
     ...((typeof item.fastMode === 'boolean' || item.fastMode === 'ultrafast') ? { fastMode: item.fastMode } : {}),
     ...(agentDeviceId !== undefined ? { agentDeviceId } : {}),
+    ...normalizeAgyPermissionState(item),
   };
+}
+
+/** What the host says about the permission agreement of a pending switch into Antigravity. */
+function normalizeAgyPermissionState(
+  item: Record<string, unknown>,
+): Pick<AgentSwitchIntentRecord, 'agyPermissionAgreement' | 'agyPermissionRevision' | 'agyPermissionAgreementForSend' | 'configStaged'> {
+  if (item.targetAgentKind !== 'agy' || !('agyPermissionAgreement' in item)) return {};
+  const raw = item.agyPermissionAgreement;
+  const agreed = raw && typeof raw === 'object' && !Array.isArray(raw)
+    ? raw as { change?: unknown; mode?: unknown } : null;
+  const change = agreed?.change;
+  let agreement: NonNullable<AgentSwitchIntentRecord['agyPermissionAgreement']> | null = null;
+  if (agreed && typeof agreed.mode === 'string' && agreed.mode
+    && (change === null || change === 'fromFullAccess' || change === 'fromUnsupported')) {
+    agreement = { change, mode: agreed.mode };
+  }
+  return {
+    agyPermissionAgreement: agreement,
+    ...(typeof item.agyPermissionRevision === 'number' ? { agyPermissionRevision: item.agyPermissionRevision } : {}),
+    ...(agreement && item.agyPermissionAgreementForSend === true ? { agyPermissionAgreementForSend: true as const } : {}),
+    ...(item.configStaged === true ? { configStaged: true as const } : {}),
+  };
+}
+
+function agyPermissionStateEquals(a: AgentSwitchIntentRecord, b: AgentSwitchIntentRecord): boolean {
+  return a.configStaged === b.configStaged
+    && a.agyPermissionRevision === b.agyPermissionRevision
+    && a.agyPermissionAgreementForSend === b.agyPermissionAgreementForSend
+    && (a.agyPermissionAgreement === b.agyPermissionAgreement
+      || (!!a.agyPermissionAgreement && !!b.agyPermissionAgreement
+        && a.agyPermissionAgreement.change === b.agyPermissionAgreement.change
+        && a.agyPermissionAgreement.mode === b.agyPermissionAgreement.mode));
 }
 
 function agentSwitchIntentEquals(
@@ -18954,7 +19029,24 @@ function agentSwitchIntentEquals(
 function mirrorAgentSwitchIntent(sessionId: string, value: unknown): void {
   if (!sessionId) return;
   const next = normalizeAgentSwitchIntent(value);
-  if (agentSwitchIntentEquals(sessions.get(sessionId)?.agentSwitchIntent ?? null, next)) return;
+  const current = sessions.get(sessionId)?.agentSwitchIntent ?? null;
+  if (agentSwitchIntentEquals(current, next)) {
+    // The same switch, about which the host now says something else on its permission agreement.
+    // That is not another selection: the revision that guards selections in flight stays.
+    if (current && next && 'agyPermissionAgreement' in next && !agyPermissionStateEquals(current, next)) {
+      // Within one registration an agreement is added or replaced, never taken away (a switch
+      // registered again has another revision). A report saying "none" for the registration this
+      // window already knows an agreement for was read before the agreement was written and
+      // arrived after it; taking it would bring the confirmation entry back right after the
+      // user confirmed.
+      if (current.agyPermissionAgreement && !next.agyPermissionAgreement
+        && current.agyPermissionRevision !== undefined && current.agyPermissionRevision === next.agyPermissionRevision) {
+        return;
+      }
+      setState(sessionId, (s) => ({ ...s, agentSwitchIntent: next }));
+    }
+    return;
+  }
   if (!next) {
     clearAgentSwitchIntent(sessionId);
     return;
@@ -19252,6 +19344,7 @@ export const makerChatStore = {
   noteAgentSwitchIntent,
   clearAgentSwitchIntent,
   getAgentSwitchIntent,
+  getAgySwitchHeldMessage,
   /** 意图的单调修订号;异步读回的新鲜度判定用它,值比较会被 ABA 骗过。 */
   getAgentSwitchIntentRev,
   /** 会话所在端(被控端 / 另一窗口)的权威 pending 意图回流镜像;幂等,值等价即 no-op。 */

@@ -52,3 +52,40 @@ export function isLaunchableDbAgentKind(value: unknown): value is LaunchableDbAg
 export function isLaunchableMakerAgentKind(value: unknown): value is LaunchableMakerAgentKind {
   return value === 'claude-code' || value === 'codex' || value === 'pi';
 }
+
+/**
+ * An engine an existing task can be switched to from its model picker. Antigravity runs only on
+ * the computer that hosts the task, so it is a target only when the task runs on this computer.
+ */
+/** Permission modes a task keeps when it switches into Antigravity from another engine. */
+export const AGY_SWITCH_KEPT_PERMISSION_MODES = ['ask', 'default', 'auto'] as const;
+/** Where Full access lands on that switch: Cindy reviews Antigravity's approval requests. */
+export const AGY_SWITCH_FROM_FULL_ACCESS_PERMISSION_MODE = 'auto';
+/** Where a mode Antigravity does not have (accept edits, plan, …) lands: the user decides each request. */
+export const AGY_SWITCH_FROM_UNSUPPORTED_PERMISSION_MODE = 'ask';
+
+/** Which of the two changes a switch into Antigravity makes to the task's mode; `null` keeps it. */
+export function agySwitchPermissionChange(mode: string | null | undefined): 'fromFullAccess' | 'fromUnsupported' | null {
+  if (mode === 'bypassPermissions') return 'fromFullAccess';
+  return (AGY_SWITCH_KEPT_PERMISSION_MODES as readonly string[]).includes(mode ?? '') ? null : 'fromUnsupported';
+}
+
+/**
+ * The permission mode a task has right after switching into Antigravity from another engine
+ * (cindy#19, QQ 2026-11-22). Antigravity's Full access removes file and network isolation, so it
+ * is never a starting value (cindy#1, PG 2026-11-19); the user can still choose it in the task
+ * after the switch. The row commit applies the same rule in SQL (localDb/agentSwitchRows.ts) and
+ * the switch dialog announces it; keep the three in step.
+ */
+export function permissionModeAfterSwitchToAgy(mode: string | null | undefined): string {
+  const change = agySwitchPermissionChange(mode);
+  if (change === 'fromFullAccess') return AGY_SWITCH_FROM_FULL_ACCESS_PERMISSION_MODE;
+  return change === 'fromUnsupported' ? AGY_SWITCH_FROM_UNSUPPORTED_PERMISSION_MODE : mode!;
+}
+
+export function isSessionSwitchTargetAgentKind(
+  value: unknown,
+  sessionRunsOnThisComputer: boolean,
+): value is MakerAgentKindWire {
+  return isLaunchableMakerAgentKind(value) || (value === 'agy' && sessionRunsOnThisComputer);
+}

@@ -1,5 +1,5 @@
 import { buildQueueRowPresentation } from '@cindy/maker-shared/queue';
-import { useEffect, useState } from 'react';
+import { useEffect, useId, useState } from 'react';
 import { ArrowDown, ArrowUp, ChevronDown, ListEnd, Pencil, Trash2 } from 'lucide-react';
 import { useTranslation } from 'react-i18next';
 import type { QueuedMessage } from '@/lib/makerChatStore';
@@ -24,6 +24,11 @@ export interface PendingQueueBubbleProps {
   steeringClientIds: readonly string[];
   editLocks: readonly string[];
   interactionLocks: readonly string[];
+  /**
+   * The task runs on another computer that this window controls. The permission change a held
+   * message waits for can only be confirmed on that computer, and the reason says so.
+   */
+  remoteTask?: boolean;
   readOnly?: boolean;
   localSend?: boolean;
   simplifiedBotConversation?: boolean;
@@ -45,6 +50,7 @@ export function PendingQueueBubble({
   editLocks,
   interactionLocks,
   readOnly,
+  remoteTask = false,
   localSend,
   simplifiedBotConversation = false,
   onEdit,
@@ -70,6 +76,10 @@ export function PendingQueueBubble({
   });
   const busy = Object.values(availability.actions).every((action) => action.disabled);
   const [open, setOpen] = useState(false);
+  // Held for the user's agreement to a permission change: the menu keeps "Interject", unavailable,
+  // with the reason written under it, so that opening the menu is enough to read it.
+  const steerHeld = availability.steerHeldForAgySwitch;
+  const steerHeldReasonId = useId();
   const sentAt = new Date(entry.chatMessage.createdAt ?? 0).getTime();
   const [statusShown, setStatusShown] = useState(!localSend || Date.now() - sentAt >= 600);
   useEffect(() => {
@@ -121,7 +131,25 @@ export function PendingQueueBubble({
             </button>
           </DropdownMenuTrigger>
           <DropdownMenuContent align="end">
-            {!availability.actions.steer.disabled && (
+            {steerHeld ? (
+              // Not the menu's own `disabled`: a disabled item is skipped by the arrow keys and
+              // never read. This one takes focus, says why in its second line, and does nothing.
+              <DropdownMenuItem
+                className="max-w-[260px] cursor-default items-start gap-2"
+                aria-disabled="true"
+                aria-describedby={steerHeldReasonId}
+                data-steer-held="true"
+                onSelect={(event) => event.preventDefault()}
+              >
+                <ArrowUp size={16} className="mt-0.5 shrink-0 opacity-50" />
+                <span className="flex min-w-0 flex-col gap-0.5">
+                  <span className="opacity-50">{t('newChat.pendingQueue.steerAction')}</span>
+                  <span id={steerHeldReasonId} className="whitespace-normal text-12 leading-[1.4] text-[var(--text-secondary)]">
+                    {t(remoteTask ? 'newChat.pendingQueue.steerHeldForAgySwitchRemote' : 'newChat.pendingQueue.steerHeldForAgySwitch')}
+                  </span>
+                </span>
+              </DropdownMenuItem>
+            ) : !availability.actions.steer.disabled && (
               <DropdownMenuItem
                 className="gap-2"
                 onSelect={() => {

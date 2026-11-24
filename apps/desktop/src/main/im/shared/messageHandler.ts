@@ -35,6 +35,8 @@ import { isCommandAuthorized, isStopCommand } from './controlCommands';
 import type { ImSlashHandlers } from './slashCommands';
 import { looksLikeSlashCommand } from './slashCommands';
 import type { ImRunAgentTurnArgs, ImTurnRunner } from './turnRunner';
+import { imText } from './imText';
+import { AGENT_SWITCH_PERMISSION_UNCONFIRMED } from '../../maker-ipc/agentSwitchPermissionAgreement.js';
 import type { ImChannelAdapter } from './types';
 import { describeInteractionSource } from './interactionSource';
 import { buildImReplyContextBlock } from './replyContext';
@@ -588,7 +590,11 @@ export function createMessageHandler(
           const text = dispatch.reason === 'missing_auth' ? ui.agent.apiKeyMissing
             : dispatch.reason === 'companion_unavailable'
               ? ui.agent.companionUnavailable?.(dispatch.reason) ?? ui.agent.runtimeError(dispatch.reason)
-              : ui.agent.sendInternalError(dispatch.reason);
+              // Not an internal error, and its code is not for the reader. The transport marks
+              // this message handled below, so "send it again" is what recovers it.
+              : dispatch.reason === AGENT_SWITCH_PERMISSION_UNCONFIRMED
+                ? imText('imBot.text.shared.turn.agentSwitchPermissionUnconfirmed')
+                : ui.agent.sendInternalError(dispatch.reason);
           try {
             await im.sendText(event.senderId, text, { threadTs: event.scopeKey });
             event.delivery.accept();

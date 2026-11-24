@@ -7880,20 +7880,36 @@ contextBridge.exposeInMainWorld('electronAPI', {
     // switched=false 且无 deferred = 同引擎 no-op(用户选回当前引擎,意图已清)。
     switchSessionAgent: (
       sessionId: string,
-      targetAgentKind: 'claude-code' | 'codex' | 'pi',
+      targetAgentKind: 'claude-code' | 'codex' | 'pi' | 'agy',
       model: string,
       providerId?: string | null,
       effort?: string,
       fastMode?: boolean | 'ultrafast',
       // 远程 Agent:同时换 Agent 所在电脑(null = 任务所在电脑)。不传 = 位置不变。
-      options?: { agentDeviceId?: string | null; confirmedContextWindow?: number },
+      options?: {
+        agentDeviceId?: string | null; confirmedContextWindow?: number;
+        agyPermissionAgreement?: { change: 'fromFullAccess' | 'fromUnsupported' | null; mode: string };
+        /** With agyPermissionAgreement on a registration: the user gave it in the dialog of this very pick. Without it the host ignores the agreement and keeps its own record. */
+        agyPermissionAgreedWithThisPick?: boolean;
+        agyPermissionAgreementOnly?: boolean;
+        agyPermissionAgreementForSend?: boolean;
+        /** With agyPermissionAgreementOnly: what the host had on record when the user was asked; a different record is replaced only then. */
+        agyPermissionAgreementExpected?: { change: 'fromFullAccess' | 'fromUnsupported' | null; mode: string };
+        /** With agyPermissionAgreementOnly, for a change of mode being confirmed: the new mode and the one the window shows the task in. */
+        agyPermissionChangingTo?: string;
+        agyPermissionChangingFrom?: string;
+        /** For an agreement given for a send: the hold of the message the user was asked about. */
+        agyPermissionHeldMessage?: string;
+        agyPermissionRevision?: number;
+      },
       thinking?: boolean,
     ): Promise<{
       switched: boolean;
-      agentKind: 'claude-code' | 'codex' | 'pi';
+      agentKind: 'claude-code' | 'codex' | 'pi' | 'agy';
       model: string;
       engineReady: boolean;
       deferred?: boolean;
+      agyPermissionAgreementRecorded?: boolean;
       sameEngineRevision?: number;
       sameEngineSuperseded?: boolean;
     }> =>
@@ -8364,14 +8380,14 @@ contextBridge.exposeInMainWorld('electronAPI', {
         ipcRenderer.invoke('maker:input:stop', sessionId, opts),
       resume: (
         sessionId: string,
-        opts?: { expectedClearBoundaryMs?: number | null },
+        opts?: { expectedClearBoundaryMs?: number | null; continueSending?: boolean; answerClientId?: string; agySwitchHeldMessage?: string | null },
       ): Promise<import('../shared/agentInputQueue').AgentInputProjection> =>
         ipcRenderer.invoke('maker:input:resume', sessionId, opts),
       retryImageDelivery: (sessionId: string, imageId: string): Promise<void> =>
         ipcRenderer.invoke('maker:images:retry', sessionId, imageId),
       retryLastError: (
         sessionId: string,
-        opts?: { expectedClearBoundaryMs?: number | null },
+        opts?: { expectedClearBoundaryMs?: number | null; agySwitchHeldMessage?: string },
       ): Promise<import('../shared/agentInputQueue').AgentInputProjection> =>
         ipcRenderer.invoke('maker:input:retry-last-error', sessionId, opts),
       clearError: (

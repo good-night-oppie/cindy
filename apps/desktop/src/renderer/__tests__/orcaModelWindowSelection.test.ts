@@ -19,9 +19,11 @@ function visit(node: ts.Node) {
 }
 visit(source);
 
+const AGREED = { change: 'fromFullAccess', mode: 'auto' };
+
 function setup(options: { agent?: string; role?: string; used?: number; current?: number;
   target?: number; remote?: boolean; hostGuard?: boolean; displayedAgent?: string;
-  agentLocationAware?: boolean } = {}) {
+  agentLocationAware?: boolean; agreedInPickDialog?: boolean; settingsLocked?: boolean } = {}) {
   const agent = options.agent ?? 'codex';
   const switchSessionAgent = vi.fn(async () => ({ deferred: true, switched: false }));
   const release = vi.fn();
@@ -29,15 +31,20 @@ function setup(options: { agent?: string; role?: string; used?: number; current?
   const confirmDialog = vi.fn(async () => false);
   const context = { contextTokens: options.used ?? 240000, contextWindow: options.current ?? 1000000, isRunning: false };
   const bindings = {
-    sessionId: 's1', sessionOrcaRole: options.role ?? 'worker', settingsLocked: false,
+    sessionId: 's1', sessionOrcaRole: options.role ?? 'worker', settingsLocked: options.settingsLocked ?? false,
     runtimeAgentKind: agent, currentModelAgentKind: options.displayedAgent ?? agent,
     activeModel: 'old-model', effectiveSourceId: 'old-provider', activeEffort: 'high',
     deviceLinkDeviceId: options.remote ? 'remote' : undefined, remoteHostId: null,
     currentSessionIdRef: { current: 's1' },
+    // Set by the pick's own dialog when the user agrees to the permission change of a switch
+    // into Antigravity; performAgentSwitch reads and clears it.
+    agyAgreedInPickDialogRef: { current: options.agreedInPickDialog ? 's1' : null } as { current: string | null },
+    readAgySwitchPermissionAgreed: () => AGREED,
     agentLocationAware: options.agentLocationAware ?? false, agentDeviceId: null, effectiveAgentDeviceId: null,
     providers: [], remoteProviders: { providers: [] }, modelMemory: null,
     ccCaps: { capabilities: {} }, codexCaps: { capabilities: {} },
     piCaps: { capabilities: { supportsModelWindowSwitchGuard: options.hostGuard !== false } },
+    agyCaps: { capabilities: {} },
     makerChatStore: { getSnapshot: () => ({ agentStatus: context }), getAgentSwitchIntent: () => null,
       getAgentSwitchIntentRev: () => 0, noteAgentSwitchIntent: vi.fn() },
     getSessionDeviceId: () => options.remote ? 'remote' : undefined,
@@ -173,5 +180,37 @@ describe('Orca same-Agent window preflight', () => {
     h.confirmDialog.mockClear();
     expect(await h.pick('claude-code', 'old-model', 'old-provider', { effort: 'high', axesOnly: true })).toBe(true);
     expect(h.confirmDialog).not.toHaveBeenCalled();
+  });
+
+  // cindy#19, DD 7091620535, items 3 and 4. The agreement to the permission change of a switch
+  // into Antigravity goes to the host only with the registration that the pick's own dialog led
+  // to. Picking again afterwards shows no dialog and sends none. A pick that stops early used to
+  // leave the mark set, and the next registration, with no dialog, carried it.
+  const agreedOptions = { agyPermissionAgreement: AGREED, agyPermissionAgreedWithThisPick: true };
+  const optionsOfCall = (h: ReturnType<typeof setup>, call: number) =>
+    (h.switchSessionAgent.mock.calls[call] as unknown[] | undefined)?.[6];
+
+  it('sends the agreement given in the pick dialog with that registration only, not with the next', async () => {
+    const h = setup({ agreedInPickDialog: true });
+    expect(await h.pick('agy', 'gemini-test', 'provider')).toBe(true);
+    expect(optionsOfCall(h, 0)).toEqual(agreedOptions);
+    expect(h.bindings.agyAgreedInPickDialogRef.current).toBeNull();
+    expect(await h.pick('agy', 'gemini-other', 'provider')).toBe(true);
+    expect(h.switchSessionAgent).toHaveBeenCalledTimes(2);
+    expect(optionsOfCall(h, 1)).toBeUndefined();
+  });
+
+  it('forgets the agreement of a pick that stopped before registering, so a later pick with no dialog does not carry it', async () => {
+    const h = setup({ agreedInPickDialog: true, settingsLocked: true });
+    expect(await h.pick('agy', 'gemini-test', 'provider')).toBe(false);
+    expect(h.switchSessionAgent).not.toHaveBeenCalled();
+    expect(h.bindings.agyAgreedInPickDialogRef.current).toBeNull();
+  });
+
+  it('sends no agreement for a task on another computer, where the host takes none', async () => {
+    const h = setup({ agreedInPickDialog: true, remote: true });
+    await h.pick('agy', 'gemini-test', 'provider');
+    for (const call of h.switchSessionAgent.mock.calls as unknown[][]) expect(call[6] ?? {}).not.toHaveProperty('agyPermissionAgreement');
+    expect(h.bindings.agyAgreedInPickDialogRef.current).toBeNull();
   });
 });

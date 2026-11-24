@@ -348,6 +348,7 @@
       "defaultTitle": "Pending queue"
     },
     "row": {
+      "steerHeldForAgySwitch": "This message is waiting for the permission change to be confirmed on the computer the task runs on, so Interject isn't available for it yet.",
       "syntheticEditDisabled": "System instruction messages can't be edited or sent as interjections.",
       "autoSentEditDisabled": "Automatically sent messages can't be edited or sent as interjections.",
       "first": "This is already the first item in the queue.",

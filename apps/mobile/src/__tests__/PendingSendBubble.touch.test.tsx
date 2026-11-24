@@ -339,6 +339,34 @@ it.each([
   }
   expect(move.mock.calls).toEqual(expected.map((id) => ['a', id === 'moveUp' ? 'up' : 'down']));
 });
+// cindy#19 (DD 7089552822, item 6): a message the host holds for a permission confirmation. With
+// the production queue rule, the phone's menu does not offer Interject for it (choosing it by
+// other means does nothing), the reason is announced with the queue control, and tapping the
+// bubble shows it in place. An ordinary message keeps Interject.
+it('does not offer interject for a message held for a permission confirmation, and shows the reason in place', () => {
+  const held = buildQueueRowPresentation({
+    item: { clientId: 'a', text: 'hello', awaitsAgySwitchConfirmation: true }, originalIndex: 0, queueLength: 2,
+    projection: EMPTY_INPUT_PROJECTION,
+  });
+  expect(held.hint).toBeTruthy();
+  show({ actions: held.actions, hint: held.hint });
+  const menu = handlers.get('pendingSend.queueMenu.a')!;
+  expect((menu.actions as MenuAction[]).map(({ id }) => id)).toEqual(['edit', 'moveDown', 'remove']);
+  const choose = menu.onPressAction as (event: { nativeEvent: { event: string } }) => void;
+  act(() => choose({ nativeEvent: { event: 'steer' } }));
+  expect(steer).not.toHaveBeenCalled();
+  expect(handlers.get('pendingSend.queueStatus.a')?.accessibilityHint).toBe(held.hint);
+  expect(host.querySelector('[data-testid="pendingSend.hint.a"]')).toBeNull();
+  // Tapped: the reason is on screen under the message.
+  show({ actions: held.actions, hint: held.hint }, 'a');
+  expect(host.querySelector('[data-testid="pendingSend.hint.a"]')?.textContent).toBe(held.hint);
+
+  const plain = buildQueueRowPresentation({
+    item: { clientId: 'a', text: 'hello' }, originalIndex: 0, queueLength: 2, projection: EMPTY_INPUT_PROJECTION,
+  });
+  show({ actions: plain.actions, hint: plain.hint });
+  expect((handlers.get('pendingSend.queueMenu.a')!.actions as MenuAction[]).map(({ id }) => id)).toContain('steer');
+});
 it('hides unavailable choices and removes the menu while busy or dispatched', () => {
   show({ actions: { ...item.actions!, steer: { disabled: true, disabledReason: 'Not available' } } });
   const menu = handlers.get('pendingSend.queueMenu.a')!;

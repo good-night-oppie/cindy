@@ -12987,6 +12987,7 @@
         },
         "turn": {
           "groupApprovalOwnerDm": "🔐 グループチャットのタスクがあなたの承認を待っています。承認カードはグループには送られないので、ここで確認してください。",
+          "agentSwitchPermissionUnconfirmed": "⏸ このメッセージは処理されませんでした。このタスクは Antigravity に切り替わろうとしており、切り替えると権限が変わるため、このタスクを管理している人が先にパソコンの Cindy でタスクを開いて確認する必要があります。確認が済んだら、このメッセージをもう一度送信してください。",
           "agentStartFailed": "❌ Agent を起動できませんでした: {{reason}}",
           "personalBotLabel": "{{channel}} 個人 bot",
           "error": "❌ エラー: {{message}}"
@@ -14139,6 +14140,8 @@
       "pluginSenderFallback": "プラグイン",
       "botRowAria": "仲間「{{sender}}」からのキュー内メッセージ",
       "dragAria": "キューの {{index}} 番目のメッセージをドラッグして並べ替え",
+      "steerHeldForAgySwitch": "このメッセージは権限の変更の確認を待っているため、確認するまで割り込みはできません。",
+      "steerHeldForAgySwitchRemote": "このメッセージは、タスクが動いているコンピューターで権限の変更が確認されるのを待っています。確認されるまで「割り込み」は使えません。",
       "steerAction": "割り込み",
       "steerRunningTip": "実行中のタスクを中断せずに割り込み送信します。現在の操作が完了した後に優先して処理されます",
       "steerPausedTip": "タスクを続行し、このメッセージを優先して処理します",
@@ -14289,7 +14292,29 @@
           "description": "新しい Agent エンジンは引き継ぎ要約を通じて続行するため、思考内容などが完全に引き継がれる保証はありません。元に戻せば、元のエンジンのセッションを引き続き利用できます。切り替えによってプロンプトキャッシュも一度中断され、トークン消費が増える可能性があります。",
           "confirm": "Agent を切り替える",
           "cancel": "現在の Agent を維持",
-          "dontShowAgain": "次回から表示しない"
+          "dontShowAgain": "次回から表示しない",
+          "antigravityFromFullAccess": "切り替え後、このタスクの権限は「フルアクセス」から「自動レビュー」に変わります。Antigravity から届く承認リクエストは Cindy が自動でレビューし、あなたには確認しません。「フルアクセス」は Antigravity には引き継がれません。切り替え後はタスクの権限メニューで変更できます。各レベルで許可される範囲もそこに書かれています。",
+          "antigravityFromUnsupported": "切り替え後、このタスクの権限は「デフォルト権限」に変わります。Antigravity から届く承認リクエストはあなたが判断します。現在の権限レベルは Antigravity にないため、そのレベル固有のルール（プランモードの制限など）は引き継がれません。切り替え後はタスクの権限メニューで変更できます。各レベルで許可される範囲もそこに書かれています。"
+        },
+        "sendConfirmation": {
+          "titleFromFullAccess": "「自動レビュー」で送信しますか？",
+          "titleFromUnsupported": "「デフォルト権限」で送信しますか？",
+          "cancel": "まだ送信しない",
+          "confirm": "確認して送信"
+        },
+        "permissionAgreementNotRecorded": "この確認は記録されなかったため、まだ何も変わっていません。もう一度お試しください。",
+        "permissionEntry": {
+          "notice": "Antigravity に切り替えるとこのタスクの権限が変わり、その変更にはあなたの確認がまだ必要です。「内容を確認」を選んでください。ここでの確認は変更への同意だけで、メッセージは送信されません。",
+          "titleFromFullAccess": "「自動レビュー」への変更に同意しますか？",
+          "titleFromUnsupported": "「デフォルト権限」への変更に同意しますか？",
+          "note": "確認してもメッセージは送信されません。"
+        },
+        "permissionConfirmation": {
+          "bodyFromFullAccess": "切り替え後、今選んだ「フルアクセス」は「自動レビュー」に変わります。Antigravity から届く承認リクエストは Cindy が自動でレビューし、あなたには確認しません。「フルアクセス」は Antigravity には引き継がれません。切り替え後はタスクの権限メニューで変更できます。各レベルで許可される範囲もそこに書かれています。",
+          "bodyFromUnsupported": "切り替え後、このタスクの権限は「デフォルト権限」に変わります。Antigravity から届く承認リクエストはあなたが判断します。今選んだレベルは Antigravity にないため、そのレベル固有のルール（プランモードの制限など）は引き継がれません。切り替え後はタスクの権限メニューで変更できます。各レベルで許可される範囲もそこに書かれています。",
+          "title": "「{{mode}}」に変更しますか？",
+          "cancel": "まだ変更しない",
+          "confirm": "変更を確認"
         }
       },
       "agentRelocation": {
@@ -14907,6 +14932,15 @@
       "gatewayQuotaExhausted": "Cindy AI の残高が不足しています。チャージすると続行できます。",
       "viewBalance": "残高を見る",
       "viewBalanceTitle": "「使用量と請求」を開いて残高を確認・チャージ",
+      "agentSwitchPermissionUnconfirmed": "このメッセージはまだ送信されていません。Antigravity に切り替えるとこのタスクの権限が変わり、その変更にはあなたの確認がまだ必要です。「内容を確認」を選んでください。あなたが確認した後にのみ、Cindy は切り替えてこのメッセージを送信します。",
+      "agentSwitchPermissionUnconfirmedRemote": "このメッセージはまだ送信されていません。Antigravity に切り替えるとこのタスクの権限が変わり、その変更はタスクを実行しているパソコンで確認する必要があります。確認された後に、Cindy は切り替えて送信します。そちらで確認が済んでもこのメッセージが送信されていない場合は、「再試行」を選んでください。",
+      "agentSwitchPermissionUnconfirmedRemoteNamed": "このメッセージはまだ送信されていません。Antigravity に切り替えるとこのタスクの権限が変わり、その変更はタスクを実行しているパソコン「{{device}}」で確認する必要があります。確認された後に、Cindy は切り替えて送信します。そちらで確認が済んでもこのメッセージが送信されていない場合は、「再試行」を選んでください。",
+      "agentSwitchPermissionKept": "このメッセージはまだ送信されていません。Antigravity に切り替えても、このタスクの権限は変わりません。「送信」を選ぶと、このメッセージが送信されます。",
+      "agentSwitchPermissionKeptSend": "送信",
+      "agentSwitchPermissionAlreadySwitched": "このメッセージはまだ送信されていません。このタスクはすでに Antigravity に切り替わっています。「送信」を選ぶと、このメッセージが送信されます。",
+      "agentSwitchPermissionAlreadySwitchedRemote": "このメッセージはまだ送信されていません。このタスクはすでに Antigravity に切り替わっています。「再試行」を選ぶと、このメッセージが送信されます。",
+      "agentSwitchPermissionSwitchGone": "このメッセージはまだ送信されていません。タスクが Antigravity に切り替わるのを待っていましたが、その切り替えはもう保留されていません。切り替える場合は、Antigravity のモデルをもう一度選び、「Agent を切り替える」を選んでから、続いて表示される案内に従って送信を確認してください。そこで初めてこのメッセージが送信されます。切り替えない場合は、このメッセージの横にある「順番待ち」を選び、「送信をキャンセル」を選んでください。メッセージは削除されるので、もう一度入力して送信してください。",
+      "agentSwitchPermissionReview": "内容を確認",
       "credentialSwitchBusy": "他の Codex タスクが実行中のため、このセッションで選択したプロバイダーへまだ切り替えられません（共有 Codex プロセスの再起動が必要です）。他のタスクの終了後に「再試行」を押してください。",
       "accountBoundaryPending": "Cindy がアカウント状態を切り替え中のため、まだこのタスクを開始できません。少し待ってから「再試行」を押してください。繰り返し表示される場合は Cindy を再起動してください。",
       "codexThreadStale": "Codex の認証モードが切り替わりました。このセッションは続行できません。新しいセッションを開始してください。",

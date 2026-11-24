@@ -13147,6 +13147,7 @@
         },
         "turn": {
           "groupApprovalOwnerDm": "🔐 Una tarea de un chat grupal necesita tu aprobación. La tarjeta de aprobación no se publica en el grupo: confírmala aquí.",
+          "agentSwitchPermissionUnconfirmed": "⏸ Este mensaje no se ha procesado. Esta tarea está a punto de cambiar a Antigravity, lo que cambiará sus permisos, así que la persona que gestiona la tarea tiene que abrirla primero en Cindy en su ordenador y confirmarlo. Después, vuelve a enviar este mensaje, por favor.",
           "agentStartFailed": "❌ No se pudo iniciar el Agent: {{reason}}",
           "personalBotLabel": "bot personal de {{channel}}",
           "error": "❌ Error: {{message}}"
@@ -14308,6 +14309,8 @@
       "pluginSenderFallback": "Complemento",
       "botRowAria": "Mensaje del amigo \"{{sender}}\" en cola",
       "dragAria": "Arrastra el mensaje en cola {{index}} para reordenarlo",
+      "steerHeldForAgySwitch": "Este mensaje espera a que confirmes el cambio de permisos; hasta entonces no se puede usar «Incorporar».",
+      "steerHeldForAgySwitchRemote": "Este mensaje espera a que el cambio de permisos se confirme en el ordenador donde se ejecuta la tarea; hasta entonces «Incorporar» no está disponible para él.",
       "steerAction": "Incorporar",
       "steerRunningTip": "Incorpora este mensaje a la tarea en curso sin interrumpirla; se atenderá cuando termine la acción actual",
       "steerPausedTip": "Continuar la tarea y atender este mensaje primero",
@@ -14459,7 +14462,29 @@
           "description": "El nuevo motor de Agent continúa mediante un resumen de transferencia, por lo que no se puede garantizar que el razonamiento y otros contenidos se transfieran perfectamente; si vuelves al motor anterior, podrás continuar su sesión original. El cambio también interrumpe una vez la caché de prompts y puede aumentar el uso de tokens.",
           "confirm": "Cambiar de Agent",
           "cancel": "Mantener el Agent actual",
-          "dontShowAgain": "No volver a recordármelo"
+          "dontShowAgain": "No volver a recordármelo",
+          "antigravityFromFullAccess": "Tras el cambio, los permisos de esta tarea pasan de «Acceso completo» a «Revisión automática»: Cindy revisa automáticamente las solicitudes de aprobación que envía Antigravity, sin preguntarte. «Acceso completo» no se traslada a Antigravity. Después puedes cambiar los permisos en el menú de permisos de la tarea; allí también se explica qué permite cada nivel.",
+          "antigravityFromUnsupported": "Tras el cambio, los permisos de esta tarea pasan a «Permisos predeterminados»: tú decides sobre las solicitudes de aprobación que envía Antigravity. Antigravity no tiene tu nivel de permisos actual, así que las reglas propias de ese nivel (como los límites del modo Plan) no se trasladan. Después puedes cambiar los permisos en el menú de permisos de la tarea; allí también se explica qué permite cada nivel."
+        },
+        "sendConfirmation": {
+          "titleFromFullAccess": "¿Enviar con «Revisión automática»?",
+          "titleFromUnsupported": "¿Enviar con «Permisos predeterminados»?",
+          "cancel": "No enviar todavía",
+          "confirm": "Confirmar y enviar"
+        },
+        "permissionAgreementNotRecorded": "Esta confirmación no se ha registrado, así que todavía no ha cambiado nada. Inténtalo de nuevo.",
+        "permissionEntry": {
+          "notice": "Cambiar a Antigravity cambiará los permisos de esta tarea, y ese cambio todavía necesita tu confirmación. Selecciona «Revisar y confirmar»; al confirmar aquí solo aceptas el cambio y no se envía ningún mensaje.",
+          "titleFromFullAccess": "¿Aceptar el cambio a «Revisión automática»?",
+          "titleFromUnsupported": "¿Aceptar el cambio a «Permisos predeterminados»?",
+          "note": "Al confirmar no se envía ningún mensaje."
+        },
+        "permissionConfirmation": {
+          "bodyFromFullAccess": "Tras el cambio, el «Acceso completo» que acabas de elegir pasa a «Revisión automática»: Cindy revisa automáticamente las solicitudes de aprobación que envía Antigravity, sin preguntarte. «Acceso completo» no se traslada a Antigravity. Después puedes cambiar los permisos en el menú de permisos de la tarea; allí también se explica qué permite cada nivel.",
+          "bodyFromUnsupported": "Tras el cambio, los permisos de esta tarea pasan a «Permisos predeterminados»: tú decides sobre las solicitudes de aprobación que envía Antigravity. Antigravity no tiene el nivel que acabas de elegir, así que sus reglas propias (como los límites del modo Plan) no se trasladan. Después puedes cambiar los permisos en el menú de permisos de la tarea; allí también se explica qué permite cada nivel.",
+          "title": "¿Cambiar a «{{mode}}»?",
+          "cancel": "No cambiar todavía",
+          "confirm": "Confirmar cambio"
         }
       },
       "agentRelocation": {
@@ -15068,6 +15093,15 @@
       "gatewayQuotaExhausted": "Se agotó tu saldo de Cindy AI. Agrega fondos para continuar.",
       "viewBalance": "Ver saldo",
       "viewBalanceTitle": "Abre Uso y facturación para consultar tu saldo y agregar fondos",
+      "agentSwitchPermissionUnconfirmed": "Este mensaje aún no se ha enviado. Cambiar a Antigravity cambiará los permisos de esta tarea, y ese cambio todavía necesita tu confirmación. Selecciona «Revisar y confirmar»; Cindy solo cambia y envía este mensaje después de que confirmes.",
+      "agentSwitchPermissionUnconfirmedRemote": "Este mensaje aún no se ha enviado. Cambiar a Antigravity cambiará los permisos de esta tarea, y ese cambio debe confirmarse en el ordenador donde se ejecuta la tarea antes de que Cindy cambie y lo envíe. Cuando se haya confirmado allí, selecciona «Reintentar» si este mensaje sigue sin enviarse.",
+      "agentSwitchPermissionUnconfirmedRemoteNamed": "Este mensaje aún no se ha enviado. Cambiar a Antigravity cambiará los permisos de esta tarea, y ese cambio debe confirmarse en «{{device}}», el ordenador donde se ejecuta la tarea, antes de que Cindy cambie y lo envíe. Cuando se haya confirmado allí, selecciona «Reintentar» si este mensaje sigue sin enviarse.",
+      "agentSwitchPermissionKept": "Este mensaje aún no se ha enviado. Cambiar a Antigravity no cambia los permisos de esta tarea; selecciona «Enviar» para que este mensaje se envíe.",
+      "agentSwitchPermissionKeptSend": "Enviar",
+      "agentSwitchPermissionAlreadySwitched": "Este mensaje aún no se ha enviado. Esta tarea ya ha cambiado a Antigravity; selecciona «Enviar» para que este mensaje se envíe.",
+      "agentSwitchPermissionAlreadySwitchedRemote": "Este mensaje aún no se ha enviado. Esta tarea ya ha cambiado a Antigravity; selecciona «Reintentar» para que este mensaje se envíe.",
+      "agentSwitchPermissionSwitchGone": "Este mensaje aún no se ha enviado. Estaba esperando a que la tarea cambiara a Antigravity, pero ese cambio ya no está pendiente. Para cambiar, vuelve a elegir un modelo de Antigravity, selecciona «Cambiar de Agent» y, a continuación, confirma el envío cuando se te pida; solo entonces se envía este mensaje. Si no quieres cambiar, selecciona «En cola» junto a este mensaje y elige «Cancelar envío»; el mensaje se elimina, así que escríbelo de nuevo y envíalo.",
+      "agentSwitchPermissionReview": "Revisar y confirmar",
       "credentialSwitchBusy": "Otra tarea de Codex sigue en ejecución, por lo que aún no se puede aplicar el proveedor de esta sesión (el proceso compartido de Codex necesita reiniciarse). Reintenta cuando terminen esas tareas.",
       "accountBoundaryPending": "Cindy aún está cambiando el estado de la cuenta, por lo que esta tarea todavía no puede iniciarse. Espera un momento y presiona Reintentar. Si el problema persiste, reinicia Cindy.",
       "codexThreadStale": "Cambió el modo de autenticación de Codex; esta sesión no puede continuar. Inicia una nueva sesión para aplicarlo.",

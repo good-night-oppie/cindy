@@ -1,5 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import {
+  agySwitchHeldMessageOf,
   buildQueuePanelSummary,
   buildQueueRowPresentation,
   isAutoSentQueueItem,
@@ -304,6 +305,45 @@ describe('shared queue presentation model', () => {
     expect(normalRow.actions.edit.disabled).toBe(false);
   });
 
+  // cindy#19 (DD 7089552822, item 6; QQ 2026-11-23). The host holds a queued message until the
+  // user confirms what a pending switch into Antigravity does to the task's permissions, and
+  // refuses to interject it meanwhile. The computer's queue said so; the phone, which builds its
+  // rows from this function, still offered Interject and then showed a generic "not delivered".
+  // The condition lives here now, for both: Interject is unavailable with the reason, the reason
+  // is the row's hint, and nothing else about the row changes.
+  it('makes interject unavailable, with the reason as the row hint, for a message held for a permission confirmation', () => {
+    const projection = { steeringQueueClientIds: [], queueEditLocks: [], queueInteractionLocks: [] };
+    const reason = '这条消息在等任务所在的电脑确认权限的改变，确认前不能插话。';
+    const held = buildQueueRowPresentation({
+      item: { ...queued('q-1'), awaitsAgySwitchConfirmation: true }, originalIndex: 0, projection, queueLength: 2,
+    });
+    expect(held.steerHeldForAgySwitch).toBe(true);
+    expect(held.actions.steer).toMatchObject({ disabled: true, disabledReason: reason });
+    expect(held.hint).toBe(reason);
+    expect(held.actions.edit.disabled).toBe(false);
+    expect(held.actions.remove.disabled).toBe(false);
+    expect(held.actions.moveDown.disabled).toBe(false);
+
+    const plain = buildQueueRowPresentation({ item: queued('q-2'), originalIndex: 1, projection, queueLength: 2 });
+    expect(plain.steerHeldForAgySwitch).toBe(false);
+    expect(plain.actions.steer.disabled).toBe(false);
+    expect(plain.hint).toBeNull();
+
+    // A row that could not be interjected anyway keeps its own reason and hint.
+    const synthetic = buildQueueRowPresentation({
+      item: { ...queued('q-3'), text: CONTINUE_AFTER_ERROR_PROMPT, awaitsAgySwitchConfirmation: true },
+      originalIndex: 0, projection, queueLength: 1,
+    });
+    expect(synthetic.steerHeldForAgySwitch).toBe(false);
+    expect(synthetic.actions.steer.disabledReason).toBe('系统指令消息不支持编辑或插话发送。');
+    const locked = buildQueueRowPresentation({
+      item: { ...queued('q-4'), awaitsAgySwitchConfirmation: true }, originalIndex: 0, queueLength: 1,
+      projection: { ...projection, queueEditLocks: ['q-4'] },
+    });
+    expect(locked.steerHeldForAgySwitch).toBe(false);
+    expect(locked.hint).not.toBe(reason);
+  });
+
   it('allows task messages to steer and reorder while keeping automatic prompts locked', () => {
     const projection = {
       steeringQueueClientIds: [],
@@ -331,6 +371,30 @@ describe('shared queue presentation model', () => {
     expect(isAutoSentQueueItem({ sourcePlugin: { name: 'no id' } })).toBe(false);
     expect(isAutoSentQueueItem({ origin: { kind: 'orca', senderLabel: 'Lead' } })).toBe(false);
     expect(isAutoSentQueueItem({})).toBe(false);
+  });
+});
+
+// cindy#19, QQ's ruling of 2026-11-23: a confirmation to send a message the host holds for a
+// switch into Antigravity is about that one message. The desktop window and the phone both read
+// "which message is this banner about" here, and send it back with the answer and the retry;
+// the host's side of it is in agent-input-coordinator.test.ts.
+describe('agySwitchHeldMessageOf', () => {
+  const held = { clientId: 'q-1', awaitsAgySwitchConfirmation: true, agySwitchHoldId: 'hold-1' };
+  const banner = { kind: 'queue-head', clientId: 'q-1' };
+
+  it('names the hold of the held message the banner is about', () => {
+    expect(agySwitchHeldMessageOf({ pendingQueue: [held, { clientId: 'q-2' }], recovery: banner })).toBe('hold-1');
+  });
+
+  it.each([
+    ['no banner is showing', { pendingQueue: [held], recovery: null }],
+    ['the banner is that of a turn, not of a queued message', { pendingQueue: [held], recovery: { kind: 'active-turn' } }],
+    ['another message was moved ahead of the one the banner is about', { pendingQueue: [{ clientId: 'q-2' }, held], recovery: banner }],
+    ['the message at the head is held for another reason', { pendingQueue: [{ clientId: 'q-1', agySwitchHoldId: 'hold-1' }], recovery: banner }],
+    ['the host named no hold (an older host)', { pendingQueue: [{ clientId: 'q-1', awaitsAgySwitchConfirmation: true }], recovery: banner }],
+    ['the queue is empty', { pendingQueue: [], recovery: banner }],
+  ])('names nothing when %s', (_name, projection) => {
+    expect(agySwitchHeldMessageOf(projection)).toBeNull();
   });
 });
 

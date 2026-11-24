@@ -51,7 +51,7 @@ import { CindyMakeSessionGate } from './CindyMakeSessionGate';
 import { SessionRouteOriginGate } from './SessionRouteOriginGate';
 import { usePluginSkillSetup } from './pluginSkillSetup';
 import { useBotIslandVisibleSession } from '@/features/bots/useBotIslandVisibleSession';
-import { dbToMakerAgentKind, isLaunchableDbAgentKind, normalizeDbAgentKind } from '../../../shared/agentKindConversion';
+import { agySwitchPermissionChange, dbToMakerAgentKind, isLaunchableDbAgentKind, normalizeDbAgentKind } from '../../../shared/agentKindConversion';
 import { useTranslation } from 'react-i18next';
 import { buildSessionDeepLink } from '@/lib/deepLink';
 import {
@@ -179,6 +179,9 @@ import { ConnectProviderBanner } from '@/components/onboarding/ConnectProviderBa
 import { Tip } from '@/components/ui/tooltip';
 import { RunningTokenCount } from './RunningTokenCount';
 import { useConfirmDialog } from '@/components/ui/confirm-dialog-provider';
+import { useAgySwitchPermissionRecovery } from '@/components/new-chat/useAgySwitchPermissionRecovery';
+import { agySwitchPendingKey, agySwitchPermissionEntryIsOffered, heldMessageBannerYieldsToPausedQueue } from '@/components/new-chat/agentSwitchConfirmation';
+import { AgySwitchPermissionPendingNotice } from '@/components/chat/AgySwitchPermissionPendingNotice';
 import { useSilentEncryptedRetry } from '@/hooks/useSilentEncryptedRetry';
 import { TodaySpendChip } from '@/components/status/TodaySpendChip';
 import { ContextCapacityRing, formatTokenCount, getModelContextWindow } from '@/components/status/ContextCapacityRing';
@@ -4775,15 +4778,33 @@ function CCAgentSessionContent({
   // 成功路径已经有更可靠的收敛点:turn 真正跑起来 → store 清掉终止错误 →
   // useSessionRunningStatus 在 running 上升沿把 orphan 的 error 角标 explicit 清掉。
   // 失败路径则天然保留红点,与仍在展示的横幅一致。
-  const handleRetry = useCallback(() => {
+  // `agySwitchHeldMessage`: which held message the click is about, when the banner is that of a
+  // message held for a switch into Antigravity (see useAgySwitchPermissionRecovery).
+  const retryNamingHeldMessage = useCallback((agySwitchHeldMessage?: string) => {
     if (isHistoryRecoveryPending()) return;
     invalidateHistoryRecoveryNavigation();
     void rebuildClaudeSubscriptionSessionBeforeRetry(errorReason)
-      .then(() => retryLastError())
+      .then(() => retryLastError(agySwitchHeldMessage))
       .catch((error) => {
         log.warn('retryLastError failed', error);
       });
   }, [errorReason, invalidateHistoryRecoveryNavigation, isHistoryRecoveryPending, rebuildClaudeSubscriptionSessionBeforeRetry, retryLastError]);
+  const handleRetry = useCallback(() => retryNamingHeldMessage(), [retryNamingHeldMessage]);
+
+  // A message the host held until the pending switch's permission change is agreed to: ask here,
+  // and resend it once on agreement, instead of leaving the user with a generic error to decode.
+  // Over a paused queue the held message's banner and its question give way to "Continue sending".
+  const heldBannerYieldsToPausedQueue = heldMessageBannerYieldsToPausedQueue({ error, queuePaused });
+  const handleRetryAfterAgySwitchAgreement = useAgySwitchPermissionRecovery({
+    sessionId,
+    error: readOnly || heldBannerYieldsToPausedQueue ? null : error,
+    runningAgent: session ? dbToMakerAgentKind(session.agentKind) : null,
+    permissionMode: session?.permissionMode,
+    remote: remoteDeviceId != null,
+    pendingSwitchKey: agySwitchPendingKey(agentSwitchIntent),
+    confirm: confirmDialog,
+    retry: retryNamingHeldMessage,
+  });
 
   const handleSwitchToClaudeSubscription = useCallback(async (): Promise<void> => {
     if (!sessionId || !session || !canSwitchToClaudeSubscription) return;
@@ -5466,7 +5487,7 @@ function CCAgentSessionContent({
     return entry ? <PendingQueueBubble pluginUi={pluginUi} entry={entry} sessionId={sessionId} index={index} count={pendingQueue.length}
       editingClientId={activeQueueComposerEdit?.clientId ?? null}
       steeringClientIds={steeringQueueClientIds} editLocks={queueEditLocks} interactionLocks={queueInteractionLocks}
-      readOnly={readOnly || queueAbortPending}
+      readOnly={readOnly || queueAbortPending} remoteTask={remoteDeviceId != null}
       simplifiedBotConversation={Boolean(botChatIdentity)} localSend={isLocalUserSend(entry.clientId)} onEdit={beginQueueComposerEdit}
       onSteer={steerQueuedMessage} onRemove={removeFromQueue} onMove={moveQueueItem} /> : null;
   };
@@ -5586,7 +5607,7 @@ function CCAgentSessionContent({
               )}
 
             {/* 只隐藏已有同一错误活动行的过载重试；认证、额度等操作入口照常保留。 */}
-            {!readOnly && error && !hasInlineOverloadRetry({
+            {!readOnly && error && !heldBannerYieldsToPausedQueue && !hasInlineOverloadRetry({
               error,
               errorReason,
               isRecoverable: errorIsRecoverable,
@@ -5602,7 +5623,7 @@ function CCAgentSessionContent({
                 outputLimit={outputLimit}
                 isRecoverable={errorIsRecoverable}
                 retryText={errorRetryText}
-                onRetry={handleRetry}
+                onRetry={handleRetryAfterAgySwitchAgreement}
                 onContinueAfterError={canContinueError ? handleContinueAfterError : undefined}
                 onSilentStopContinue={handleSilentStopContinue}
                 usageLimitWait={usageLimitWait}
@@ -5613,6 +5634,10 @@ function CCAgentSessionContent({
                 agentKind={session?.agentKind}
                 remoteHostId={session?.remoteHostId ?? undefined}
                 deviceLinkDeviceId={remoteDeviceId}
+                deviceLinkDeviceName={controlledDeviceName}
+                agySwitchPending={agentSwitchIntent?.target === 'agy'}
+                agySwitchKeepsPermissions={agySwitchPermissionChange(session?.permissionMode) === null}
+                agyTaskRunsAntigravity={!!session && dbToMakerAgentKind(session.agentKind) === 'agy'}
                 agentDeviceId={session?.agentDeviceId}
                 modelId={session?.model}
                 providerId={session?.providerId}
@@ -5629,6 +5654,21 @@ function CCAgentSessionContent({
                 forkStripEncryptedRunning={forkStripEncryptedRunning}
                 onDiagnose={canDiagnoseError ? handleDiagnoseError : undefined}
                 style={{ width: '100%' }}
+              />
+            )}
+
+            {/* The task's own entry to confirm a pending switch's permission change; a held queued
+                message has the banner above instead. Only the task's computer can confirm. */}
+            {sessionId && agySwitchPermissionEntryIsOffered({ readOnly, remote: remoteDeviceId != null, error }) && (
+              <AgySwitchPermissionPendingNotice
+                sessionId={sessionId}
+                intent={agentSwitchIntent}
+                runningAgent={session ? dbToMakerAgentKind(session.agentKind) : null}
+                permissionMode={session?.permissionMode}
+                partnerConversation={session?.source === 'bot'}
+                confirm={confirmDialog}
+                style={{ width: '100%' }}
+                className="py-1"
               />
             )}
 

@@ -26,6 +26,12 @@ export const HOST_SEND_FAILURE_CODES = [
   'SEND_FAILED',
   'PLUGIN_TURN_SKIPPED',
   'PLUGIN_TURN_BLOCKED',
+  /**
+   * A pending switch into Antigravity would rewrite the task's permission mode in a way the user
+   * has not agreed to. Nothing was applied or sent; the switch stays pending and the message stays
+   * where it was (a queued message at the head of the queue) until the user confirms and retries.
+   */
+  'AGENT_SWITCH_PERMISSION_UNCONFIRMED',
 ] as const;
 
 export type HostSendFailureCode = (typeof HOST_SEND_FAILURE_CODES)[number];

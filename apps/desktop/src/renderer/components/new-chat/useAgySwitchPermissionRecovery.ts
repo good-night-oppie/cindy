@@ -1,0 +1,139 @@
+import { useCallback, useEffect, useRef } from 'react';
+import { useTranslation } from 'react-i18next';
+import { toast } from '@/lib/toast';
+import type { ConfirmOptions } from '@/components/ui/confirm-dialog-provider';
+import { makerChatStore } from '@/lib/makerChatStore';
+import {
+  agreeToPendingAgySwitchPermission, forgetAgySwitchPermissionAgreed, isAgentSwitchPermissionUnconfirmedError,
+  isAgySwitchPermissionDialogOpen,
+} from './agentSwitchConfirmation';
+import { recordAgySwitchPermissionAgreementWithHost } from './agySwitchPermissionHost';
+import { agySwitchPermissionChange } from '../../../shared/agentKindConversion';
+
+/**
+ * The host held a message (a queued one, usually) because applying the pending switch into
+ * Antigravity would rewrite the task's permissions in a way nobody agreed to: the mode was changed
+ * from another window, a device or IM. The message is still at the head of the queue and the
+ * switch is still pending.
+ *
+ * Automatically, at most once per pending switch and stored mode: ask with the dialog a send
+ * shows, tell the host, and resend the held message once on a "yes". A retry clears the error before the host answers, so "the error went away
+ * and came back" is not a new occasion: if the host holds the message again, nothing more happens
+ * on its own. The banner stays, and its action asks the user afresh, never trusting an agreement
+ * the host has just shown it does not have.
+ *
+ * On another computer controlling the task the host accepts no agreement, so nothing is asked
+ * there and the banner says where to confirm.
+ *
+ * Returns the retry action for the error banner.
+ */
+export function useAgySwitchPermissionRecovery(input: {
+  sessionId: string | null | undefined;
+  error: string | null | undefined;
+  runningAgent: string | null | undefined;
+  permissionMode: string | null | undefined;
+  /** The task runs on another computer that this window controls. */
+  remote: boolean;
+  /**
+   * What the view renders of the task's pending switch: its engine, which registration it is and
+   * what the host has recorded as agreed (null when none). Only so that the automatic step runs
+   * again when any of that changes: a message held with no switch pending (after a restart, say)
+   * is resent once when the user picks the engine again and agrees, and so is one whose question
+   * was being answered in another dialog of this task when it was held.
+   */
+  pendingSwitchKey?: string | null;
+  confirm: (options: ConfirmOptions) => Promise<boolean>;
+  /** Retries the task's last error; for a held message, naming the hold the user acted on. */
+  retry: (agySwitchHeldMessage?: string) => void;
+}): () => void {
+  const { t } = useTranslation();
+  const latest = useRef(input);
+  latest.current = input;
+  const asking = useRef(false);
+  /** Stored modes this pending switch was already recovered for automatically, per task. */
+  const automaticallyTried = useRef<{ sessionId: string; modes: Set<string> } | null>(null);
+
+  const recover = useCallback(async (askAfresh: boolean) => {
+    const { sessionId, runningAgent, permissionMode, confirm, retry } = latest.current;
+    if (!sessionId || asking.current) return;
+    // In a mode Antigravity keeps as it is there is no permission change to ask about, so no
+    // dialog would show and "nothing to ask" would pass for a "yes": the held message would be
+    // resent by itself as soon as a switch appeared, which is the model picker sending it. Only
+    // the user's own action on the banner sends it then; that click is the confirmation.
+    if (!askAfresh && agySwitchPermissionChange(permissionMode) === null) return;
+    asking.current = true;
+    // The message the question is about, read before the question is shown. The answer and the
+    // retry carry it, and the host acts on them only if the message it holds then is still this
+    // one in this hold: while the dialog is open the user can remove or edit the message, and the
+    // next one in the queue can come to be held in its place. An answer about the first must not
+    // send the second (QQ, 2026-11-23).
+    const heldMessage = makerChatStore.getAgySwitchHeldMessage(sessionId) ?? undefined;
+    try {
+      // A held message is resent only on the user's answer to the question of sending it, asked
+      // here. Whatever the host has on record, or this window remembers, was agreed about
+      // something else: the conversion (the model picker, the task's entry), a setting (the
+      // permission menu), another message (a send), or in another window. None of that stands in
+      // for this answer (QQ, 2026-11-23).
+      askAfresh = true;
+      if (askAfresh) forgetAgySwitchPermissionAgreed(sessionId);
+      const agreed = await agreeToPendingAgySwitchPermission({
+        sessionId,
+        intent: makerChatStore.getAgentSwitchIntent(sessionId),
+        runningAgent,
+        permissionMode,
+        confirm,
+        copy: {
+          title: {
+            fromFullAccess: t('newChat.chatInput.agentSwitch.sendConfirmation.titleFromFullAccess'),
+            fromUnsupported: t('newChat.chatInput.agentSwitch.sendConfirmation.titleFromUnsupported'),
+          },
+          confirmText: t('newChat.chatInput.agentSwitch.sendConfirmation.confirm'),
+          cancelText: t('newChat.chatInput.agentSwitch.sendConfirmation.cancel'),
+        },
+        t,
+        registerWithHost: (intent, agreement) => recordAgySwitchPermissionAgreementWithHost(sessionId, intent, agreement, 'send', undefined, heldMessage),
+        currentIntent: () => makerChatStore.getAgentSwitchIntent(sessionId),
+        askAfresh,
+      });
+      // With no switch into Antigravity pending any more there is nothing to agree to, and the
+      // host would only refuse the held message again: it was written for an engine the task is
+      // not going to. The banner says so ("that switch is no longer pending") instead.
+      // A task that already runs Antigravity has no switch left to agree to, and the message was
+      // written for the engine it runs on: the click on its banner is what sends it.
+      if (agreed && (makerChatStore.getAgentSwitchIntent(sessionId)?.target === 'agy' || runningAgent === 'agy')) retry(heldMessage);
+    } catch {
+      // The host did not record the agreement: the message stays held and the banner stays.
+      toast.error(t('newChat.chatInput.agentSwitch.permissionAgreementNotRecorded'));
+    } finally {
+      asking.current = false;
+    }
+  }, [t]);
+
+  const held = !input.remote && isAgentSwitchPermissionUnconfirmedError(input.error);
+  const { sessionId, permissionMode } = input;
+  useEffect(() => {
+    if (!sessionId) return;
+    if (automaticallyTried.current?.sessionId !== sessionId) automaticallyTried.current = { sessionId, modes: new Set() };
+    // The record lasts as long as the pending switch does, not as long as the error text: a retry
+    // clears the error first, and the host's next refusal would otherwise look like a new one.
+    if (makerChatStore.getAgentSwitchIntent(sessionId)?.target !== 'agy') {
+      automaticallyTried.current.modes.clear();
+      return;
+    }
+    if (!held) return;
+    // The question is already on screen for this task (asked from its entry, say). When it is
+    // answered the host's record changes and this runs again; asking behind it would ask twice.
+    if (isAgySwitchPermissionDialogOpen(latest.current.confirm, sessionId)) return;
+    const mode = permissionMode ?? '';
+    if (automaticallyTried.current.modes.has(mode)) return;
+    automaticallyTried.current.modes.add(mode);
+    void recover(false);
+  }, [held, sessionId, input.error, permissionMode, input.pendingSwitchKey, recover]);
+
+  return useCallback(() => {
+    const now = latest.current;
+    if (!now.remote && isAgentSwitchPermissionUnconfirmedError(now.error)) void recover(true);
+    // The click is on the banner as it is now; if it is that of a held message, it is about that one.
+    else now.retry((now.sessionId ? makerChatStore.getAgySwitchHeldMessage(now.sessionId) : null) ?? undefined);
+  }, [recover]);
+}

@@ -13040,6 +13040,7 @@
         },
         "turn": {
           "groupApprovalOwnerDm": "🔐 A task in a group chat needs your approval. The approval card isn't posted in the group — confirm it here.",
+          "agentSwitchPermissionUnconfirmed": "⏸ This message wasn't processed. This task is about to switch to Antigravity, which will change its permissions, so the person who manages the task needs to open it in Cindy on their computer and confirm first. After that, send this message again.",
           "agentStartFailed": "❌ Couldn't start the Agent: {{reason}}",
           "personalBotLabel": "{{channel}} personal bot",
           "error": "❌ Error: {{message}}"
@@ -14193,6 +14194,8 @@
       "pluginSenderFallback": "Plugin",
       "botRowAria": "Queued message from buddy “{{sender}}”",
       "dragAria": "Drag queued message {{index}} to reorder",
+      "steerHeldForAgySwitch": "This message is waiting for you to confirm the permission change, so it can't steer yet.",
+      "steerHeldForAgySwitchRemote": "This message is waiting for the permission change to be confirmed on the computer the task runs on, so it can't steer yet.",
       "steerAction": "Steer",
       "steerRunningTip": "Steer this message into the running task without interrupting it; handled once the current action finishes",
       "steerPausedTip": "Continue the task and handle this message first",
@@ -14343,7 +14346,29 @@
           "description": "The new Agent engine continues through a handoff summary, so reasoning and other content cannot be guaranteed to carry over perfectly; switching back still lets you continue the original engine’s session. Switching also interrupts the prompt cache once and may increase token usage.",
           "confirm": "Switch Agent",
           "cancel": "Keep Current Agent",
-          "dontShowAgain": "Don’t remind me again"
+          "dontShowAgain": "Don’t remind me again",
+          "antigravityFromFullAccess": "After the switch, this task's permissions change from Full access to Auto-review: Cindy automatically reviews the approval requests Antigravity sends, without asking you. Full access isn't carried over to Antigravity. You can change permissions in the task's permission menu afterwards; it also explains what each level allows.",
+          "antigravityFromUnsupported": "After the switch, this task's permissions change to Default permissions: you decide on the approval requests Antigravity sends. Antigravity doesn't have your current permission level, so that level's own rules (such as Plan mode's limits) aren't carried over. You can change permissions in the task's permission menu afterwards; it also explains what each level allows."
+        },
+        "sendConfirmation": {
+          "titleFromFullAccess": "Send with Auto-review?",
+          "titleFromUnsupported": "Send with Default permissions?",
+          "cancel": "Don't send yet",
+          "confirm": "Confirm and send"
+        },
+        "permissionAgreementNotRecorded": "This confirmation wasn't recorded, so nothing has changed yet. Try again.",
+        "permissionEntry": {
+          "notice": "Switching to Antigravity will change this task's permissions, and that change still needs your confirmation. Select Review and confirm; confirming here only agrees to the change and doesn't send any message.",
+          "titleFromFullAccess": "Agree to change to Auto-review?",
+          "titleFromUnsupported": "Agree to change to Default permissions?",
+          "note": "Confirming doesn't send any message."
+        },
+        "permissionConfirmation": {
+          "bodyFromFullAccess": "After the switch, the Full access you just picked changes to Auto-review: Cindy automatically reviews the approval requests Antigravity sends, without asking you. Full access isn't carried over to Antigravity. You can change permissions in the task's permission menu afterwards; it also explains what each level allows.",
+          "bodyFromUnsupported": "After the switch, this task's permissions change to Default permissions: you decide on the approval requests Antigravity sends. Antigravity doesn't have the level you just picked, so its own rules (such as Plan mode's limits) aren't carried over. You can change permissions in the task's permission menu afterwards; it also explains what each level allows.",
+          "title": "Change to {{mode}}?",
+          "cancel": "Don't change yet",
+          "confirm": "Confirm change"
         }
       },
       "agentRelocation": {
@@ -14972,6 +14997,15 @@
       "gatewayQuotaExhausted": "Your Cindy AI balance is used up. Add funds to continue.",
       "viewBalance": "View balance",
       "viewBalanceTitle": "Open Usage and billing to check your balance and add funds",
+      "agentSwitchPermissionUnconfirmed": "This message hasn't been sent. Switching to Antigravity will change this task's permissions, and that change still needs your confirmation. Select Review and confirm; Cindy switches and sends this message only after you confirm.",
+      "agentSwitchPermissionUnconfirmedRemote": "This message hasn't been sent. Switching to Antigravity will change this task's permissions, and that change has to be confirmed on the computer the task runs on before Cindy switches and sends it. Once it's confirmed there, select Retry if this message still hasn't been sent.",
+      "agentSwitchPermissionUnconfirmedRemoteNamed": "This message hasn't been sent. Switching to Antigravity will change this task's permissions, and that change has to be confirmed on “{{device}}”, the computer the task runs on, before Cindy switches and sends it. Once it's confirmed there, select Retry if this message still hasn't been sent.",
+      "agentSwitchPermissionKept": "This message hasn't been sent. Switching to Antigravity won't change this task's permissions; select Send to send this message.",
+      "agentSwitchPermissionKeptSend": "Send",
+      "agentSwitchPermissionAlreadySwitched": "This message hasn't been sent. This task has already switched to Antigravity; select Send to send this message.",
+      "agentSwitchPermissionAlreadySwitchedRemote": "This message hasn't been sent. This task has already switched to Antigravity; select Retry to send this message.",
+      "agentSwitchPermissionSwitchGone": "This message hasn't been sent. It was waiting for the task to switch to Antigravity, but that switch is no longer pending. To switch, pick an Antigravity model again, select Switch Agent, then confirm sending when prompted; only then is this message sent. If you don't want to switch, select Queued next to this message and choose Cancel send; the message is removed, so type it again and send it.",
+      "agentSwitchPermissionReview": "Review and confirm",
       "credentialSwitchBusy": "Another Codex task is still running, so the provider for this session can't be applied yet (the shared Codex process needs a restart). Retry after those tasks finish.",
       "accountBoundaryPending": "Cindy is still switching account state, so this task can't start yet. Wait a moment, then press Retry. If this keeps happening, restart Cindy.",
       "codexThreadStale": "Codex auth mode changed — this session can't continue. Start a new session to apply it.",

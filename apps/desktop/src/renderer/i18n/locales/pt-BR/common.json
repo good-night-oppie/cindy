@@ -13147,6 +13147,7 @@
         },
         "turn": {
           "groupApprovalOwnerDm": "🔐 Uma tarefa em um chat em grupo precisa da sua autorização. O cartão de autorização não é publicado no grupo: confirme aqui.",
+          "agentSwitchPermissionUnconfirmed": "⏸ Esta mensagem não foi processada. Esta tarefa está prestes a trocar para o Antigravity, o que vai alterar as permissões dela; por isso, a pessoa que gerencia a tarefa precisa primeiro abri-la na Cindy no computador dela e confirmar. Depois disso, envie esta mensagem novamente, por favor.",
           "agentStartFailed": "❌ Não foi possível iniciar o Agent: {{reason}}",
           "personalBotLabel": "bot pessoal do {{channel}}",
           "error": "❌ Erro: {{message}}"
@@ -14308,6 +14309,8 @@
       "pluginSenderFallback": "Plugin",
       "botRowAria": "Mensagem do amigo \"{{sender}}\" na fila",
       "dragAria": "Arraste a mensagem {{index}} da fila para reordenar",
+      "steerHeldForAgySwitch": "Esta mensagem aguarda você confirmar a mudança de permissões; até lá, não é possível usar “Orientar”.",
+      "steerHeldForAgySwitchRemote": "Esta mensagem aguarda que a mudança de permissões seja confirmada no computador em que a tarefa é executada; até lá, “Orientar” não está disponível para ela.",
       "steerAction": "Orientar",
       "steerRunningTip": "Encaminhar esta mensagem para a tarefa em execução sem interrompê-la; será processada quando a ação atual terminar",
       "steerPausedTip": "Continuar a tarefa e processar esta mensagem primeiro",
@@ -14459,7 +14462,29 @@
           "description": "O novo mecanismo do Agent continua por meio de um resumo de transferência, portanto não é possível garantir que o raciocínio e outros conteúdos sejam transferidos perfeitamente; ao voltar, você ainda poderá continuar a sessão do mecanismo original. A troca também interrompe o cache de prompts uma vez e pode aumentar o uso de tokens.",
           "confirm": "Trocar Agent",
           "cancel": "Manter Agent atual",
-          "dontShowAgain": "Não me lembrar novamente"
+          "dontShowAgain": "Não me lembrar novamente",
+          "antigravityFromFullAccess": "Após a troca, as permissões desta tarefa mudam de “Acesso total” para “Revisão automática”: a Cindy revisa automaticamente as solicitações de aprovação que o Antigravity envia, sem perguntar a você. “Acesso total” não é levado para o Antigravity. Depois você pode alterar as permissões no menu de permissões da tarefa; ele também explica o que cada nível permite.",
+          "antigravityFromUnsupported": "Após a troca, as permissões desta tarefa mudam para “Permissões padrão”: você decide sobre as solicitações de aprovação que o Antigravity envia. O Antigravity não tem o seu nível de permissão atual, então as regras próprias desse nível (como os limites do modo Plano) não são levadas. Depois você pode alterar as permissões no menu de permissões da tarefa; ele também explica o que cada nível permite."
+        },
+        "sendConfirmation": {
+          "titleFromFullAccess": "Enviar com “Revisão automática”?",
+          "titleFromUnsupported": "Enviar com “Permissões padrão”?",
+          "cancel": "Não enviar ainda",
+          "confirm": "Confirmar e enviar"
+        },
+        "permissionAgreementNotRecorded": "Esta confirmação não foi registrada, então nada mudou ainda. Tente de novo.",
+        "permissionEntry": {
+          "notice": "A troca para o Antigravity vai alterar as permissões desta tarefa, e essa alteração ainda precisa da sua confirmação. Selecione “Revisar e confirmar”; confirmar aqui apenas aceita a alteração e não envia nenhuma mensagem.",
+          "titleFromFullAccess": "Aceitar a mudança para “Revisão automática”?",
+          "titleFromUnsupported": "Aceitar a mudança para “Permissões padrão”?",
+          "note": "Confirmar não envia nenhuma mensagem."
+        },
+        "permissionConfirmation": {
+          "bodyFromFullAccess": "Após a troca, o “Acesso total” que você acabou de escolher muda para “Revisão automática”: a Cindy revisa automaticamente as solicitações de aprovação que o Antigravity envia, sem perguntar a você. “Acesso total” não é levado para o Antigravity. Depois você pode alterar as permissões no menu de permissões da tarefa; ele também explica o que cada nível permite.",
+          "bodyFromUnsupported": "Após a troca, as permissões desta tarefa mudam para “Permissões padrão”: você decide sobre as solicitações de aprovação que o Antigravity envia. O Antigravity não tem o nível que você acabou de escolher, então as regras próprias dele (como os limites do modo Plano) não são levadas. Depois você pode alterar as permissões no menu de permissões da tarefa; ele também explica o que cada nível permite.",
+          "title": "Mudar para “{{mode}}”?",
+          "cancel": "Não mudar ainda",
+          "confirm": "Confirmar mudança"
         }
       },
       "agentRelocation": {
@@ -15068,6 +15093,15 @@
       "gatewayQuotaExhausted": "Seu saldo do Cindy AI acabou. Adicione fundos para continuar.",
       "viewBalance": "Ver saldo",
       "viewBalanceTitle": "Abra Uso e cobrança para verificar seu saldo e adicionar fundos",
+      "agentSwitchPermissionUnconfirmed": "Esta mensagem ainda não foi enviada. A troca para o Antigravity vai alterar as permissões desta tarefa, e essa alteração ainda precisa da sua confirmação. Selecione “Revisar e confirmar”; a Cindy só troca e envia esta mensagem depois que você confirmar.",
+      "agentSwitchPermissionUnconfirmedRemote": "Esta mensagem ainda não foi enviada. A troca para o Antigravity vai alterar as permissões desta tarefa, e essa alteração precisa ser confirmada no computador em que a tarefa é executada antes que a Cindy troque e a envie. Depois que ela for confirmada lá, selecione “Tentar novamente” se esta mensagem ainda não tiver sido enviada.",
+      "agentSwitchPermissionUnconfirmedRemoteNamed": "Esta mensagem ainda não foi enviada. A troca para o Antigravity vai alterar as permissões desta tarefa, e essa alteração precisa ser confirmada em “{{device}}”, o computador em que a tarefa é executada, antes que a Cindy troque e a envie. Depois que ela for confirmada lá, selecione “Tentar novamente” se esta mensagem ainda não tiver sido enviada.",
+      "agentSwitchPermissionKept": "Esta mensagem ainda não foi enviada. Trocar para o Antigravity não muda as permissões desta tarefa; selecione “Enviar” para que esta mensagem seja enviada.",
+      "agentSwitchPermissionKeptSend": "Enviar",
+      "agentSwitchPermissionAlreadySwitched": "Esta mensagem ainda não foi enviada. Esta tarefa já trocou para o Antigravity; selecione “Enviar” para que esta mensagem seja enviada.",
+      "agentSwitchPermissionAlreadySwitchedRemote": "Esta mensagem ainda não foi enviada. Esta tarefa já trocou para o Antigravity; selecione “Tentar novamente” para que esta mensagem seja enviada.",
+      "agentSwitchPermissionSwitchGone": "Esta mensagem ainda não foi enviada. Ela aguardava a tarefa trocar para o Antigravity, mas essa troca não está mais pendente. Para trocar, escolha novamente um modelo do Antigravity, selecione “Trocar Agent” e, em seguida, confirme o envio quando solicitado; só então esta mensagem é enviada. Se não quiser trocar, selecione “Na fila” ao lado desta mensagem e escolha “Cancelar envio”; a mensagem é removida, então digite-a de novo e envie.",
+      "agentSwitchPermissionReview": "Revisar e confirmar",
       "credentialSwitchBusy": "Outra tarefa do Codex ainda está em execução, então o provedor desta sessão ainda não pode ser aplicado (o processo compartilhado do Codex precisa ser reiniciado). Tente novamente quando essas tarefas terminarem.",
       "accountBoundaryPending": "O Cindy ainda está alterando o estado da conta, então esta tarefa ainda não pode começar. Aguarde um momento e pressione Tentar novamente. Se isso persistir, reinicie o Cindy.",
       "codexThreadStale": "O modo de autenticação do Codex mudou — esta sessão não pode continuar. Inicie uma nova sessão para aplicá-lo.",

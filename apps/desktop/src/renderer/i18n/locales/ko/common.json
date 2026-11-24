@@ -12987,6 +12987,7 @@
         },
         "turn": {
           "groupApprovalOwnerDm": "🔐 그룹 채팅의 작업에 승인이 필요합니다. 승인 카드는 그룹에 올라가지 않으니 여기서 확인하세요.",
+          "agentSwitchPermissionUnconfirmed": "⏸ 이 메시지는 처리되지 않았습니다. 이 작업은 곧 Antigravity로 전환되며 전환하면 권한이 바뀌므로, 이 작업을 관리하는 사람이 먼저 컴퓨터의 Cindy에서 작업을 열어 확인해야 합니다. 확인이 끝나면 이 메시지를 다시 보내 주세요.",
           "agentStartFailed": "❌ Agent를 시작하지 못했습니다: {{reason}}",
           "personalBotLabel": "{{channel}} 개인 bot",
           "error": "❌ 오류: {{message}}"
@@ -14139,6 +14140,8 @@
       "pluginSenderFallback": "플러그인",
       "botRowAria": "동반자 \"{{sender}}\"에서 온 대기 메시지",
       "dragAria": "큐의 {{index}}번째 메시지를 드래그해 순서 변경",
+      "steerHeldForAgySwitch": "이 메시지는 권한 변경 확인을 기다리고 있어, 확인 전에는 끼어들기를 할 수 없습니다.",
+      "steerHeldForAgySwitchRemote": "이 메시지는 작업이 실행되는 컴퓨터에서 권한 변경이 확인되기를 기다리고 있습니다. 확인되기 전에는 '끼어들기'를 사용할 수 없습니다.",
       "steerAction": "끼어들기",
       "steerRunningTip": "실행 중인 작업을 중단하지 않고 끼어듭니다. 현재 동작이 끝난 후 이 메시지를 우선 처리합니다",
       "steerPausedTip": "작업을 계속하고 이 메시지를 우선 처리합니다",
@@ -14289,7 +14292,29 @@
           "description": "새 Agent 엔진은 인계 요약을 통해 이어지므로 추론 내용 등이 완벽하게 이어진다고 보장할 수 없습니다. 기존 엔진으로 다시 전환하면 해당 엔진의 세션을 계속 이어갈 수 있습니다. 전환 시 프롬프트 캐시가 한 번 중단되어 토큰 사용량이 늘어날 수 있습니다.",
           "confirm": "Agent 전환",
           "cancel": "현재 Agent 유지",
-          "dontShowAgain": "다음부터 표시하지 않기"
+          "dontShowAgain": "다음부터 표시하지 않기",
+          "antigravityFromFullAccess": "전환 후 이 작업의 권한이 '전체 접근'에서 '자동 리뷰'로 바뀝니다. Antigravity가 보내는 승인 요청은 Cindy가 자동으로 검토하며, 사용자에게 묻지 않습니다. '전체 접근'은 Antigravity로 이어지지 않습니다. 전환 후 작업의 권한 메뉴에서 다시 바꿀 수 있으며, 각 단계가 허용하는 범위도 거기에 나와 있습니다.",
+          "antigravityFromUnsupported": "전환 후 이 작업의 권한이 '기본 권한'으로 바뀝니다. Antigravity가 보내는 승인 요청은 사용자가 결정합니다. 지금 쓰는 권한 단계는 Antigravity에 없어서, 그 단계 고유의 규칙(예: 계획 모드의 제한)은 이어지지 않습니다. 전환 후 작업의 권한 메뉴에서 다시 바꿀 수 있으며, 각 단계가 허용하는 범위도 거기에 나와 있습니다."
+        },
+        "sendConfirmation": {
+          "titleFromFullAccess": "'자동 리뷰'로 보낼까요?",
+          "titleFromUnsupported": "'기본 권한'으로 보낼까요?",
+          "cancel": "아직 보내지 않기",
+          "confirm": "확인하고 보내기"
+        },
+        "permissionAgreementNotRecorded": "이번 확인은 기록되지 않아 아직 아무것도 바뀌지 않았습니다. 다시 시도하세요.",
+        "permissionEntry": {
+          "notice": "Antigravity로 전환하면 이 작업의 권한이 바뀌며, 그 변경에는 아직 확인이 필요합니다. '검토 후 확인'을(를) 선택하세요. 여기서의 확인은 변경에 동의하는 것일 뿐, 메시지는 보내지 않습니다.",
+          "titleFromFullAccess": "'자동 리뷰'로 바꾸는 데 동의할까요?",
+          "titleFromUnsupported": "'기본 권한'으로 바꾸는 데 동의할까요?",
+          "note": "확인해도 메시지는 보내지 않습니다."
+        },
+        "permissionConfirmation": {
+          "bodyFromFullAccess": "전환 후 방금 고른 '전체 접근'이 '자동 리뷰'로 바뀝니다. Antigravity가 보내는 승인 요청은 Cindy가 자동으로 검토하며, 사용자에게 묻지 않습니다. '전체 접근'은 Antigravity로 이어지지 않습니다. 전환 후 작업의 권한 메뉴에서 다시 바꿀 수 있으며, 각 단계가 허용하는 범위도 거기에 나와 있습니다.",
+          "bodyFromUnsupported": "전환 후 이 작업의 권한이 '기본 권한'으로 바뀝니다. Antigravity가 보내는 승인 요청은 사용자가 결정합니다. 방금 고른 단계는 Antigravity에 없어서, 그 단계 고유의 규칙(예: 계획 모드의 제한)은 이어지지 않습니다. 전환 후 작업의 권한 메뉴에서 다시 바꿀 수 있으며, 각 단계가 허용하는 범위도 거기에 나와 있습니다.",
+          "title": "'{{mode}}'(으)로 바꿀까요?",
+          "cancel": "아직 바꾸지 않기",
+          "confirm": "변경 확인"
         }
       },
       "agentRelocation": {
@@ -14907,6 +14932,15 @@
       "gatewayQuotaExhausted": "Cindy AI 잔액이 부족합니다. 충전한 후 계속하세요.",
       "viewBalance": "잔액 보기",
       "viewBalanceTitle": "「사용량 및 결제」를 열어 잔액을 확인하고 충전",
+      "agentSwitchPermissionUnconfirmed": "이 메시지는 아직 전송되지 않았습니다. Antigravity로 전환하면 이 작업의 권한이 바뀌며, 그 변경에는 아직 확인이 필요합니다. '검토 후 확인'을 선택하세요. 확인한 뒤에만 Cindy가 전환하고 이 메시지를 보냅니다.",
+      "agentSwitchPermissionUnconfirmedRemote": "이 메시지는 아직 전송되지 않았습니다. Antigravity로 전환하면 이 작업의 권한이 바뀌며, 그 변경은 작업이 실행되는 컴퓨터에서 확인해야 Cindy가 전환하고 메시지를 보냅니다. 그 컴퓨터에서 확인한 뒤에도 이 메시지가 전송되지 않았다면 '다시 시도'를 선택하세요.",
+      "agentSwitchPermissionUnconfirmedRemoteNamed": "이 메시지는 아직 전송되지 않았습니다. Antigravity로 전환하면 이 작업의 권한이 바뀌며, 그 변경은 작업이 실행되는 컴퓨터 '{{device}}'에서 확인해야 Cindy가 전환하고 메시지를 보냅니다. 그 컴퓨터에서 확인한 뒤에도 이 메시지가 전송되지 않았다면 '다시 시도'를 선택하세요.",
+      "agentSwitchPermissionKept": "이 메시지는 아직 전송되지 않았습니다. Antigravity로 전환해도 이 작업의 권한은 바뀌지 않습니다. '전송'을 선택해야 이 메시지가 전송됩니다.",
+      "agentSwitchPermissionKeptSend": "전송",
+      "agentSwitchPermissionAlreadySwitched": "이 메시지는 아직 전송되지 않았습니다. 이 작업은 이미 Antigravity로 전환되었습니다. '전송'을 선택해야 이 메시지가 전송됩니다.",
+      "agentSwitchPermissionAlreadySwitchedRemote": "이 메시지는 아직 전송되지 않았습니다. 이 작업은 이미 Antigravity로 전환되었습니다. '다시 시도'를 선택해야 이 메시지가 전송됩니다.",
+      "agentSwitchPermissionSwitchGone": "이 메시지는 아직 전송되지 않았습니다. 작업이 Antigravity로 전환되기를 기다리고 있었지만, 그 전환은 더 이상 대기 중이 아닙니다. 전환하려면 Antigravity 모델을 다시 선택하고 'Agent 전환'을(를) 선택한 다음, 이어지는 안내에 따라 전송을 확인하세요. 그래야 이 메시지가 전송됩니다. 전환하지 않으려면 이 메시지 옆의 '대기 중'을(를) 선택하고 '전송 취소'을(를) 고르세요. 메시지가 삭제되므로 다시 입력해서 보내세요.",
+      "agentSwitchPermissionReview": "검토 후 확인",
       "credentialSwitchBusy": "다른 Codex 작업이 실행 중이어서 이 세션에서 선택한 제공자로 아직 전환할 수 없습니다(공유 Codex 프로세스 재시작 필요). 다른 작업이 끝난 후 ‘다시 시도’를 눌러 주세요.",
       "accountBoundaryPending": "Cindy가 계정 상태를 전환하는 중이라 아직 이 작업을 시작할 수 없습니다. 잠시 후 ‘다시 시도’를 눌러 주세요. 계속 표시되면 Cindy를 다시 시작해 주세요.",
       "codexThreadStale": "Codex 인증 모드가 변경되었습니다. 이 세션은 계속할 수 없습니다. 새 세션을 시작하세요.",

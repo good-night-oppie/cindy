@@ -349,6 +349,7 @@
       "defaultTitle": "File d'attente"
     },
     "row": {
+      "steerHeldForAgySwitch": "Ce message attend que le changement d'autorisations soit confirmé sur l'ordinateur où la tâche s'exécute ; d'ici là, « Insérer » n'est pas disponible pour lui.",
       "syntheticEditDisabled": "Les messages d'instruction système ne peuvent pas être modifiés ni envoyés en cours de tour.",
       "autoSentEditDisabled": "Les messages envoyés automatiquement ne peuvent pas être modifiés ni envoyés en cours de tour.",
       "first": "Cet élément est déjà le premier de la file d'attente.",

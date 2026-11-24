@@ -306,3 +306,146 @@ describe.each(SUPPORTED_LOCALES)('error presentation in %s', locale => {
     expect(screen.queryByText(/Switch this task/)).toBeNull();
   });
 });
+
+// cindy#19 (QQ's ruling after DD 7077886823): the host holds a message until the user confirms the
+// permission change of a pending switch into Antigravity. This is a state to act on, not a failure
+// to decode: the banner says so in the user's language, its action reopens the confirmation, and
+// Escape (which closes that confirmation) must not also remove the banner, the only way back to it.
+it.each([['en', en], ['zh-CN', zhCN]] as const)('presents a held permission confirmation as an action to take (%s)', async (lng, strings) => {
+  const i18n = createInstance();
+  await i18n.init({ lng, resources: { [lng]: { translation: strings } } });
+  const onRetry = vi.fn();
+  const onCancel = vi.fn();
+  render(<I18nextProvider i18n={i18n}><ErrorBanner
+    error="AGENT_SWITCH_PERMISSION_UNCONFIRMED: The pending switch to Antigravity would change this task's permissions"
+    retryText="the held message" onRetry={onRetry} onCancel={onCancel} dismissOnEscape /></I18nextProvider>);
+  expect(screen.getByText(strings.chat.errorBanner.agentSwitchPermissionUnconfirmed)).toBeTruthy();
+  expect(screen.queryByText(/AGENT_SWITCH_PERMISSION_UNCONFIRMED/)).toBeNull();
+  fireEvent.keyDown(window, { key: 'Escape' });
+  expect(onCancel).not.toHaveBeenCalled();
+  // DD 7079095110: closing the banner left the held message at the head of a paused queue with no
+  // way back to the confirmation, so a held message offers no close button either.
+  expect(screen.queryByRole('button', { name: strings.chat.errorBanner.cancelTitle })).toBeNull();
+  // QQ's ruling on the look: waiting for a confirmation is not a failure and the action is not a
+  // retry, so the review button carries no retry icon. For this state only.
+  const review = screen.getByRole('button', { name: strings.chat.errorBanner.agentSwitchPermissionReview });
+  expect(review.querySelector('svg')).toBeNull();
+  fireEvent.click(review);
+  expect(onRetry).toHaveBeenCalledExactlyOnceWith('the held message');
+});
+
+// JJ 7090463421. A held message, a switch pending again, and the task in a mode Antigravity keeps
+// as it is: the banner used to say that the switch "changes this task's permissions" and offer
+// "Review and confirm", with nothing to review; the click simply sent the message. It says that
+// the permissions do not change and that the message goes when Send is selected, and the button
+// is named Send. Where the mode is rewritten the banner is unchanged (the test above).
+it.each([['en', en], ['zh-CN', zhCN]] as const)('says that nothing changes and offers Send when the pending switch keeps the task\u2019s permissions (%s)', async (lng, strings) => {
+  const i18n = createInstance();
+  await i18n.init({ lng, resources: { [lng]: { translation: strings } } });
+  const onRetry = vi.fn();
+  render(<I18nextProvider i18n={i18n}><ErrorBanner
+    error="AGENT_SWITCH_PERMISSION_UNCONFIRMED: The pending switch to Antigravity would change this task's permissions"
+    retryText="the held message" onRetry={onRetry} onCancel={vi.fn()} agySwitchPending agySwitchKeepsPermissions /></I18nextProvider>);
+  expect(screen.getByText(strings.chat.errorBanner.agentSwitchPermissionKept)).toBeTruthy();
+  expect(screen.queryByText(strings.chat.errorBanner.agentSwitchPermissionUnconfirmed)).toBeNull();
+  expect(screen.queryByRole('button', { name: strings.chat.errorBanner.agentSwitchPermissionReview })).toBeNull();
+  // The sentence names the button exactly as the button reads.
+  expect(strings.chat.errorBanner.agentSwitchPermissionKept).toContain(strings.chat.errorBanner.agentSwitchPermissionKeptSend);
+  const send = screen.getByRole('button', { name: strings.chat.errorBanner.agentSwitchPermissionKeptSend });
+  fireEvent.click(send);
+  expect(onRetry).toHaveBeenCalledExactlyOnceWith('the held message');
+});
+
+// QQ's ruling on restarts: the pending switch does not survive a restart, the held message does.
+// With no switch pending there is nothing to review. DD 7080449825: a button that resends only
+// to be refused again looks like a button that does nothing, on a banner that cannot be closed.
+// So this state offers no resend, says what to do instead, and can be closed (the message stays
+// in the queue, and "Continue sending" brings the banner back).
+it.each([['en', en], ['zh-CN', zhCN]] as const)('tells the user to pick the model again when the switch a held message waited for is gone (%s)', async (lng, strings) => {
+  const i18n = createInstance();
+  await i18n.init({ lng, resources: { [lng]: { translation: strings } } });
+  const onRetry = vi.fn();
+  const onCancel = vi.fn();
+  render(<I18nextProvider i18n={i18n}><ErrorBanner
+    error="AGENT_SWITCH_PERMISSION_UNCONFIRMED: The pending switch to Antigravity would change this task's permissions"
+    retryText="the held message" onRetry={onRetry} onCancel={onCancel} agySwitchPending={false} /></I18nextProvider>);
+  expect(screen.getByText(strings.chat.errorBanner.agentSwitchPermissionSwitchGone)).toBeTruthy();
+  expect(screen.queryByRole('button', { name: strings.chat.errorBanner.agentSwitchPermissionReview })).toBeNull();
+  expect(screen.queryByRole('button', { name: strings.chat.errorBanner.retry })).toBeNull();
+  fireEvent.click(screen.getByRole('button', { name: strings.chat.errorBanner.cancelTitle }));
+  expect(onCancel).toHaveBeenCalledOnce();
+  expect(onRetry).not.toHaveBeenCalled();
+});
+
+// DD 7079095110: the host takes the agreement only from the computer the task runs on. A window
+// that controls the task from another computer used to be told to "review and confirm" something
+// it cannot confirm. It says where to confirm, and offers the ordinary retry for afterwards.
+it.each([['en', en], ['zh-CN', zhCN]] as const)('tells a remote controller where the held permission change is confirmed (%s)', async (lng, strings) => {
+  const i18n = createInstance();
+  await i18n.init({ lng, resources: { [lng]: { translation: strings } } });
+  const onRetry = vi.fn();
+  render(<I18nextProvider i18n={i18n}><ErrorBanner
+    error="AGENT_SWITCH_PERMISSION_UNCONFIRMED: The pending switch to Antigravity would change this task's permissions"
+    retryText="the held message" onRetry={onRetry} onCancel={vi.fn()} deviceLinkDeviceId="device-1" /></I18nextProvider>);
+  expect(screen.getByText(strings.chat.errorBanner.agentSwitchPermissionUnconfirmedRemote)).toBeTruthy();
+  expect(screen.queryByText(strings.chat.errorBanner.agentSwitchPermissionUnconfirmed)).toBeNull();
+  expect(screen.queryByRole('button', { name: strings.chat.errorBanner.agentSwitchPermissionReview })).toBeNull();
+  expect(screen.queryByRole('button', { name: strings.chat.errorBanner.cancelTitle })).toBeNull();
+  fireEvent.click(screen.getByRole('button', { name: strings.chat.errorBanner.retry }));
+  expect(onRetry).toHaveBeenCalledExactlyOnceWith('the held message');
+});
+
+// JJ 7105504180. A message is held for a switch into Antigravity and, meanwhile, another entry
+// applied that switch: the task runs Antigravity, nothing is pending, the message is unsent.
+// The banner took "no switch pending" for "the switch is gone" and told the user to pick the
+// model again, with no action; on a computer controlling the task it still said that the switch
+// would change the permissions. Both were untrue. It now says that the task has switched and
+// names the action that sends the message: Send here, Retry on a controlling computer.
+it.each([['en', en], ['zh-CN', zhCN]] as const)('says that the task has already switched and offers Send, with no question, when a held message is left on a task that runs Antigravity (%s)', async (lng, strings) => {
+  const i18n = createInstance();
+  await i18n.init({ lng, resources: { [lng]: { translation: strings } } });
+  const onRetry = vi.fn();
+  render(<I18nextProvider i18n={i18n}><ErrorBanner
+    error="AGENT_SWITCH_PERMISSION_UNCONFIRMED: The pending switch to Antigravity would change this task's permissions"
+    retryText="the held message" onRetry={onRetry} onCancel={vi.fn()} agySwitchPending={false} agyTaskRunsAntigravity /></I18nextProvider>);
+  expect(screen.getByText(strings.chat.errorBanner.agentSwitchPermissionAlreadySwitched)).toBeTruthy();
+  expect(screen.queryByText(strings.chat.errorBanner.agentSwitchPermissionSwitchGone)).toBeNull();
+  expect(screen.queryByText(strings.chat.errorBanner.agentSwitchPermissionUnconfirmed)).toBeNull();
+  expect(screen.queryByRole('button', { name: strings.chat.errorBanner.agentSwitchPermissionReview })).toBeNull();
+  expect(strings.chat.errorBanner.agentSwitchPermissionAlreadySwitched).toContain(strings.chat.errorBanner.agentSwitchPermissionKeptSend);
+  fireEvent.click(screen.getByRole('button', { name: strings.chat.errorBanner.agentSwitchPermissionKeptSend }));
+  expect(onRetry).toHaveBeenCalledExactlyOnceWith('the held message');
+});
+
+it.each([['en', en], ['zh-CN', zhCN]] as const)('says so to a computer controlling the task too, and names Retry (%s)', async (lng, strings) => {
+  const i18n = createInstance();
+  await i18n.init({ lng, resources: { [lng]: { translation: strings } } });
+  const onRetry = vi.fn();
+  render(<I18nextProvider i18n={i18n}><ErrorBanner
+    error="AGENT_SWITCH_PERMISSION_UNCONFIRMED: The pending switch to Antigravity would change this task's permissions"
+    retryText="the held message" onRetry={onRetry} onCancel={vi.fn()} deviceLinkDeviceId="device-1" deviceLinkDeviceName="Katana desk"
+    agyTaskRunsAntigravity /></I18nextProvider>);
+  expect(screen.getByText(strings.chat.errorBanner.agentSwitchPermissionAlreadySwitchedRemote)).toBeTruthy();
+  expect(screen.queryByText(strings.chat.errorBanner.agentSwitchPermissionUnconfirmedRemote)).toBeNull();
+  expect(strings.chat.errorBanner.agentSwitchPermissionAlreadySwitchedRemote).toContain(strings.chat.errorBanner.retry);
+  fireEvent.click(screen.getByRole('button', { name: strings.chat.errorBanner.retry }));
+  expect(onRetry).toHaveBeenCalledExactlyOnceWith('the held message');
+});
+
+// QQ's ruling: the remote controller is shown which computer to go back to. JJ 7081641637: by the
+// name the user sees in Cindy when it is known, never by the device id; otherwise the text above.
+it.each([
+  ['its display name', 'Katana desk', true],
+  ['no name', null, false],
+  ['only its id', 'device-1', false],
+] as const)('names the task computer to a remote controller when it knows %s', async (_name, deviceName, named) => {
+  const i18n = createInstance();
+  await i18n.init({ lng: 'zh-CN', resources: { 'zh-CN': { translation: zhCN } } });
+  render(<I18nextProvider i18n={i18n}><ErrorBanner
+    error="AGENT_SWITCH_PERMISSION_UNCONFIRMED: The pending switch to Antigravity would change this task's permissions"
+    retryText="the held message" onRetry={vi.fn()} onCancel={vi.fn()}
+    deviceLinkDeviceId="device-1" deviceLinkDeviceName={deviceName} /></I18nextProvider>);
+  expect(screen.queryByText(/任务所在的电脑「Katana desk」上确认/) !== null).toBe(named);
+  expect(screen.queryByText(zhCN.chat.errorBanner.agentSwitchPermissionUnconfirmedRemote) !== null).toBe(!named);
+  expect(screen.queryByText(/device-1/)).toBeNull();
+});

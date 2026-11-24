@@ -47,6 +47,13 @@ export interface QueueRowPresentation {
    * 且 edit / steer 已被禁用(任何合成指令都不该被改写;删除/排序保留)。
    */
   syntheticKind: 'continue' | 'generic' | null;
+  /**
+   * The message could be interjected but for one thing: the host holds it until the user
+   * confirms what the task's pending switch into Antigravity does to its permissions, and
+   * refuses to interject it meanwhile. Interject is unavailable with that reason, and the reason
+   * is the row's hint. One condition for the computer's queue and the phone's (cindy#19).
+   */
+  steerHeldForAgySwitch: boolean;
   title: string;
 }
 
@@ -113,9 +120,43 @@ export function buildQueuePanelSummary(
   };
 }
 
+/**
+ * Whether the host holds this queued message for the user's agreement to the permission change
+ * of a switch into Antigravity. The one definition of it for every surface that shows a queue
+ * (the desktop bubble and its shortcut, the phone): such a message cannot be interjected, and
+ * each surface says so where it would offer "Interject", unless a lock it knows about already
+ * makes the row unavailable for another reason.
+ */
+export function queueItemHeldForAgySwitch(item: { awaitsAgySwitchConfirmation?: unknown }): boolean {
+  return item.awaitsAgySwitchConfirmation === true;
+}
+
+/**
+ * Which hold of which message a task's error banner is about, when that message is one the host
+ * holds for a switch into Antigravity: the host's own name for the hold (`agySwitchHoldId`), read
+ * from the queue as the screen shows it. A client reads it when the user acts on that banner
+ * (when its question opens, where it asks one) and sends it back with the answer and with the
+ * retry; the host acts only if the message it holds then is still that one in that hold, so an
+ * action on a message that was since removed, edited, merged or replaced at the head of the
+ * queue sends nothing. Null when the banner is not that of such a message, or the host named no
+ * hold (an older host).
+ */
+export function agySwitchHeldMessageOf(projection: {
+  pendingQueue: ReadonlyArray<{ clientId: string; awaitsAgySwitchConfirmation?: unknown; agySwitchHoldId?: unknown }>;
+  /** What the task's banner can retry, as the host reports it; clients type it differently. */
+  recovery?: unknown;
+}): string | null {
+  const head = projection.pendingQueue[0];
+  const recovery = projection.recovery && typeof projection.recovery === 'object'
+    ? projection.recovery as { kind?: unknown; clientId?: unknown } : null;
+  if (!head || !recovery || recovery.kind !== 'queue-head' || recovery.clientId !== head.clientId) return null;
+  if (!queueItemHeldForAgySwitch(head)) return null;
+  return typeof head.agySwitchHoldId === 'string' && head.agySwitchHoldId.length > 0 ? head.agySwitchHoldId : null;
+}
+
 export function buildQueueRowPresentation(input: {
   busy?: boolean;
-  item: { clientId: string; origin?: unknown; text?: string; sourcePlugin?: unknown };
+  item: { clientId: string; origin?: unknown; text?: string; sourcePlugin?: unknown; awaitsAgySwitchConfirmation?: unknown };
   originalIndex: number;
   projection: QueueRowProjectionLike;
   queueLength: number;
@@ -152,11 +193,19 @@ export function buildQueueRowPresentation(input: {
     ? presentationText(localizer, 'message.queuePresentation.row.orcaEditDisabled', '协同消息不支持编辑。')
     : null;
 
+  // Held by the host for the user's agreement to a permission change. Only for a message that
+  // could be interjected otherwise; its other actions are untouched.
+  const steerHeldForAgySwitch = queueItemHeldForAgySwitch(input.item)
+    && !baseDisabledReason && !syntheticEditReason && !autoSentReason;
+  const heldSteerReason = steerHeldForAgySwitch
+    ? presentationText(localizer, 'message.queuePresentation.row.steerHeldForAgySwitch', '这条消息在等任务所在的电脑确认权限的改变，确认前不能插话。')
+    : null;
+
   return {
     actions: {
       moveUp: queueRowAction(baseDisabledReason, moveUpTarget, presentationText(localizer, 'message.queuePresentation.row.first', '已经是队列第一条。')),
       moveDown: queueRowAction(baseDisabledReason, moveDownTarget, presentationText(localizer, 'message.queuePresentation.row.last', '已经是队列最后一条。')),
-      steer: queueRowAction(baseDisabledReason ?? syntheticEditReason ?? autoSentReason),
+      steer: queueRowAction(baseDisabledReason ?? syntheticEditReason ?? autoSentReason ?? heldSteerReason),
       edit: queueRowAction(baseDisabledReason ?? syntheticEditReason ?? autoSentReason ?? orcaEditReason),
       remove: queueRowAction(baseDisabledReason),
     },
@@ -167,10 +216,11 @@ export function buildQueueRowPresentation(input: {
       readOnlyReason: input.readOnlyReason,
       steering,
       syntheticKind,
-    }, localizer),
+    }, localizer) ?? heldSteerReason,
     interactionLocked,
     orcaOrigin,
     steering,
+    steerHeldForAgySwitch,
     syntheticKind,
     title: steering
       ? presentationText(localizer, 'message.queuePresentation.row.steering', '插话发送中')

@@ -348,6 +348,7 @@
       "defaultTitle": "전송 대기 큐"
     },
     "row": {
+      "steerHeldForAgySwitch": "이 메시지는 작업이 실행되는 컴퓨터에서 권한 변경이 확인되기를 기다리고 있습니다. 확인되기 전에는 '끼어들기'를 사용할 수 없습니다.",
       "syntheticEditDisabled": "시스템 지시 메시지는 편집하거나 끼어들기로 보낼 수 없습니다.",
       "autoSentEditDisabled": "자동으로 보낸 메시지는 편집하거나 끼어들기로 보낼 수 없습니다.",
       "first": "이미 큐의 첫 항목입니다.",

@@ -39,7 +39,7 @@ import {
   isRemoteAgentResumeRejectedError,
 } from '@cindy/maker-shared/error-redaction';
 import { chatRemoteErrorGuidanceKey } from '@/lib/autoReviewUnavailableGuidance';
-import { AlertCircle, ArrowRightLeft, Check, Split, Play, RotateCcw, RefreshCw, Timer, Wallet } from 'lucide-react';
+import { AlertCircle, ArrowRightLeft, Check, Info, Split, Play, RotateCcw, RefreshCw, Timer, Wallet } from 'lucide-react';
 import { useTranslation } from 'react-i18next';
 import { toast } from '@/lib/toast';
 import { Spinner } from '@/components/ui/spinner';
@@ -71,6 +71,7 @@ import {
   CLAUDE_SUBSCRIPTION_OPUS_PLAN_MISMATCH_REASON,
 } from '../../../shared/claudeGatewayError';
 import { isPiImageInputUnsupportedError } from '../../../shared/inputError';
+import { isAgentSwitchPermissionUnconfirmedError } from '@/components/new-chat/agentSwitchConfirmation';
 import type { ToolLoopErrorDetails } from '@cindy/maker-core';
 import type { ErrorDiagnosisSource } from '@/lib/errorDiagnosisPrompt';
 
@@ -112,6 +113,31 @@ interface ErrorBannerProps {
   remoteHostId?: string;
   /** device-link 被控端设备 id。非空表示 turn 不在本机执行，本机认证恢复入口必须禁用。 */
   deviceLinkDeviceId?: string | null;
+  /**
+   * The name the user sees in Cindy for the computer the task runs on, when it is known. Never
+   * the device id: the remote controller's banner tells the user which computer to go to.
+   */
+  deviceLinkDeviceName?: string | null;
+  /**
+   * Whether the task has a switch into Antigravity pending. A message held for one that is no
+   * longer pending (the app was restarted, or the switch withdrawn) has nothing to confirm: the
+   * banner says to pick the model again. Undefined is read as pending.
+   */
+  agySwitchPending?: boolean;
+  /**
+   * The task's permission mode is one Antigravity keeps as it is: the pending switch changes no
+   * permission, so there is nothing to review. The held message still goes only on the user's
+   * own action, and the banner says that, with a button named for what it does (JJ 7090463421).
+   */
+  agySwitchKeepsPermissions?: boolean;
+  /**
+   * The task already runs Antigravity (another entry applied the switch meanwhile) and a message
+   * held for that switch is still unsent. Nothing is pending and nothing is left to confirm: the
+   * banner says that the task has switched and that the message goes on the user's action, which
+   * sends it with no question (JJ 7105504180). Not to be confused with a switch that is gone
+   * while the task runs another engine, which offers no action.
+   */
+  agyTaskRunsAntigravity?: boolean;
   /** 当前 session 的 model id。用于判断 OpenAI/ChatGPT 连接来源及桥接模型。 */
   modelId?: string;
   /** 当前会话显式选择的模型来源。OpenAI 重连只能处理 openai / 无显式来源的历史会话；
@@ -181,6 +207,10 @@ export function ErrorBanner({
   remoteHostId,
   agentDeviceId,
   deviceLinkDeviceId,
+  deviceLinkDeviceName,
+  agySwitchPending,
+  agySwitchKeepsPermissions = false,
+  agyTaskRunsAntigravity = false,
   modelId,
   providerId,
   onSwitchToClaudeSubscription,
@@ -197,8 +227,21 @@ export function ErrorBanner({
 }: ErrorBannerProps) {
   const { t, i18n } = useTranslation();
   const bannerRef = useRef<HTMLDivElement>(null);
+  // A message the host holds until the user confirms a permission change: Escape closes the
+  // confirmation dialog, and must not also take away the only place to open it again.
+  const heldForPermissionConfirmation = isAgentSwitchPermissionUnconfirmedError(error);
+  // The action opens the confirmation here; elsewhere (a remote controller, a switch that is no
+  // longer pending) it is the ordinary retry.
+  const agyAlreadySwitched = heldForPermissionConfirmation && agyTaskRunsAntigravity;
+  const reviewsHeldPermission = heldForPermissionConfirmation && !deviceLinkDeviceId
+    && (agySwitchPending !== false || agyAlreadySwitched);
+  // Held, but the switch it waited for is no longer pending: there is nothing to confirm and a
+  // resend would only be refused again, so no action is offered that does nothing (DD
+  // 7080449825). The banner says what to do, and can be closed; the message stays in the queue.
+  const heldSwitchGone = heldForPermissionConfirmation && !deviceLinkDeviceId && agySwitchPending === false
+    && !agyAlreadySwitched;
   useEffect(() => {
-    if (!dismissOnEscape || !onCancel) return;
+    if (!dismissOnEscape || !onCancel || (heldForPermissionConfirmation && !heldSwitchGone)) return;
     const onKeyDown = (event: KeyboardEvent) => {
       if (
         event.key !== 'Escape' ||
@@ -232,7 +275,7 @@ export function ErrorBanner({
     // 冒泡阶段让输入框的候选列表、语音取消等先消费按键。
     window.addEventListener('keydown', onKeyDown);
     return () => window.removeEventListener('keydown', onKeyDown);
-  }, [dismissOnEscape, onCancel]);
+  }, [dismissOnEscape, onCancel, heldForPermissionConfirmation, heldSwitchGone]);
   const { confirm } = useConfirmDialog();
   const promptCodexSessionExpired = useCodexSessionExpiredPrompt({
     // 非共享凭证沿用原有确认/登录流程；共享凭证由横幅内联动作直接唤起 App。
@@ -470,7 +513,7 @@ export function ErrorBanner({
     // retry alongside settings, without claiming that cached credentials recovered.
     (isCodexLocalOAuthAuthMissing && !independentOpenAiAccount && !openAiConnectionRecoveredSinceError);
   const safeRetryText = !hideRetry && retryText ? retryText : null;
-  const retryAction = safeRetryText
+  const retryAction = heldSwitchGone ? undefined : safeRetryText
     ? () => onRetry(safeRetryText)
     : !hideRetry && !isRecoverable && !requiresAgentErrorConfigurationChange(error)
       ? onContinueAfterError : undefined;
@@ -542,6 +585,20 @@ export function ErrorBanner({
     displayError = t('chat.errorBanner.codexResumeNotReady');
   } else if (isPiImageInputUnsupportedError(error)) {
     displayError = t('ipcError.PI_IMAGE_INPUT_UNSUPPORTED');
+  } else if (isAgentSwitchPermissionUnconfirmedError(error)) {
+    // The host takes an agreement only from the computer the task runs on.
+    const taskComputer = deviceLinkDeviceName?.trim();
+    displayError = agyAlreadySwitched
+      ? t(deviceLinkDeviceId ? 'chat.errorBanner.agentSwitchPermissionAlreadySwitchedRemote' : 'chat.errorBanner.agentSwitchPermissionAlreadySwitched')
+      : deviceLinkDeviceId
+      ? taskComputer && taskComputer !== deviceLinkDeviceId
+        ? t('chat.errorBanner.agentSwitchPermissionUnconfirmedRemoteNamed', { device: taskComputer })
+        : t('chat.errorBanner.agentSwitchPermissionUnconfirmedRemote')
+      : agySwitchPending === false
+        ? t('chat.errorBanner.agentSwitchPermissionSwitchGone')
+        : agySwitchKeepsPermissions
+          ? t('chat.errorBanner.agentSwitchPermissionKept')
+          : t('chat.errorBanner.agentSwitchPermissionUnconfirmed');
   } else if (isCredentialSwitchBusy) {
     displayError = t('chat.errorBanner.credentialSwitchBusy');
   } else if (isAccountBoundaryPending) {
@@ -810,10 +867,15 @@ export function ErrorBanner({
           ? () => onDiagnose({ message: displayError, details: error, reason: errorReason })
           : undefined
       }
-      onDismiss={onCancel}
+      // Dismissing would leave the held message at the head of a paused queue with no way back
+      // to the confirmation; the user ends this state by confirming or by cancelling the message.
+      onDismiss={heldForPermissionConfirmation && !heldSwitchGone ? undefined : onCancel}
       icon={
         openAiConnectionRecoveredSinceError ? (
           <Check size={16} className="text-[var(--text-secondary)]" />
+        ) : heldForPermissionConfirmation ? (
+          // Waiting for the user, not a failure: the neutral mark, for this state only.
+          <Info size={16} className="text-[var(--text-secondary)]" />
         ) : (
           <AlertCircle
             size={16}
@@ -970,10 +1032,12 @@ export function ErrorBanner({
               disabled={forkStripEncryptedRunning}
               loading={retrying}
               onClick={() => void handleRetry()}
-              title={t('chat.errorBanner.retryTitle')}
+              title={reviewsHeldPermission ? undefined : t('chat.errorBanner.retryTitle')}
             >
-              <RotateCcw size={12} />
-              {t('chat.errorBanner.retry')}
+              {!reviewsHeldPermission && <RotateCcw size={12} />}
+              {reviewsHeldPermission
+                ? t(agySwitchKeepsPermissions || agyAlreadySwitched ? 'chat.errorBanner.agentSwitchPermissionKeptSend' : 'chat.errorBanner.agentSwitchPermissionReview')
+                : t('chat.errorBanner.retry')}
             </Button>
           )}
           {(showHistoryRecovery || showInvalidEncryptedContentRecovery) && onForkStripEncrypted && (

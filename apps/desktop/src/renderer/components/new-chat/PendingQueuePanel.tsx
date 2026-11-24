@@ -34,7 +34,7 @@ import {
   Trash2,
 } from 'lucide-react';
 import type { KeyboardEvent as ReactKeyboardEvent, ReactElement } from 'react';
-import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { useCallback, useEffect, useId, useMemo, useRef, useState } from 'react';
 import { useTranslation } from 'react-i18next';
 
 import { SortableList } from '@/components/sidebar/SortableList';
@@ -193,6 +193,10 @@ export function PendingQueuePanel({
    * 只记「哪一行溢出」而不记「刚刚量到溢出」,上一次的结果才不会残留到另一行头上。
    */
   const [bodyTipClientId, setBodyTipClientId] = useState<string | null>(null);
+  // The row whose unavailable "Interject" was tapped or clicked: its reason is shown until the
+  // pointer or focus moves on. A touch screen has no hover to show it with.
+  const [heldSteerTipClientId, setHeldSteerTipClientId] = useState<string | null>(null);
+  const heldSteerReasonIdPrefix = useId();
   /** 已经等满悬停延迟、可以真正浮出的行:受控 Tip 不会自己走 Provider 的 delay。 */
   const [revealedBodyTipClientId, setRevealedBodyTipClientId] = useState<string | null>(null);
   /** 拖动排序进行中:Sortable 指针捕获期间不允许行级浮层留在屏幕上。 */
@@ -288,6 +292,11 @@ export function PendingQueuePanel({
     setBodyTipClientId((current) =>
       current !== null && !queue.some((q) => q.clientId === current) ? null : current,
     );
+    // The reason belongs to a message that is held now: gone with the message, and gone when
+    // the hold ends, so that it does not open by itself if the same message is held again.
+    setHeldSteerTipClientId((current) =>
+      current !== null && !queue.some((q) => q.clientId === current && q.awaitsAgySwitchConfirmation === true) ? null : current,
+    );
   }, [editingClientId, queue, releaseEditLock]);
 
   useEffect(() => {
@@ -364,6 +373,10 @@ export function PendingQueuePanel({
           const isSteering = steeringClientIds.includes(entry.clientId);
           const showActions = !isPendingEnqueue && (isRowActive || isSteering || isRowEditing);
           const canSteerRow = Boolean(onSteer) && rowPresentation.canSteer;
+          // Held for the user's agreement to a permission change: "Interject" stays where it is,
+          // unavailable, and says why. Nothing on this row interjects it.
+          const steerHeldRow = Boolean(onSteer) && rowPresentation.steerHeldForAgySwitch;
+          const heldSteerReasonId = `${heldSteerReasonIdPrefix}-${originalIdx}`;
           const canEditRow =
             Boolean(onEditBegin) &&
             rowPresentation.canEdit &&
@@ -380,7 +393,7 @@ export function PendingQueuePanel({
               (entry.chatMessage.slashCommandRanges?.length ?? 0) > 0 ||
               agentReferences.length > 0 ||
               (entry.mentions?.length ?? 0) > 0);
-          const actionSlotWidth = canSteerRow
+          const actionSlotWidth = canSteerRow || steerHeldRow
             ? canEditRow
               ? 'w-[68px]'
               : 'w-[44px]'
@@ -439,6 +452,14 @@ export function PendingQueuePanel({
             : rowPresentation.displayText || t('newChat.pendingQueue.noTextContent');
           const handleRowKeyDown = (e: ReactKeyboardEvent<HTMLDivElement>) => {
             if (!isPendingQueueSteerShortcut(e)) return;
+            if (steerHeldRow) {
+              // The shortcut does not interject this message; it says why instead of doing nothing.
+              e.preventDefault();
+              e.stopPropagation();
+              setRowActivity((activity) => activatePendingQueueRowFocus(activity, entry.clientId));
+              setHeldSteerTipClientId(entry.clientId);
+              return;
+            }
             if (!canSteerRow || !onSteer || isSteering || isRowEditing) return;
             e.preventDefault();
             e.stopPropagation();
@@ -486,8 +507,9 @@ export function PendingQueuePanel({
           return (
             <div
               role="listitem"
-              tabIndex={canSteerRow && !isPendingEnqueue ? 0 : undefined}
+              tabIndex={(canSteerRow || steerHeldRow) && !isPendingEnqueue ? 0 : undefined}
               aria-keyshortcuts={canSteerRow ? 'Meta+Enter Control+Enter' : undefined}
+              aria-describedby={steerHeldRow ? heldSteerReasonId : undefined}
               onKeyDown={handleRowKeyDown}
               onMouseEnter={() => {
                 setRowActivity((activity) =>
@@ -691,6 +713,11 @@ export function PendingQueuePanel({
                 </>
               )}
 
+              {steerHeldRow && (
+                <span id={heldSteerReasonId} className="sr-only">
+                  {t('newChat.pendingQueue.steerHeldForAgySwitch')}
+                </span>
+              )}
               {isPendingEnqueue ? (
                 <span
                   aria-hidden
@@ -705,6 +732,37 @@ export function PendingQueuePanel({
                   data-pending-queue-row-action="true"
                   className={cn('flex shrink-0 items-center justify-end gap-1', actionSlotWidth)}
                 >
+                  {steerHeldRow && (
+                    <Tip
+                      text={t('newChat.pendingQueue.steerHeldForAgySwitch')}
+                      side="top"
+                      controlledOpen={heldSteerTipClientId === entry.clientId ? true : undefined}
+                      onOpenChange={() => setHeldSteerTipClientId(null)}
+                      // A sentence, not a path: it wraps between words.
+                      contentClassName="max-w-[320px] whitespace-normal break-words"
+                    >
+                      {/* Not the native `disabled`: the button has to take focus, hover and a tap
+                          so that the reason can be reached every way. It does nothing else. */}
+                      <button
+                        type="button"
+                        aria-disabled="true"
+                        aria-label={t('newChat.pendingQueue.steerAria', { index: originalIdx + 1 })}
+                        aria-describedby={heldSteerReasonId}
+                        data-steer-held="true"
+                        onClick={(e) => {
+                          // Enter or Space on the focused button is a click too. Without this the
+                          // tooltip's own "close on click" runs after it and the reason goes away.
+                          e.preventDefault();
+                          setHeldSteerTipClientId(entry.clientId);
+                        }}
+                        onBlur={() => setHeldSteerTipClientId(null)}
+                        onMouseLeave={() => setHeldSteerTipClientId(null)}
+                        className={cn(iconButtonClassName, 'cursor-not-allowed opacity-50 hover:text-[var(--settings-section-desc)]')}
+                      >
+                        <ArrowUp size={12} strokeWidth={2.25} aria-hidden />
+                      </button>
+                    </Tip>
+                  )}
                   {canSteerRow && onSteer && (
                     <Tip text={steerTipText} side="top">
                       <button

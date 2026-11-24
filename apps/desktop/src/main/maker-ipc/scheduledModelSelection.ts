@@ -4,6 +4,7 @@ import { resolveCompatibleSessionRuntimeEffort } from './sessionRuntimeControl';
 import { parseScheduledModelBaseline, type ScheduledModelBaseline } from '../../shared/scheduledModelBaseline';
 import { throwIpcError } from '../utils/ipcValidate';
 import { isIpcError } from '../../shared/ipc-errors';
+import { AgentSwitchPermissionUnconfirmedError } from './agentSwitchPermissionAgreement';
 
 /** A saved automation choice, applied only while its target's send lock is held. */
 export interface ScheduledModelSelection {
@@ -39,6 +40,23 @@ export function createScheduledModelScope(deps: {
   /** Caller holds the send lock; true means the saved companion route was
    * applied and the exact failed baseline was retired without restoring it. */
   recoverUnavailableBaseline?: (sessionId: string, expectedBaseline: string) => Promise<boolean>;
+  /**
+   * Putting the saved choice back would switch the task into Antigravity and change its
+   * permissions, which needs the user's agreement. The host registers it as a pending switch the
+   * user can confirm or withdraw in the task. The baseline is kept: it is the durable record of
+   * what to go back to, and where, until the user confirms, withdraws or picks something else,
+   * so a restart does not leave the task on the schedule's model without a word.
+   * `current` is where the task runs now.
+   */
+  holdBaselineForConfirmation?: (
+    sessionId: string, baseline: ScheduledModelBaseline, current: { agentDeviceId?: string | null },
+  ) => boolean;
+  /**
+   * A pending switch already decides what the task runs next: the one registered above, or a
+   * newer choice of the user's. Applying the baseline again would only be refused again, on every
+   * send, and would stand in the way of that choice.
+   */
+  baselineAwaitsPendingSwitch?: (sessionId: string, baseline: ScheduledModelBaseline) => boolean;
 }) {
   const assertOwner = (owner: string | undefined) => {
     if (owner !== deps.ownerEpoch?.()) throw new Error('Account changed during scheduled model selection');
@@ -99,6 +117,7 @@ export function createScheduledModelScope(deps: {
       // A permanent save owns the next selection, including across restart.
       // Keep its old baseline for retries until reconciliation accepts the save.
       if (baseline.pendingBotProfileVersion) return;
+      if (deps.baselineAwaitsPendingSwitch?.(sessionId, baseline)) return;
       let restoredProfile: void | ScheduledModelSelection;
       try {
         restoredProfile = await deps.apply(sessionId, baseline);
@@ -110,6 +129,11 @@ export function createScheduledModelScope(deps: {
           await deps.recoverUnavailableBaseline?.(sessionId, row!.baseline!)) {
           assertOwner(owner);
           return;
+        }
+        // Not sent either way: the caller refuses this message. What changes is what comes
+        // next: a pending switch the user can answer, with the baseline kept as its record.
+        if (error instanceof AgentSwitchPermissionUnconfirmedError) {
+          deps.holdBaselineForConfirmation?.(sessionId, baseline, { agentDeviceId: row!.profile.agentDeviceId });
         }
         throw error;
       }

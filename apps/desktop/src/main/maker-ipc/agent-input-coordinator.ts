@@ -45,6 +45,7 @@ import { AUTO_BRIDGE_BATCH_HEADER_RESERVE, AUTO_BRIDGE_BATCH_MAX_CHARS, AUTO_BRI
 import { AUTO_REVIEW_DELEGATED_CONTINUATION, readAutoReviewUserText } from './autoReviewUserIntent.js';
 import type { createMessage as createDbMessage } from '../localDb/ipc/messages.js';
 import { REPLY_QUOTE_SOURCE_CONTENT } from './chatReplyQuoteNote.js';
+import { AgentSwitchPermissionUnconfirmedError } from './agentSwitchPermissionAgreement.js';
 import type { touchUserSendInDb } from '../localDb/ipc/sessions.js';
 import type { AgentInputQueueSnapshotState } from '../localDb/agentInputQueueSnapshots.js';
 import {
@@ -793,6 +794,40 @@ interface SessionInputState {
    * 放行;而用户显式 Stop 出来的暂停必须保持,不许新输入静默释放旧队列。
    */
   queuePausedByRestore: boolean;
+  /**
+   * The queue is paused because the banner of a message held for a switch into Antigravity was
+   * closed (clearError), and for no other reason since. Only such a pause is lifted when the
+   * switch is agreed to for a send. It is about the queue, not one row: the held message may have
+   * been merged or moved meanwhile. Every other write of `queuePaused` drops it: a Stop, a
+   * rewind, Continue sending.
+   */
+  heldSwitchPause?: boolean;
+  /**
+   * The hold (agySwitchHoldId) the user has just said may go, by confirming on that message's
+   * banner. Checked once, where the next message is handed to the engine: if that message is not
+   * in this hold, it is held instead of sent. Between the answer and the dispatch the queue can
+   * change (the message removed, edited, another moved ahead), and the agreement recorded for the
+   * switch would let whatever is first then go out on an answer that was about something else.
+   */
+  agySwitchLetGo?: string | null;
+  /**
+   * The holds (agySwitchHoldId) the user has let go, by one of the only two actions that send a
+   * message held for a switch into Antigravity: confirming on that message's own banner, or
+   * "Continue sending" (which is about every message in the queue at that moment). The dispatch
+   * sends a held message only if its hold is here; anything else that sets the queue moving (a
+   * new message releasing a pause, an interjected message, a merge, a restart) reaches the held
+   * message and holds it again, with its banner. A hold's name changes when the message is held
+   * again or its content changes, so an entry here never outlives what the user acted on; the
+   * set is emptied when the queue is paused.
+   */
+  agySwitchHoldsLetGo?: Set<string>;
+  /**
+   * The message that was stopped at the dispatch only because an answer about another message
+   * was still outstanding (agySwitchLetGo). It is stopped once, with the banner, and is not
+   * marked as held for the switch: it was never refused for the switch itself, and the mark
+   * would keep it from ever going if the switch were withdrawn afterwards (DD 7107111403, 3).
+   */
+  agySwitchAnswerLapsedOn?: string | null;
   /** Queue head whose steer delivery is unknown; its protective pause needs an explicit user decision. */
   uncertainDeliveryClientId: string | null;
   queueExpanded: boolean;
@@ -1835,6 +1870,7 @@ export class AgentInputCoordinator {
         // A cold Stop reserved its pause until the unknown queue was read.
         // An actually empty queue keeps the warm empty-Stop input behavior.
         state.queuePaused = false;
+        state.heldSwitchPause = false;
         state.queuePausedByRestore = false;
         this.emit(sessionId);
         return;
@@ -1868,6 +1904,7 @@ export class AgentInputCoordinator {
     // paused even while the old vendor turn still reports itself as running.
     if (!state.queuePaused && (wasQuiet || state.orcaReportsStopped === true)) {
       state.queuePaused = true;
+      state.heldSwitchPause = false;
       state.queuePausedByRestore = true;
     }
     log.info('restored queued input from crash snapshot', {
@@ -2013,7 +2050,22 @@ export class AgentInputCoordinator {
   pausePendingQueueForRewind(sessionId: string): AgentInputProjection {
     const state = this.getState(sessionId);
     this.blockAutomaticOrcaReports(state);
+    this.endAgySwitchQuestions(state);
     state.queuePaused = state.pendingQueue.length > 0 || state.pendingCompacts.length > 0;
+    state.heldSwitchPause = false;
+    // The banner of a message held for a switch into Antigravity would stay up over a queue that
+    // is now paused: its button would ask, record the agreement and send nothing, since only
+    // "Continue sending" starts a paused queue. It is taken down as if the user had closed it;
+    // the message stays where it is and the paused queue shows "Continue sending".
+    const heldHead = state.recovery?.kind === 'queue-head' ? state.pendingQueue[0] : undefined;
+    if (state.queuePaused && heldHead && state.recovery?.kind === 'queue-head'
+      && heldHead.clientId === state.recovery.clientId && heldHead.awaitsAgySwitchConfirmation === true) {
+      state.error = null;
+      clearErrorProjectionSignals(state);
+      state.stickyError = null;
+      state.recovery = null;
+      state.heldSwitchPause = true;
+    }
     state.queuePausedByRestore = false;
     this.emit(sessionId);
     return this.getProjection(sessionId);
@@ -2131,6 +2183,7 @@ export class AgentInputCoordinator {
         item.orcaReportDelivery.recoveryBlocked = true;
         if (!state.queuePaused) {
           state.queuePaused = true;
+          state.heldSwitchPause = false;
           state.queuePausedByRestore = true;
         }
       } else if (!item.orcaReportDelivery.recoveryBlocked) {
@@ -2200,7 +2253,10 @@ export class AgentInputCoordinator {
     // 派发不出去,会话直到重启都处于"全部排队"死锁。用户显式 Stop 的暂停
     // (queuePausedByRestore=false)不受影响;Orca 等 main 侧自动投递不带本 flag。
     if (opts?.resumeRestorePausedQueue && state.queuePaused && state.queuePausedByRestore) {
+      // The new message releases the pause; it lets no held message go (see agySwitchHoldsLetGo).
+      state.agySwitchHoldsLetGo?.clear();
       state.queuePaused = false;
+      state.heldSwitchPause = false;
       state.queuePausedByRestore = false;
       log.info('crash-restored paused queue released by explicit user input', {
         sessionId,
@@ -2241,7 +2297,11 @@ export class AgentInputCoordinator {
         return this.getProjection(sessionId);
       }
       const abandoned = state.pendingQueue.find((q) => q.clientId === abandonedClientId);
-      if (abandoned) {
+      // A head held for the user's confirmation of a switch into Antigravity did not fail, and
+      // "not now" is not "discard": a new message does not replace it. It keeps its place and
+      // its banner, and the new message waits behind it. Removing it is the user's explicit act.
+      const heldForConfirmation = abandoned?.awaitsAgySwitchConfirmation === true;
+      if (abandoned && !heldForConfirmation) {
         state.pendingQueue = state.pendingQueue.filter((q) => q.clientId !== abandonedClientId);
         this.removePendingCompactWaitClientId(state, abandonedClientId);
         // 与 remove() 同口径:摘除消息时同步清其 edit lock,否则留下指向不存在
@@ -2254,10 +2314,12 @@ export class AgentInputCoordinator {
           clientId: abandonedClientId,
         });
       }
-      state.error = null;
-      clearErrorProjectionSignals(state);
-      state.stickyError = null;
-      state.recovery = null;
+      if (!heldForConfirmation) {
+        state.error = null;
+        clearErrorProjectionSignals(state);
+        state.stickyError = null;
+        state.recovery = null;
+      }
     }
     // 用户点「继续任务」表达的是恢复刚才中断/失败的 turn，必须先于此前
     // 已排队的新任务执行；普通 composer / Orca / scheduler 输入仍保持 FIFO。
@@ -2276,6 +2338,11 @@ export class AgentInputCoordinator {
     } else {
       state.pendingQueue.push(item);
     }
+    // A "send this one" (agySwitchLetGo) whose message was removed before it could go stays, so
+    // that what was queued behind it is not sent on that answer. Once the queue has emptied
+    // there is nothing left that it could wrongly send: a message arriving now is a new send,
+    // with its own question where one is due, and must not be held on account of the old answer.
+    if (state.agySwitchLetGo && state.pendingQueue.length === 1) state.agySwitchLetGo = null;
     // scheduler 撞忙排队不算"用户活跃":userSendAt 是 B1 活跃礼让的判据,自动化
     // 入队若 bump 它,接下来 10 分钟内同会话其它心跳会被误当"用户正在远程控制"
     // 而静默顺延(PR #972 review P2)。侧栏排序的 bump 语义保留在派发时刻 ——
@@ -2693,6 +2760,11 @@ export class AgentInputCoordinator {
     // relationship check. Read the host-owned row first: UI projections omit
     // the receipt, and queue-to-steer must not silence an existing user turn.
     if (item.botTaskCoordination) return false;
+    // "Interject" hands a queued message to the turn that is running, on the engine it runs on,
+    // without the send step that would apply a pending switch or refuse for want of the user's
+    // agreement. A message held for a switch into Antigravity was not written for that engine:
+    // it is not steered. It stays where it is in the queue, with its entry to confirm.
+    if (item.awaitsAgySwitchConfirmation === true) return false;
     if (state.steeringQueueClientIds.includes(item.clientId)) {
       log.info('steer ignored: duplicate in-flight clientId (control-side resend)', {
         sessionId,
@@ -2763,7 +2835,9 @@ export class AgentInputCoordinator {
     this.clearErrorUnlessQueueHeadBlocked(state, item.clientId);
     // UI steer doubles as "resume"; an agent-chosen steer only runs when the queue is
     // not paused and must never release a pause the user owns.
+    if (!opts?.controlInput && state.queuePaused) state.agySwitchHoldsLetGo?.clear();
     if (!opts?.controlInput) state.queuePaused = false;
+    state.heldSwitchPause = false;
     if (!state.steeringQueueClientIds.includes(item.clientId)) {
       state.steeringQueueClientIds.push(item.clientId);
     }
@@ -2827,6 +2901,7 @@ export class AgentInputCoordinator {
           this.removePendingCompactWaitClientId(cur, item.clientId);
           cur.queueEditLocks = cur.queueEditLocks.filter((id) => id !== item.clientId);
           if (cur.pendingQueue.length === 0) cur.queuePaused = false;
+          cur.heldSwitchPause = false;
         }
         observation.policyBlocked = true;
         this.deps.onUserMessageBlocked?.(sessionId, item, verdict);
@@ -3059,6 +3134,7 @@ export class AgentInputCoordinator {
           this.movePendingCompactWaitClientIdToFront(latest, item.clientId);
           latest.recovery = { kind: 'queue-head', clientId: item.clientId };
           latest.queuePaused = false;
+          latest.heldSwitchPause = false;
           latest.queuePausedByRestore = false;
         }
         // 投递结果不确定(ack 超时 / post-send abort,见 isSteerDeliveryUncertainError):
@@ -3069,6 +3145,7 @@ export class AgentInputCoordinator {
         else if (isSteerDeliveryUncertainError(err)) {
           this.prependQueueHeadIfMissing(latest, item);
           latest.queuePaused = true;
+          latest.heldSwitchPause = false;
           // 不确定投递的保护性暂停必须由用户显式处置,不许新输入静默放行。
           latest.queuePausedByRestore = false;
           latest.uncertainDeliveryClientId = item.clientId;
@@ -3087,6 +3164,7 @@ export class AgentInputCoordinator {
         // generation 守卫:clearSession 是用户显式重置,不把消息塞回已清空的会话。
         this.prependQueueHeadIfMissing(latest, item);
         latest.queuePaused = true;
+        latest.heldSwitchPause = false;
         // 同上:不确定投递的保护性暂停,不许新输入静默放行。
         latest.queuePausedByRestore = false;
         latest.uncertainDeliveryClientId = item.clientId;
@@ -3139,6 +3217,7 @@ export class AgentInputCoordinator {
         this.removePendingCompactWaitClientId(accepted, item.clientId);
         accepted.queueEditLocks = accepted.queueEditLocks.filter((id) => id !== item.clientId);
         if (accepted.pendingQueue.length === 0) accepted.queuePaused = false;
+        accepted.heldSwitchPause = false;
       }
       const detachedAcceptedTurn: ActiveTurn = {
         item,
@@ -3177,6 +3256,7 @@ export class AgentInputCoordinator {
       this.removePendingCompactWaitClientId(accepted, item.clientId);
       accepted.queueEditLocks = accepted.queueEditLocks.filter((id) => id !== item.clientId);
       if (accepted.pendingQueue.length === 0) accepted.queuePaused = false;
+      accepted.heldSwitchPause = false;
     }
     // 乱序窗口快照:turn 在 ack 等待期间以 terminal error 终结时,onTurnEvent
     // 已建立的失败状态(error / recovery = 旧 turn 的 Retry 入口)会被下面的
@@ -3371,7 +3451,9 @@ export class AgentInputCoordinator {
       state.pendingQueue.length > 0
       || (this.deps.loadQueueSnapshot && !this.restoredQueueSessions.has(sessionId))
     ));
+    this.endAgySwitchQuestions(state);
     state.queuePaused = shouldPause;
+    state.heldSwitchPause = false;
     // Ordinary Stop remains explicit. Restart, like crash recovery, may be
     // released by the next deliberate user input, never by background enqueue.
     state.queuePausedByRestore = shouldPause && opts?.resumeOnUserInput === true;
@@ -3421,9 +3503,45 @@ export class AgentInputCoordinator {
     return this.getProjection(sessionId);
   }
 
-  resume(sessionId: string): AgentInputProjection {
+  /**
+   * An answer to a question card was queued while the queue was paused, and the queue is to move
+   * so that the answer reaches the agent. The answer is not "Continue sending": a message held
+   * for a switch into Antigravity stays held. The answer is placed ahead of the held messages
+   * (it answers the agent's question; it was not typed behind them) and the pause is lifted for
+   * it alone: it goes, and the queue stops again at the first held message.
+   */
+  resumeForQueuedAnswer(sessionId: string, answerClientId: string): AgentInputProjection {
+    // Checked before anything is moved. A guest of a shared task may send but may not reorder:
+    // the message named here is moved only if it is the guest's own, or the name would be a way
+    // to put anybody's queued message first (DD 7119951458).
+    const sharedTask = getDeviceLinkInvokeContext()?.sharedTask;
+    assertSharedTaskQueueMutation(sharedTask, sessionId, 'input.send');
+    const state = this.getState(sessionId);
+    const firstHeld = state.pendingQueue.findIndex(item => item.awaitsAgySwitchConfirmation === true);
+    const at = state.pendingQueue.findIndex(item => item.clientId === answerClientId);
+    const author = at >= 0 ? state.pendingQueue[at]!.sharedTaskAuthor : undefined;
+    const callersOwn = !sharedTask || (!!author && author.sharedTaskId === sharedTask.author.sharedTaskId
+      && author.memberId === sharedTask.author.memberId);
+    if (firstHeld >= 0 && at > firstHeld && callersOwn) {
+      const next = [...state.pendingQueue];
+      const [answer] = next.splice(at, 1);
+      next.splice(firstHeld, 0, answer!);
+      state.pendingQueue = next;
+      // A banner still up for the held message would keep the answer from going.
+      this.takeDownHeldBannerLeftBehind(state);
+    }
+    return this.resume(sessionId);
+  }
+
+  /**
+   * Lifts the queue's pause. `continueSending` is the user's "Continue sending" on the paused
+   * queue; every other caller (an answer to a question card, a supplementary answer) only needs
+   * the queue to move and says nothing about a message held for a switch into Antigravity.
+   */
+  resume(sessionId: string, opts?: { continueSending?: boolean; heldMessage?: string | null }): AgentInputProjection {
     assertSharedTaskQueueMutation(getDeviceLinkInvokeContext()?.sharedTask, sessionId, 'input.send');
     const state = this.getState(sessionId);
+    const wasPaused = state.queuePaused;
     state.orcaReportsStopped = false;
     const recovery = state.recovery;
     const pausedQueueHeadRecoveryClientId =
@@ -3433,6 +3551,31 @@ export class AgentInputCoordinator {
         ? recovery.clientId
         : null;
     state.queuePaused = false;
+    state.heldSwitchPause = false;
+    // "Continue sending" on a queue paused in front of a held message lets that one message go:
+    // the one the user sees the queue stopped at. Not the held messages behind it, at each of
+    // which the queue stops again; not when the queue was not paused (a window showing an old
+    // state); and not on a resume that is not the user's "Continue sending" (an answer to a
+    // question card lifted the pause and sent the held message ahead of the answer: DD
+    // 7107111403, item 1).
+    // On a queue that was not paused nothing is let go and nothing that was let go is taken
+    // back: a "Continue sending" from a window showing an old state must not undo a confirmation
+    // just given on the banner (DD 7119951458).
+    if (wasPaused) {
+      state.agySwitchLetGo = null;
+      state.agySwitchHoldsLetGo = new Set();
+    }
+    const pausedAt = state.pendingQueue[0];
+    // When the click says which held message the window showed the queue stopped at, it lets go
+    // that one only: another window may have reordered the queue before the click arrived.
+    // A click that names no held message (null: the window showed none at the head) or another one
+    // lets nothing held go. Only a click without the field (an older client) keeps the old rule.
+    const namesAnother = opts?.heldMessage !== undefined && opts.heldMessage !== pausedAt?.agySwitchHoldId;
+    if (opts?.continueSending === true && wasPaused && pausedAt?.awaitsAgySwitchConfirmation === true && !namesAnother) {
+      // A row stored by a version that did not name holds.
+      if (!pausedAt.agySwitchHoldId) pausedAt.agySwitchHoldId = crypto.randomUUID();
+      (state.agySwitchHoldsLetGo ??= new Set()).add(pausedAt.agySwitchHoldId);
+    }
     state.queuePausedByRestore = false;
     state.uncertainDeliveryClientId = null;
     if (pausedQueueHeadRecoveryClientId !== null) {
@@ -3455,8 +3598,8 @@ export class AgentInputCoordinator {
   }
 
   /** 用户点「重试 / 继续任务」。行为见 performRetryLastError。 */
-  async retryLastError(sessionId: string): Promise<AgentInputProjection> {
-    const { projection } = await this.performRetryLastError(sessionId);
+  async retryLastError(sessionId: string, agySwitchHeldMessage?: string): Promise<AgentInputProjection> {
+    const { projection } = await this.performRetryLastError(sessionId, agySwitchHeldMessage === undefined ? undefined : { agySwitchHeldMessage });
     return projection;
   }
 
@@ -3499,11 +3642,43 @@ export class AgentInputCoordinator {
       attemptToken?: number;
       /** Quota/group continuation shares the wait token, but retains its actual recovery owner. */
       usageLimitWait?: { token: number; info: AutoResumeInfo; recoveryOwner: 'quota-reset' | 'provider-group' };
+      /** The hold the user's retry is about, as the window read it when it asked (agySwitchHoldId). */
+      agySwitchHeldMessage?: string;
     },
   ): Promise<{ projection: AgentInputProjection; outcome: AutoRetryOutcome }> {
     const state = this.getState(sessionId);
     const recovery = state.recovery;
+    // A retry that names a hold is about that held message and nothing else. Whatever the task
+    // shows by the time it arrives (the banner of another queued message, the error of a turn,
+    // nothing), it retries that message in that hold at the head of the queue, or it retries
+    // nothing and changes nothing: it must not fall through to an ordinary retry of something the
+    // user never clicked on (QQ on 816dee58). A retry that names none is an ordinary one.
+    if (opts?.agySwitchHeldMessage !== undefined) {
+      const head = state.pendingQueue[0];
+      const stillThatOne = recovery?.kind === 'queue-head' && !!head && head.clientId === recovery.clientId
+        && head.awaitsAgySwitchConfirmation === true && head.agySwitchHoldId === opts.agySwitchHeldMessage
+        // A queue the user paused is started by "Continue sending" only.
+        && !state.queuePaused;
+      if (!stillThatOne) return { projection: this.getProjection(sessionId), outcome: 'superseded' };
+    }
     if (!recovery) return { projection: this.getProjection(sessionId), outcome: 'superseded' };
+    // A retry of a message held for a switch into Antigravity is the user saying "send this
+    // one". It says which one: the hold the window showed. A retry that names another hold (the
+    // message was removed, edited, merged or held anew since) or none (an older window) retries
+    // nothing; the message that is held now has its own banner to act on.
+    if (!opts?.auto && !opts?.usageLimitWait && recovery.kind === 'queue-head') {
+      // The banner is that of the message the recovery names, wherever that message is now: if
+      // another was moved ahead of it, the retry would send that other one.
+      const head = state.pendingQueue[0];
+      const held = state.pendingQueue.find(item => item.clientId === recovery.clientId && item.awaitsAgySwitchConfirmation === true);
+      if (held) {
+        if (held !== head || !held.agySwitchHoldId || opts?.agySwitchHeldMessage !== held.agySwitchHoldId) {
+          return { projection: this.getProjection(sessionId), outcome: 'superseded' };
+        }
+        state.agySwitchLetGo = held.agySwitchHoldId;
+        (state.agySwitchHoldsLetGo ??= new Set()).add(held.agySwitchHoldId);
+      }
+    }
     const usageWait = opts?.usageLimitWait;
     // 等待计划在每个 await 之后都要复核：用户可能在读库期间发了消息 / 收下错误 / 取消等待。
     const usageWaitSuperseded = (): boolean =>
@@ -3831,12 +4006,62 @@ export class AgentInputCoordinator {
     // 已清并回滚额度)。
     state.autoResumePending = null;
     state.autoResumeAttemptToken = null;
+    const heldHeadClientId = state.recovery?.kind === 'queue-head' ? state.recovery.clientId : null;
     if (state.recovery?.kind !== 'queue-head') {
       state.recovery = null;
+    } else if (state.pendingQueue.some(item => item.clientId === heldHeadClientId && item.awaitsAgySwitchConfirmation === true)) {
+      // Closing the banner of a message held for a switch into Antigravity. Leaving the recovery
+      // in place with no error shown would stop the queue with nothing on screen to start it
+      // again. The message stays where it is and the queue is paused instead, which the task
+      // shows with "Continue sending"; the send step holds the message again if it still must.
+      state.recovery = null;
+      state.queuePaused = true;
+      state.queuePausedByRestore = false;
+      state.heldSwitchPause = true;
+      this.endAgySwitchQuestions(state);
     }
     this.emit(sessionId);
     if (shouldDrainTail) this.scheduleDrain(sessionId, 'clear-active-turn-error');
     return this.getProjection(sessionId);
+  }
+
+  /**
+   * The user has agreed, on the banner of a message held for the pending switch into Antigravity,
+   * that this message should go. The caller decides that it was such an answer
+   * (sessionAgentSwitchHandler.ts); an agreement that was only recorded, by the task's entry, the
+   * model picker, a change of mode or the dialog of another message's send, does not reach this.
+   * `heldMessage` is the hold the answer is about. If the message at the head of the queue is in
+   * that hold with its banner showing and the queue is not paused, the hold is lifted and the
+   * queue goes on; the dispatch checks the hold once more. The send step still decides; if the
+   * agreement does not fit, the message is held again, in a new hold. After the banner was
+   * closed, the queue stopped or the history gone back in, nothing is lifted: "Continue sending"
+   * is the way on. Returns whether a message was let go.
+   */
+  wakeHeldForAgySwitch(sessionId: string, heldMessage?: unknown): boolean {
+    const state = this.states.get(sessionId);
+    const head = state?.pendingQueue[0];
+    if (!state || !head) return false;
+    // The answer is about one hold of one message (agySwitchHoldId), the one the window showed
+    // when it asked. It lets go only that hold, and only while that message is the next to be
+    // sent. If the message was removed, edited, merged, moved back or held anew since, or the
+    // caller names no hold (an older window), nothing is let go: the caller records the agreement
+    // without a send, and whatever is held now waits for its own answer (QQ, 2026-11-23).
+    if (typeof heldMessage !== 'string' || heldMessage.length === 0) return false;
+    if (head.awaitsAgySwitchConfirmation !== true || head.agySwitchHoldId !== heldMessage) return false;
+    // Only a message whose banner is showing, in a queue that is not paused. Once the banner
+    // was closed or the queue stopped (in any window), "Continue sending" is the only way on:
+    // an answer to a dialog that another window still had open lifts no pause.
+    if (state.recovery?.kind !== 'queue-head' || state.recovery.clientId !== head.clientId) return false;
+    if (state.queuePaused) return false;
+    state.agySwitchLetGo = heldMessage;
+    (state.agySwitchHoldsLetGo ??= new Set()).add(heldMessage);
+    state.error = null;
+    clearErrorProjectionSignals(state);
+    state.stickyError = null;
+    state.recovery = null;
+    this.emit(sessionId);
+    this.scheduleDrain(sessionId, 'agy-switch-agreed');
+    return true;
   }
 
   remove(sessionId: string, clientId: string): AgentInputProjection {
@@ -3868,6 +4093,7 @@ export class AgentInputCoordinator {
       state.recovery = null;
     }
     if (state.pendingQueue.length === 0) state.queuePaused = false;
+    state.heldSwitchPause = false;
     // 等待中的那条消息被用户删掉(不论其当前位置)→ 取消本轮凭证切换等待(等待态
     // 的"取消"入口);队列清空同理。其余删除不影响等待:等待态按 clientId 绑定消息,
     // 不绑定"队首"位置。后续 drain 会为新队首重新判定 —— 仍撞 busy 就重建等待。
@@ -3986,6 +4212,17 @@ export class AgentInputCoordinator {
     const deliveryIds = [...new Set([...(current.mergedDeliveryClientIds ?? []), ...(replacement.mergedDeliveryClientIds ?? [])])];
     if (deliveryIds.length) replacement.mergedDeliveryClientIds = deliveryIds;
     if (current.clientId === replacement.clientId) {
+      // Editing the text does not change which engine the message was waiting for.
+      if (current.awaitsAgySwitchConfirmation) replacement.awaitsAgySwitchConfirmation = true;
+      else delete replacement.awaitsAgySwitchConfirmation;
+      // It does change what a confirmation to send it was about: the same hold only if what would
+      // be sent is the same, a new one otherwise, so an answer given about the old content sends
+      // nothing.
+      const sameContent = replacement.text === current.text && replacement.persistedContent === current.persistedContent
+        && replacement.files === current.files && replacement.mentions === current.mentions
+        && replacement.sessionRefs === current.sessionRefs && replacement.agentReferences === current.agentReferences;
+      if (!current.awaitsAgySwitchConfirmation) delete replacement.agySwitchHoldId;
+      else replacement.agySwitchHoldId = sameContent && current.agySwitchHoldId ? current.agySwitchHoldId : crypto.randomUUID();
       if (this.restoredQueueItems.has(current)) this.restoredQueueItems.add(replacement);
       // Editing content cannot erase or forge the host's stable retry lineage.
       replacement.retrySourceClientId = current.retrySourceClientId;
@@ -4106,6 +4343,13 @@ export class AgentInputCoordinator {
       automaticReports ? replacement : this.preserveRestoredQueueProvenance(survivor, replacement),
       ...state.pendingQueue.slice(firstIndex + presentTargets.length),
     ];
+    // Text that was held for a switch into Antigravity stays held whatever it is merged into.
+    const mergedRow = state.pendingQueue[firstIndex];
+    if (mergedRow && presentTargets.some(item => item.awaitsAgySwitchConfirmation === true)) {
+      mergedRow.awaitsAgySwitchConfirmation = true;
+      // A merged row is not the message any earlier answer was about, even under the same id.
+      mergedRow.agySwitchHoldId = crypto.randomUUID();
+    }
     const removedIds = new Set(removed.map((item) => item.clientId));
     state.recentEnqueuedClientIds = state.recentEnqueuedClientIds.filter(
       (id) => !removedIds.has(id),
@@ -4136,6 +4380,15 @@ export class AgentInputCoordinator {
     if (fromIndex === insertIndex) return this.getProjection(sessionId);
     next.splice(insertIndex, 0, entry);
     state.pendingQueue = next;
+    // The banner of a held message is about the first message in the queue. With another moved
+    // ahead of it the banner could neither send (its answer names a message that is not first)
+    // nor be closed, and the queue did not move: nothing on screen led out (DD 7107111403, item
+    // 2). It is taken down as closing it does, and the paused queue shows "Continue sending".
+    if (this.takeDownHeldBannerLeftBehind(state)) {
+      state.queuePaused = true;
+      state.queuePausedByRestore = false;
+      state.heldSwitchPause = true;
+    }
     // 拖拽重排后等待中的消息不再是队首 → 等待态失效(横幅/自动重发都以队首为目标)。
     // 清掉并重新 drain:新队首仍撞 busy 会带自己的 clientId 重建等待,不撞则直接派发。
     if (
@@ -5389,8 +5642,65 @@ export class AgentInputCoordinator {
     sessionId: string,
     state: SessionInputState,
   ): AgentInputQueuedMessage | null {
+    // A paused queue forgets which held messages were let go: what releases the pause decides anew.
+    if (state.queuePaused) state.agySwitchHoldsLetGo?.clear();
     if (this.explainDrainBlockGate(sessionId, state) !== null) return null;
-    return state.pendingQueue[0] ?? null;
+    const head = state.pendingQueue[0] ?? null;
+    if (head && this.keepsHeldForAgySwitch(sessionId, state, head)) return null;
+    return head;
+  }
+
+  /**
+   * The user closed the banner of a held message, stopped the queue or went back in the task's
+   * history. A question about a held message that a window opened before that is over: its answer
+   * and its retry must send nothing, in this window or another one that still shows the dialog.
+   * Every held message gets a new hold, so nothing asked earlier names it any more, and nothing
+   * stays let go. From here "Continue sending" is the way on (QQ on 72e7b16a, 2026-11-23).
+   */
+  private endAgySwitchQuestions(state: SessionInputState): void {
+    state.agySwitchLetGo = null;
+    state.agySwitchHoldsLetGo?.clear();
+    for (const queued of state.pendingQueue) {
+      if (queued.awaitsAgySwitchConfirmation === true) queued.agySwitchHoldId = crypto.randomUUID();
+    }
+  }
+
+  /**
+   * The banner showing is that of a message held for a switch into Antigravity, and that message
+   * is no longer first in the queue. Takes the banner down (error and recovery) and ends the
+   * questions asked on it; returns whether it did. The message keeps its mark and its place.
+   */
+  private takeDownHeldBannerLeftBehind(state: SessionInputState): boolean {
+    const recovery = state.recovery;
+    if (recovery?.kind !== 'queue-head') return false;
+    const held = state.pendingQueue.find(item => item.clientId === recovery.clientId);
+    if (!held || held.awaitsAgySwitchConfirmation !== true || state.pendingQueue[0] === held) return false;
+    state.error = null;
+    clearErrorProjectionSignals(state);
+    state.stickyError = null;
+    state.recovery = null;
+    this.endAgySwitchQuestions(state);
+    return true;
+  }
+
+  /**
+   * The next message to go is one that was held for a switch into Antigravity, and the user has
+   * not let it go: neither on its own banner nor with "Continue sending" (agySwitchHoldsLetGo).
+   * Something else set the queue moving: a new message that released a pause after a restart or
+   * a Stop, an interjected message, a merge, a move. None of those asked about this message, so
+   * it is not handed to the engine: the queue is paused in front of it, as it is after the
+   * message's banner was closed, and "Continue sending" is the way on. No banner is raised and
+   * no question asked (QQ's rulings of 2026-11-23; DD 7091620535, items 1 and 2).
+   */
+  private keepsHeldForAgySwitch(sessionId: string, state: SessionInputState, head: AgentInputQueuedMessage): boolean {
+    if (head.awaitsAgySwitchConfirmation !== true || head.autoResume) return false;
+    if (head.agySwitchHoldId && state.agySwitchHoldsLetGo?.has(head.agySwitchHoldId) === true) return false;
+    state.queuePaused = true;
+    state.queuePausedByRestore = false;
+    state.heldSwitchPause = true;
+    log.info('queue paused in front of a message held for a switch into Antigravity', { sessionId, clientId: head.clientId });
+    this.emit(sessionId);
+    return true;
   }
 
   private getDrainableCompact(
@@ -5651,7 +5961,25 @@ export class AgentInputCoordinator {
       // post-dispatch acknowledgements must remain older than that marker.
       const preVendorDispatchAt = Math.max(0, Date.now() - 1);
       const appMessageGuard = queuedAppMessageGuard(head);
-      const result = await this.deps.sendToAgent(sessionId, wireUserMessage, head.createOpts, {
+      // The user's "send this one", given on the banner of a held message, is used here, once,
+      // on the message that is actually going out. If that is another message than the one the
+      // answer named, it is held (as the host's send step holds a message) instead of sent on an
+      // answer that was not about it.
+      // A message that was held for the switch goes only in a hold the user let go, by its
+      // banner or by "Continue sending" (agySwitchHoldsLetGo): whatever else set the queue moving
+      // did not ask about it (DD 7091620535, items 1 and 2).
+      const dispatching = this.getState(sessionId);
+      const letGo = dispatching.agySwitchLetGo ?? null;
+      const heldRow = head.awaitsAgySwitchConfirmation === true;
+      const holdLetGo = !!head.agySwitchHoldId && dispatching.agySwitchHoldsLetGo?.has(head.agySwitchHoldId) === true;
+      const notTheOneLetGo = !head.autoResume && (heldRow ? !holdLetGo : letGo !== null);
+      if (!head.autoResume) dispatching.agySwitchLetGo = null;
+      dispatching.agySwitchAnswerLapsedOn = notTheOneLetGo && !heldRow ? head.clientId : null;
+      const heldInstead = (): AgentInputSendResult => {
+        const refusal = new AgentSwitchPermissionUnconfirmedError();
+        return { kind: 'host-send', accepted: false, code: refusal.code, message: refusal.message };
+      };
+      const result = notTheOneLetGo ? heldInstead() : await this.deps.sendToAgent(sessionId, wireUserMessage, head.createOpts, {
         ...(appMessageGuard || taskActionGuard ? { [MCP_APP_MESSAGE_GUARD]: async () => {
           try {
             await appMessageGuard?.();
@@ -6031,6 +6359,7 @@ export class AgentInputCoordinator {
     }
     const message = sendFailureMessage(result);
     const logFields = sendFailureLogFields(result);
+    const heldForAgySwitch = result.kind === 'host-send' && result.code === 'AGENT_SWITCH_PERMISSION_UNCONFIRMED';
 
     if (!active.persisted) {
       if (isSessionRunningSendFailure(result)) {
@@ -6056,6 +6385,20 @@ export class AgentInputCoordinator {
         latest.pendingQueue = [item, ...latest.pendingQueue];
         this.prependPendingCompactWaitClientId(latest, item.clientId);
       }
+      // Outlives the pending switch it waits for (see the field). Not for a message stopped
+      // only on account of an answer about another one: its ordinary retry sends it.
+      const stoppedForAnotherAnswer = latest.agySwitchAnswerLapsedOn === item.clientId;
+      latest.agySwitchAnswerLapsedOn = null;
+      if (heldForAgySwitch && !stoppedForAnotherAnswer) {
+        for (const queued of latest.pendingQueue) {
+          if (queued.clientId === item.clientId) {
+            queued.awaitsAgySwitchConfirmation = true;
+            // A new hold: an answer given about an earlier one does not carry over to it.
+            queued.agySwitchHoldId = crypto.randomUUID();
+          }
+        }
+      }
+      if (latest.agySwitchLetGo !== undefined) latest.agySwitchLetGo = null;
       this.clearCredentialSwitchWait(latest);
       latest.error = message;
       clearErrorProjectionSignals(latest);
@@ -6839,10 +7182,17 @@ export class AgentInputCoordinator {
     }
     this.abandonActiveTurnRecoveryForUserAction(state);
     this.clearErrorUnlessQueueHeadBlocked(state, item.clientId);
+    // Interjecting sends this message; it lets no held message go (see agySwitchHoldsLetGo).
+    if (state.queuePaused) state.agySwitchHoldsLetGo?.clear();
     state.queuePaused = false;
+    state.heldSwitchPause = false;
     this.clearSteeringMarker(state, item.clientId);
     state.queueEditLocks = state.queueEditLocks.filter((id) => id !== item.clientId);
     this.movePreparedItemToQueueFront(state, item, removeFromQueue);
+    // Interjected in front of a held message whose banner was showing: the banner would keep the
+    // queue from moving, so the interjected message was reported as interjected and never sent.
+    // The banner is taken down; this message goes, and the queue then stops at the held one.
+    this.takeDownHeldBannerLeftBehind(state);
     this.emit(sessionId);
     this.scheduleDrain(sessionId, 'steer-fallback');
   }

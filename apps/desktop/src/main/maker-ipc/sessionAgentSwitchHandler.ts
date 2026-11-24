@@ -48,7 +48,11 @@ import {
 } from './agentHandoff.js';
 import { throwIpcError } from '../utils/ipcValidate.js';
 import { shouldApplyExclusiveProviderRerouteLive } from '../maker-host/model-route-guard-catalog.js';
-import { dbToMakerAgentKind, makerToDbAgentKind, normalizeDbAgentKind } from '../../shared/agentKindConversion.js';
+import { agySwitchPermissionChange, dbToMakerAgentKind, makerToDbAgentKind, normalizeDbAgentKind, permissionModeAfterSwitchToAgy } from '../../shared/agentKindConversion.js';
+import {
+  AgentSwitchPermissionUnconfirmedError, agySwitchPermissionIsUnconfirmed, parseAgySwitchPermissionAgreement,
+  type AgySwitchPermissionAgreement,
+} from './agentSwitchPermissionAgreement.js';
 import { decideProviderGroupFailure, providerGroupFailureSignals } from '../provider-group/failurePolicy.js';
 
 function throwIfAgentSwitchAborted(signal: AbortSignal | undefined): void {
@@ -193,6 +197,8 @@ export interface AgentSwitchSessionRow {
   source?: string | null;
   /** Agent 在哪台电脑运行(null / 缺省 = 任务所在电脑)。 */
   agentDeviceId?: string | null;
+  /** The stored permission mode; read to check a pending switch into Antigravity before it applies. */
+  permissionMode?: string | null;
 }
 
 /** 与 create-session 的 agentDeviceId 校验同一口径。 */
@@ -304,6 +310,8 @@ export interface MakerSessionAgentSwitchHandlerDeps {
       /** 目标引擎下的 effort / fastMode(意图登记时由 renderer 解析,apply 时一并落库)。 */
       effort?: string;
       fastMode?: boolean | 'ultrafast';
+      /** A user's pending switch into Antigravity: commit only the permission rewrite they agreed to. */
+      agyPermissionGuard?: { agreement: AgySwitchPermissionAgreement | undefined };
       /** Agent 换电脑:undefined = 不动,null = 改回任务所在电脑。 */
       agentDeviceId?: string | null;
     },
@@ -364,12 +372,33 @@ export interface MakerSessionAgentSwitchHandlerDeps {
     intent: PublicAgentSwitchIntent | null,
   ): void;
   /**
+   * The agreement recorded on the pending switch changed; the switch itself did not. Told to the
+   * same windows as onPendingSwitchChanged, but it is not a selection: nothing that follows a
+   * user's choice of route may run from it. Falls back to onPendingSwitchChanged when absent.
+   */
+  onPendingSwitchAgreementChanged?(sessionId: string, intent: PublicAgentSwitchIntent): void;
+  /**
    * 用户选择的路由落地(应用成功)后回调 —— 供 IM 侧给任务打「脱离跟随」标记:
    * 「单独改过」按选择行为判定, 同值重选也永久脱离跟随(greptile P1 补充, PR #5155)。
    * 系统配置对齐(configStaged)与 Agent 自选不触发。**失败会抛错**: 墓碑写不进去时
    * 意图保留、下一条消息重试, 不把用户选择当成功消费。
    */
   onUserRouteSelectionLanded?(sessionId: string): void | Promise<void>;
+  /**
+   * The permission change of the task's pending switch into Antigravity is being agreed to on
+   * this computer, on the banner of a held message, so that this message goes. `heldMessage` is
+   * the hold the user was asked about, as the caller sent it (agySwitchHoldId; anything else
+   * when it sent none). Returns whether the queue still held that message in that hold and let
+   * it go; when it did not, the agreement is recorded as one given for no send.
+   */
+  onPendingSwitchAgreed?(sessionId: string, heldMessage: unknown): boolean;
+  /**
+   * A pending switch that puts back the model a schedule had replaced has been applied. The host
+   * retires the saved model before the apply step goes on: the caller may be a schedule about to
+   * run, which reads the saved model next, and a clear still on its way would then delete the one
+   * that run saves anew (DD 7085158660, item 2). Awaited; a failure leaves it to the registry.
+   */
+  onScheduledRestoreLanded?(sessionId: string): void | Promise<void>;
   log: {
     info(message: string, fields?: Record<string, unknown>): void;
     warn(message: string, fields?: Record<string, unknown>): void;
@@ -406,6 +435,19 @@ export interface SessionAgentSwitchResult {
 
 /** 登记的切换意图(下一条消息发送时刻执行;effort/fastMode 由 renderer 按目标引擎解析好带入)。 */
 export interface PendingAgentSwitchIntent {
+  /**
+   * Stamped by the registry when the intent is stored: the session's revision at that moment.
+   * Revisions only grow within a session (a clear counts too), so no two registrations share
+   * one, not even identical ones made before and after a withdrawal. An answer about "the
+   * pending switch" names the revision it was asked about.
+   */
+  revision?: number;
+  /**
+   * Stands for the model a schedule had replaced and that could not be put back without the
+   * user's agreement (see holdAgySwitchForConfirmation). The saved model stays on record while
+   * this is pending; withdrawing it is the user's decision not to go back.
+   */
+  restoresScheduledBaseline?: true;
   /** Agent-requested complete selection, exposed by the runtime control query. */
   runtimeSource?: 'agent';
   /**
@@ -430,6 +472,20 @@ export interface PendingAgentSwitchIntent {
   confirmedContextWindow?: number;
   /** 选择同时换 Agent 所在电脑(null = 任务所在电脑)；缺省 = 位置不变。 */
   targetAgentDeviceId?: string | null;
+  /**
+   * Antigravity only: the permission rewrite the user agreed to on this computer. Checked against
+   * the stored mode when the switch is applied. Windows are told of it so that a task whose pending
+   * switch still waits for an agreement can say so; no window's copy is taken back as an agreement.
+   */
+  agyPermissionAgreement?: AgySwitchPermissionAgreement;
+  /**
+   * The agreement above was given where the user was told a message would go out with it: in the
+   * dialog a send shows, on the banner of a held message, or with the engine pick itself. Only
+   * such an agreement lets a held message go by itself. The task's own entry says "this sends no
+   * message": an agreement from there is recorded without this, and a held message stays where
+   * it is until the user sends it. (JJ 7084937114, QQ's ruling on the entry.)
+   */
+  agyPermissionAgreementForSend?: true;
   /**
    * Pi-only：目标模型的思考开关意图（renderer 记忆，缺省开）。发送时刻回放暂存
    * 选择时必须一并应用，否则上一模型的 off 会残留——Pi 的 set_model 不重置
@@ -466,6 +522,25 @@ export interface PublicAgentSwitchIntent {
   fastMode?: boolean | 'ultrafast';
   /** 只在换 Agent 所在电脑时出现(null = 任务所在电脑)；旧控制端忽略。 */
   agentDeviceId?: string | null;
+  /**
+   * Antigravity only: the permission rewrite agreed for this pending switch, or null when none
+   * was. A task's window shows its confirmation entry from this and the stored mode. Older
+   * windows ignore it.
+   */
+  agyPermissionAgreement?: AgySwitchPermissionAgreement | null;
+  /**
+   * Antigravity only: which registration this is (see PendingAgentSwitchIntent.revision). A
+   * window sends it back with an agreement, so that the agreement lands on the registration the
+   * user was shown and on no other.
+   */
+  agyPermissionRevision?: number;
+  /**
+   * Antigravity only: the recorded agreement was given where a message was to go out with it (see
+   * PendingAgentSwitchIntent). A window resends a held message by itself only on such a one.
+   */
+  agyPermissionAgreementForSend?: true;
+  /** The switch was staged by configuration, not picked by the user in this task. */
+  configStaged?: true;
 }
 
 /**
@@ -495,10 +570,126 @@ export function projectPendingAgentSwitchIntent(
     ...(intent.effort ? { effort: intent.effort } : {}),
     ...((typeof intent.fastMode === 'boolean' || intent.fastMode === 'ultrafast') ? { fastMode: intent.fastMode } : {}),
     ...(intent.targetAgentDeviceId !== undefined ? { agentDeviceId: intent.targetAgentDeviceId } : {}),
+    ...(intent.targetAgentKind === 'agy' ? { agyPermissionAgreement: intent.agyPermissionAgreement ?? null } : {}),
+    ...(intent.targetAgentKind === 'agy' && typeof intent.revision === 'number' ? { agyPermissionRevision: intent.revision } : {}),
+    ...(intent.targetAgentKind === 'agy' && intent.agyPermissionAgreement && intent.agyPermissionAgreementForSend === true
+      ? { agyPermissionAgreementForSend: true as const } : {}),
+    ...(intent.targetAgentKind === 'agy' && intent.configStaged === true ? { configStaged: true as const } : {}),
   };
 }
 
-export function createPendingAgentSwitchRegistry(): PendingAgentSwitchRegistry {
+/**
+ * Records the user's agreement to the permission rewrite of the switch into Antigravity that is
+ * pending right now, and nothing else: no switch is registered, replaced or applied, and no
+ * message is sent. The caller names the registration the user was asked about by the revision
+ * the host stamped on it. A switch withdrawn and registered again is another registration even
+ * when every parameter is the same, so an answer to an old question cannot authorize a newer
+ * switch: when the revision is not the pending one's, nothing is recorded. The model and
+ * provider are compared too, as a second reading of the same thing. Resolves whether the
+ * agreement was recorded.
+ *
+ * `forSend` says the user agreed where a message was to go out with it. Only then is the host
+ * told to let a held message go. Without it the agreement is recorded and nothing is sent:
+ * that is what the task's own entry promises on screen.
+ *
+ * What is written is checked here, on the host, and not left to the window that sends it
+ * (DD 7085158660, item 5; QQ 2026-11-22). `check` carries what the host knows and what the
+ * caller declared:
+ *  - The agreement has to be about a mode the host can name: the mode the task is stored in, or,
+ *    for a change of mode the user is confirming, the mode they are changing to (`changingTo`),
+ *    and then only while the task is still in the mode the caller saw (`changingFrom`). An answer
+ *    about any other mode is an old one.
+ *  - An agreement already on record is replaced by a different one only when the caller shows
+ *    that it knew what was on record (`expected`). A request that says nothing about it, as an
+ *    older window sends, cannot replace it; neither can one that read the record before it changed.
+ * Without `check` (callers inside the host, tests of the record itself) nothing of this applies.
+ * A refused write records nothing and wakes nothing.
+ */
+export function recordAgySwitchPermissionAgreement(
+  deps: Pick<MakerSessionAgentSwitchHandlerDeps, 'pendingSwitches' | 'onPendingSwitchChanged' | 'onPendingSwitchAgreementChanged' | 'onPendingSwitchAgreed'>,
+  sessionId: string,
+  askedAbout: { revision: unknown; model: unknown; providerId: unknown },
+  agreement: unknown,
+  forSend = false,
+  check?: {
+    /** The permission mode the task is stored in now. */
+    storedMode: string | null | undefined;
+    /** What the caller says the host had on record when the user was asked: an agreement, null for none, undefined when it does not say. */
+    expected?: unknown;
+    /** A change of mode being confirmed: the mode the user is changing to, and the one the caller saw the task in. */
+    changingTo?: unknown;
+    changingFrom?: unknown;
+    /**
+     * For an agreement given for a send: which hold of which message the user was asked about
+     * (agySwitchHoldId), as the window read it when the question opened.
+     */
+    heldMessage?: unknown;
+  },
+): boolean {
+  const parsed = parseAgySwitchPermissionAgreement(agreement);
+  // An ordinary change of mode never lets a held message go, whatever else the request says
+  // (QQ, 2026-11-22). A request that declares a change of mode is one, so it is not also an
+  // agreement given for a send: the two are read apart and must not be combined by a caller.
+  if (check && typeof check.changingTo === 'string' && check.changingTo.length > 0) forSend = false;
+  const pending = deps.pendingSwitches?.get?.(sessionId);
+  if (!parsed || !pending || pending.targetAgentKind !== 'agy' || pending.model !== askedAbout.model
+    || (pending.providerId ?? null) !== (typeof askedAbout.providerId === 'string' && askedAbout.providerId ? askedAbout.providerId : null)) {
+    return false;
+  }
+  // Checked where it is written, against the stamp on the pending switch itself. A registry
+  // that issues no revisions stamps nothing, so nothing is recorded through it.
+  if (typeof askedAbout.revision !== 'number' || pending.revision !== askedAbout.revision) return false;
+  if (check) {
+    const changing = typeof check.changingTo === 'string' && check.changingTo.length > 0;
+    // A change of mode is confirmed before the new mode is stored, so the stored mode is still the
+    // old one: it must be the one the caller saw, or the task has moved on since the question.
+    if (changing && check.changingFrom !== check.storedMode) return false;
+    const about = changing ? check.changingTo as string : check.storedMode;
+    if (typeof about !== 'string' || parsed.change !== agySwitchPermissionChange(about)
+      || parsed.mode !== permissionModeAfterSwitchToAgy(about)) return false;
+    const onRecord = pending.agyPermissionAgreement;
+    if (onRecord && (onRecord.change !== parsed.change || onRecord.mode !== parsed.mode)) {
+      const expected = parseAgySwitchPermissionAgreement(check.expected);
+      if (!expected || expected.change !== onRecord.change || expected.mode !== onRecord.mode) return false;
+    }
+  }
+  // Written on the pending switch itself, not on a copy stored in its place. It stays the same
+  // registration: its revision does not move, so a withdrawal that read the revision before this
+  // still clears it, and a switch being applied still recognises its own intent when it finishes.
+  // Where the switch came from (configuration, an agent, the user) and everything else it carries
+  // are untouched for the same reason.
+  const replaced = pending.agyPermissionAgreement;
+  // An agreement is "given for a send" of one message: the one whose banner asked. The queue
+  // says whether that message, in that hold, is still the one waiting, and lets it go if so. If
+  // it is not (removed, edited, merged, another one held since) or the caller did not say which
+  // message (an older window), the agreement is still a valid answer about the permissions and is
+  // recorded, but for no send: nothing is let go and the message held now waits for its own
+  // answer (QQ, 2026-11-23). Nothing is awaited between this and the write below.
+  if (forSend) forSend = deps.onPendingSwitchAgreed?.(sessionId, check?.heldMessage) === true;
+  pending.agyPermissionAgreement = parsed;
+  // "Given for a send" is said of one agreement. It stays when the very same agreement is
+  // recorded again without it (the entry confirming what a send had agreed to); it does not pass
+  // to a different agreement that was only recorded, or a window would resend a held message by
+  // itself on an ordinary change of mode (DD 7089552822, item 2).
+  if (forSend) pending.agyPermissionAgreementForSend = true;
+  else if (!replaced || replaced.change !== parsed.change || replaced.mode !== parsed.mode) delete pending.agyPermissionAgreementForSend;
+  const report = projectPendingAgentSwitchIntent(pending)!;
+  if (deps.onPendingSwitchAgreementChanged) deps.onPendingSwitchAgreementChanged(sessionId, report);
+  else deps.onPendingSwitchChanged?.(sessionId, report);
+  return true;
+}
+
+export function createPendingAgentSwitchRegistry(options?: {
+  /**
+   * The pending switch that stood for the model a schedule had replaced is no longer pending:
+   * the user picked something else (another engine, another model, or one of the engine the task
+   * runs on, which is how the model picker withdraws a switch), or it was applied. Either way the
+   * saved model has had its answer and the host retires it now. Waiting for the next send to do it
+   * left a window in which a restart brought the same question back (DD 7083915988, item 3).
+   * Decided here because every way of replacing or clearing a pending switch ends here.
+   */
+  onScheduledRestoreSettled?(sessionId: string): void;
+}): PendingAgentSwitchRegistry {
   const pending = new Map<string, PendingAgentSwitchIntent>();
   const revisions = new Map<string, number>();
   const bump = (sessionId: string): number => {
@@ -506,21 +697,33 @@ export function createPendingAgentSwitchRegistry(): PendingAgentSwitchRegistry {
     revisions.set(sessionId, next);
     return next;
   };
+  const settled = (sessionId: string, previous: PendingAgentSwitchIntent | undefined, next?: PendingAgentSwitchIntent) => {
+    if (previous?.restoresScheduledBaseline === true && next?.restoresScheduledBaseline !== true) {
+      options?.onScheduledRestoreSettled?.(sessionId);
+    }
+  };
   return {
     set: (sessionId, intent) => {
+      const previous = pending.get(sessionId);
+      intent.revision = bump(sessionId);
       pending.set(sessionId, intent);
-      bump(sessionId);
+      settled(sessionId, previous, intent);
     },
     get: (sessionId) => pending.get(sessionId),
     clear: (sessionId) => {
+      const previous = pending.get(sessionId);
       pending.delete(sessionId);
       bump(sessionId);
+      settled(sessionId, previous);
     },
     revision: (sessionId) => revisions.get(sessionId) ?? 0,
     clearIfRevision: (sessionId, expectedRevision) => {
       if ((revisions.get(sessionId) ?? 0) !== expectedRevision) return null;
+      const previous = pending.get(sessionId);
       pending.delete(sessionId);
-      return bump(sessionId);
+      const revision = bump(sessionId);
+      settled(sessionId, previous);
+      return revision;
     },
   };
 }
@@ -695,6 +898,23 @@ export async function performSessionAgentSwitch(
     fastMode?: unknown;
     /** Local picker acknowledgement of this route's checked context window. */
     confirmedContextWindow?: unknown;
+    /** Local composer: what the user agreed this switch into Antigravity does to the permission mode. */
+    agyPermissionAgreement?: unknown;
+    /**
+     * Local composer: the agreement above was given in the dialog of this very pick, a moment
+     * ago. Only then is it taken with a registration. An agreement that merely travels with a
+     * later pick (another model, effort, Fast, thinking: no dialog) is what the window remembers,
+     * possibly from the task's entry or the permission menu; taking it as "agreed with this pick"
+     * let a held message go on an agreement that was only recorded (DD 7089552822, item 1).
+     */
+    agyPermissionAgreedWithThisPick?: unknown;
+    /**
+     * Re-entry of a pending switch being applied: what it carries that a registration made again
+     * on a failed recovery must keep (see PendingAgentSwitchIntent for both).
+     */
+    restoresScheduledBaseline?: true;
+    agyPermissionAgreementForSend?: true;
+
     /**
      * 选择的 Agent 位置(远程 Agent):undefined = 保持任务当前位置(内部调用与不认识该字段的
      * 旧控制端都走这里，不做推断)，null = 任务所在电脑，字符串 = 同账号另一台电脑。
@@ -1010,6 +1230,35 @@ export async function performSessionAgentSwitch(
       ...(typeof thinking === 'boolean' ? { thinking } : {}),
       ...(agentDeviceChanges ? { targetAgentDeviceId } : {}),
     };
+    // Taken with the registration only when the caller says the user answered this pick's own
+    // dialog, and only as an answer about the mode the task is stored in. Anything else that
+    // comes along is ignored here.
+    const broughtAgreement = params.agyPermissionAgreedWithThisPick === true
+      ? parseAgySwitchPermissionAgreement(params.agyPermissionAgreement) : undefined;
+    const agreedWithThisPick = broughtAgreement && typeof row?.permissionMode === 'string'
+      && broughtAgreement.change === agySwitchPermissionChange(row.permissionMode)
+      && broughtAgreement.mode === permissionModeAfterSwitchToAgy(row.permissionMode)
+      ? broughtAgreement : undefined;
+    // QQ's ruling, 2026-11-23 (on DD 7089552822, "A"):
+    //  - The pick's dialog tells the user what the switch does. Agreeing there agrees to the
+    //    conversion and to nothing else: it is recorded, never as given for a send, and no held
+    //    message goes on it. A held message goes when the user confirms on its banner or
+    //    continues the queue.
+    //  - An agreement is about one pending switch and one permission conversion. Registering
+    //    again for the same engine, model and provider, which is what changing only the effort,
+    //    Fast or thinking does, is the same switch: the agreement on record is kept, as long as
+    //    it is still the conversion the task's stored mode would get now (the owner's decision,
+    //    2026-11-24, on "A2"). Another model, provider or engine is another switch and starts
+    //    with none; so does a switch that was withdrawn and registered again.
+    //  - Keeping the agreement keeps the answer about the permissions only. It is never kept as
+    //    given for a send: changing a setting sends nothing and lets no held message go.
+    const onRecord = sameTarget && targetAgentKind === 'agy' ? existingIntent?.agyPermissionAgreement : undefined;
+    const keptAgreement = onRecord && typeof row?.permissionMode === 'string'
+      && onRecord.change === agySwitchPermissionChange(row.permissionMode)
+      && onRecord.mode === permissionModeAfterSwitchToAgy(row.permissionMode)
+      ? onRecord : undefined;
+    const agreement = agreedWithThisPick ?? keptAgreement;
+    if (targetAgentKind === 'agy' && agreement) intent.agyPermissionAgreement = agreement;
     deps.pendingSwitches.set(sessionId, intent);
     deps.onPendingSwitchChanged?.(sessionId, projectPendingAgentSwitchIntent(intent));
     deps.log.info('agent-switch: intent registered (applies on next send)', {
@@ -1240,6 +1489,10 @@ export async function performSessionAgentSwitch(
         sdkSessionId: relocatedNativeId ?? parked?.sdkSessionId ?? null,
         ...(typeof params.effort === 'string' && params.effort ? { effort: params.effort } : {}),
         ...((typeof params.fastMode === 'boolean' || params.fastMode === 'ultrafast') ? { fastMode: params.fastMode } : {}),
+        // Every way into Antigravity from another engine commits only a permission rewrite that
+        // was agreed to; only a user's pending switch carries an agreement.
+        ...(toDbKind === 'agy' && fromDbKind !== 'agy' && agySwitchPermissionIsGuarded(row, params)
+          ? { agyPermissionGuard: { agreement: parseAgySwitchPermissionAgreement(params.agyPermissionAgreement) } } : {}),
         // 组选回的当前位置在另一台电脑时也带上位置：提交按它判断窗口该查哪台的目录，不能拿本机目录。
         ...(agentDeviceChanges || (orcaGroupReturnRebuild && targetAgentDeviceId)
           ? { agentDeviceId: targetAgentDeviceId }
@@ -1349,6 +1602,18 @@ export async function performSessionAgentSwitch(
             resumed: false,
             ...(relocatedNativeId ? { nativeHistory: 'fallback' as const } : {}),
           };
+          // A registration made again below stands for the same pending switch. It keeps what that
+          // one was: a restore of a schedule's saved model (or its landing would be taken for a pick
+          // of the user's and detach an IM task from the route it follows, and the registry would
+          // retire the saved model as if the restore had been replaced), and the agreement to its
+          // permission change (DD 7085158660, item 7).
+          const carriedAgreement = parseAgySwitchPermissionAgreement(params.agyPermissionAgreement);
+          const carriedOverOnReRegistration = {
+            ...(params.restoresScheduledBaseline === true ? { restoresScheduledBaseline: true as const } : {}),
+            ...(targetAgentKind === 'agy' && carriedAgreement ? { agyPermissionAgreement: carriedAgreement } : {}),
+            ...(targetAgentKind === 'agy' && carriedAgreement && params.agyPermissionAgreementForSend === true
+              ? { agyPermissionAgreementForSend: true as const } : {}),
+          };
           let fallbackCommitted = false;
           if (boundaryClientId) {
             try {
@@ -1364,6 +1629,7 @@ export async function performSessionAgentSwitch(
               deps.pendingSwitches?.set(sessionId, {
                 ...(params.runtimeSource ? { runtimeSource: params.runtimeSource } : {}),
                 ...(params.configStaged === true ? { configStaged: true } : {}),
+                ...carriedOverOnReRegistration,
                 targetAgentKind,
                 model,
                 providerId: normalizedProviderId,
@@ -1389,6 +1655,7 @@ export async function performSessionAgentSwitch(
             deps.pendingSwitches?.set(sessionId, {
               ...(params.runtimeSource ? { runtimeSource: params.runtimeSource } : {}),
               ...(params.configStaged === true ? { configStaged: true } : {}),
+              ...carriedOverOnReRegistration,
               targetAgentKind,
               model,
               providerId: normalizedProviderId,
@@ -1472,6 +1739,19 @@ export async function performSessionAgentSwitch(
  *    已进入 commit point 后若失败,则只重试其原子恢复尾段。
  */
 /** 墓碑写失败: 一律阻止发送并保留可重试状态 —— 不适用跨引擎的 fail-continue(PR #5155 review P2)。 */
+/**
+ * Whether a switch into Antigravity may rewrite this task's permission mode only with the user's
+ * agreement. It may, for every task and every source of the switch (the user's pick, an agent's
+ * request, an automation's model, an automatic fallback), with one exception: a partner's
+ * conversation whose engine follows the partner's settings. There the rewrite is the partner
+ * policy decided for cindy#18 (QQ 7076775057), and no dialog exists to agree in.
+ */
+function agySwitchPermissionIsGuarded(
+  row: Pick<AgentSwitchSessionRow, 'source'>, switching: { configStaged?: boolean },
+): boolean {
+  return !(switching.configStaged === true && row.source === 'bot');
+}
+
 export class UserRouteSelectionMarkerError extends Error {
   readonly cause: unknown;
 
@@ -1495,6 +1775,23 @@ async function noteLandedUserRouteSelection(
   intent: PendingAgentSwitchIntent,
 ): Promise<void> {
   if (!isUserPendingAgentSwitchIntent(intent)) return;
+  // Put back by the host on the user's agreement, not picked by the user in this task: it does
+  // not detach an IM task from the route it follows. Its saved model is retired here, before the
+  // caller goes on, and the mark is taken off so that the registry does not retire it a second
+  // time, later, when it might be another saved model by then.
+  if (intent.restoresScheduledBaseline === true) {
+    if (!deps.onScheduledRestoreLanded) return;
+    try {
+      await deps.onScheduledRestoreLanded(sessionId);
+      delete intent.restoresScheduledBaseline;
+    } catch (err) {
+      deps.log.warn('failed to retire the saved model of an applied scheduled restore; left to the registry', {
+        sessionId,
+        err: err instanceof Error ? err.message : String(err),
+      });
+    }
+    return;
+  }
   try {
     await deps.onUserRouteSelectionLanded?.(sessionId);
   } catch (err) {
@@ -1608,6 +1905,20 @@ export function applyPendingAgentSwitchIfIdle(
         }
         return;
       }
+      // The user's pick of a Gemini model: the mode stored now may not be the one they were told
+      // about (changed from another window, a device, IM, or while this message waited in the
+      // queue). Nothing is applied and nothing is sent; the switch stays pending. Every source of
+      // the switch is checked the same way; the one exception is in agySwitchPermissionIsGuarded.
+      if (intent.targetAgentKind === 'agy') {
+        // An early answer, before the running engine is closed. The row commit decides again
+        // inside its own statement; this read alone could be overtaken by a concurrent change.
+        const row = await deps.getSessionRow(sessionId);
+        if (row && row.agentKind !== 'agy' && typeof row.permissionMode === 'string'
+          && agySwitchPermissionIsGuarded(row, intent)
+          && agySwitchPermissionIsUnconfirmed(row.permissionMode, intent.agyPermissionAgreement)) {
+          throw new AgentSwitchPermissionUnconfirmedError();
+        }
+      }
       const result = await performSessionAgentSwitch(deps, {
         sessionId,
         targetAgentKind: intent.targetAgentKind,
@@ -1622,6 +1933,9 @@ export function applyPendingAgentSwitchIfIdle(
         fastMode: intent.fastMode,
         thinking: intent.thinking,
         agentDeviceId: intent.targetAgentDeviceId,
+        ...(intent.agyPermissionAgreement ? { agyPermissionAgreement: intent.agyPermissionAgreement } : {}),
+        ...(intent.agyPermissionAgreementForSend === true ? { agyPermissionAgreementForSend: true as const } : {}),
+        ...(intent.restoresScheduledBaseline === true ? { restoresScheduledBaseline: true as const } : {}),
         // 普通 maker send 随后会按 DB 真源 lazy-create,无需在 apply 内多 spawn 一次;
         // Goal / IM / scheduler 三条直发路径没有该 lazy-create 事务,必须先把新引擎
         // bootstrap 好再拿 live session 发送,否则会继续持有已关闭的旧 session。
@@ -1661,6 +1975,7 @@ export function applyPendingAgentSwitchIfIdle(
       // 换电脑同理:用户选的是另一台电脑(或改回本机)，不能悄悄留在原来那台继续发。
       if (
         err instanceof UserRouteSelectionMarkerError ||
+        err instanceof AgentSwitchPermissionUnconfirmedError ||
         intent.sameAgentSelection ||
         intent.runtimeSource === 'agent' ||
         intent.targetAgentDeviceId !== undefined
@@ -1675,6 +1990,71 @@ export function applyPendingAgentSwitchIfIdle(
   });
   pendingAgentSwitchApplyInFlight.set(sessionId, run);
   return run;
+}
+
+/**
+ * A switch into Antigravity that the host wanted to make on its own (putting back the model a
+ * schedule had replaced) and that was refused because it would change the task's permissions
+ * without the user's agreement. Refusing alone left nothing to agree to: every later send tried
+ * again and was refused again. The switch is registered as pending instead, with no agreement,
+ * so the task shows where to confirm it, every entry is refused the same way until then, and
+ * picking a model of the current engine withdraws it. A switch already pending is the user's
+ * newer choice and is left as it is.
+ *
+ * The pending switch is in memory. The saved model it stands for is not touched here: it stays
+ * on record until the switch is applied or withdrawn, so after a restart the same model is held
+ * again, with no agreement, instead of the task quietly staying where the schedule left it.
+ *
+ * Where it runs: Antigravity runs only on the task's own computer (performSessionAgentSwitch
+ * refuses any other). If the schedule moved the task to another computer, the pending switch
+ * says "back to the task's computer"; a saved model that names another computer cannot be an
+ * Antigravity one and is not held (nothing is defaulted to this computer).
+ * Resolves whether a pending switch now stands for the saved model.
+ */
+export function holdAgySwitchForConfirmation(
+  deps: Pick<MakerSessionAgentSwitchHandlerDeps, 'pendingSwitches' | 'onPendingSwitchChanged' | 'onPendingSwitchAgreementChanged'>,
+  sessionId: string,
+  route: {
+    model: string; providerId: string | null; effort?: string | null; fastMode?: boolean | 'ultrafast';
+    /** Where the saved model ran: null = the task's computer; undefined = not recorded. */
+    agentDeviceId?: string | null;
+  },
+  currentAgentDeviceId?: string | null,
+): boolean {
+  if (!deps.pendingSwitches) return false;
+  if (deps.pendingSwitches.get(sessionId)) return true;
+  if (route.agentDeviceId) return false;
+  const intent: PendingAgentSwitchIntent = {
+    restoresScheduledBaseline: true,
+    targetAgentKind: 'agy',
+    model: route.model,
+    providerId: route.providerId,
+    ...(route.effort ? { effort: route.effort } : {}),
+    ...((typeof route.fastMode === 'boolean' || route.fastMode === 'ultrafast') ? { fastMode: route.fastMode } : {}),
+    ...(currentAgentDeviceId ? { targetAgentDeviceId: null } : {}),
+  };
+  deps.pendingSwitches.set(sessionId, intent);
+  // Told to the windows as a change of what is pending, not as a selection of the user's.
+  const report = projectPendingAgentSwitchIntent(intent)!;
+  if (deps.onPendingSwitchAgreementChanged) deps.onPendingSwitchAgreementChanged(sessionId, report);
+  else deps.onPendingSwitchChanged?.(sessionId, report);
+  return true;
+}
+
+/**
+ * The last check before a queued message is dispatched, after the pending switch (if any) was
+ * applied. A message that was once held for an unconfirmed switch into Antigravity was written
+ * for that engine; the switch it waited for is only in memory and is gone after a restart, when
+ * the queue comes back. Without this the message would then go to the engine the task still
+ * runs on. It goes only once the task runs Antigravity, that is after the user has picked the
+ * engine again and agreed; until then it is refused the same way and stays at the queue's head.
+ */
+export async function assertMessageHeldForAgySwitchMayGo(
+  deps: Pick<MakerSessionAgentSwitchHandlerDeps, 'getSessionRow'>, sessionId: string, wasHeldForAgySwitch: boolean,
+): Promise<void> {
+  if (!wasHeldForAgySwitch) return;
+  const row = await deps.getSessionRow(sessionId);
+  if (row && row.agentKind !== 'agy') throw new AgentSwitchPermissionUnconfirmedError();
 }
 
 export function registerMakerSessionAgentSwitchHandler(
@@ -1704,6 +2084,45 @@ export function registerMakerSessionAgentSwitchHandler(
       if (isDeviceLinkInvoke() && confirmedContextWindow !== undefined) {
         throwIpcError('PRECONDITION_FAILED', 'remote model-window confirmation is unsupported');
       }
+      // Only this computer's composer shows the dialog the agreement comes from.
+      const agyPermissionAgreement = !isDeviceLinkInvoke() && options && typeof options === 'object' && !Array.isArray(options)
+        ? (options as { agyPermissionAgreement?: unknown }).agyPermissionAgreement : undefined;
+      const agyPermissionAgreedWithThisPick = agyPermissionAgreement !== undefined
+        && (options as { agyPermissionAgreedWithThisPick?: unknown }).agyPermissionAgreedWithThisPick === true;
+      // An answer to "may this pending switch change the permissions": it is attached to that
+      // switch if it is still the pending one, and does nothing else (see the function). A remote
+      // controller's answer is not taken; this path decides that for itself, from what was sent.
+      // It runs under the task's send lock like every other change to the pending switch, so it
+      // cannot land in the middle of a withdrawal or of the switch being applied (DD 7082445534).
+      if (options && typeof options === 'object' && !Array.isArray(options)
+        && (options as { agyPermissionAgreementOnly?: unknown }).agyPermissionAgreementOnly === true) {
+        if (typeof sessionId !== 'string' || sessionId.length === 0) throwIpcError('INVALID_PARAMS', 'sessionId required');
+        const answer = options as {
+          agyPermissionAgreement?: unknown; agyPermissionRevision?: unknown; agyPermissionAgreementForSend?: unknown;
+          agyPermissionAgreementExpected?: unknown; agyPermissionChangingTo?: unknown; agyPermissionChangingFrom?: unknown;
+          agyPermissionHeldMessage?: unknown;
+        };
+        const fromThisComputer = !isDeviceLinkInvoke();
+        const record = async () => {
+          // Read under the task's lock, where a change of mode and this write cannot interleave.
+          const stored = fromThisComputer && targetAgentKind === 'agy' ? await deps.getSessionRow(sessionId) : null;
+          const recorded = !!stored && stored.agentKind !== 'agy'
+            && recordAgySwitchPermissionAgreement(deps, sessionId, {
+              revision: answer.agyPermissionRevision, model, providerId,
+            }, answer.agyPermissionAgreement, answer.agyPermissionAgreementForSend === true, {
+              storedMode: typeof stored.permissionMode === 'string' ? stored.permissionMode : null,
+              expected: answer.agyPermissionAgreementExpected,
+              changingTo: answer.agyPermissionChangingTo,
+              changingFrom: answer.agyPermissionChangingFrom,
+              heldMessage: answer.agyPermissionHeldMessage,
+            });
+          return {
+            switched: false, agentKind: 'agy' as const, model: typeof model === 'string' ? model : '', engineReady: true,
+            deferred: recorded, agyPermissionAgreementRecorded: recorded,
+          };
+        };
+        return deps.withSessionLock ? deps.withSessionLock(sessionId, record) : record();
+      }
       const agentDeviceId =
         options && typeof options === 'object' && !Array.isArray(options) && 'agentDeviceId' in options
           ? (options as { agentDeviceId?: unknown }).agentDeviceId
@@ -1721,6 +2140,8 @@ export function registerMakerSessionAgentSwitchHandler(
         effort,
         fastMode,
         ...(confirmedContextWindow !== undefined ? { confirmedContextWindow } : {}),
+        ...(agyPermissionAgreement !== undefined ? { agyPermissionAgreement } : {}),
+        ...(agyPermissionAgreedWithThisPick ? { agyPermissionAgreedWithThisPick: true as const } : {}),
         ...(agentDeviceId !== undefined ? { agentDeviceId } : {}),
         thinking,
         assertSelectionCurrent: guard.admit,

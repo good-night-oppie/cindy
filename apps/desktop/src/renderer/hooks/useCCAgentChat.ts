@@ -182,7 +182,7 @@ interface UseCCAgentChatReturn {
   /** 取消账号限额重置后的自动继续(错误与重试保留)。 */
   cancelUsageLimitWait: () => void;
   /** Retry the main-owned typed recovery target. */
-  retryLastError: () => Promise<void>;
+  retryLastError: (agySwitchHeldMessage?: string) => Promise<void>;
   /** silent-stop 耗尽横幅「继续」:清横幅并发隐藏续跑指令(充值守卫额度)。 */
   continueAfterSilentStop: () => void;
   /** F-CMD: Insert a local-only system card */
@@ -564,9 +564,9 @@ export function useCCAgentChat(
     makerChatStore.continueAfterSilentStop(sessionId);
   }, [sessionId]);
 
-  const retryLastError = useCallback(() => {
+  const retryLastError = useCallback((agySwitchHeldMessage?: string) => {
     if (!sessionId) return Promise.resolve();
-    return makerChatStore.retryLastError(sessionId);
+    return makerChatStore.retryLastError(sessionId, agySwitchHeldMessage);
   }, [sessionId]);
 
   const insertSystemCard = useCallback(

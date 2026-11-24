@@ -6629,12 +6629,12 @@ interface ElectronAPI {
       ) => Promise<import('../shared/agentInputQueue').AgentInputProjection>;
       resume: (
         sessionId: string,
-        opts?: { expectedClearBoundaryMs?: number | null },
+        opts?: { expectedClearBoundaryMs?: number | null; continueSending?: boolean; answerClientId?: string; agySwitchHeldMessage?: string | null },
       ) => Promise<import('../shared/agentInputQueue').AgentInputProjection>;
       retryImageDelivery: (sessionId: string, imageId: string) => Promise<void>;
       retryLastError: (
         sessionId: string,
-        opts?: { expectedClearBoundaryMs?: number | null },
+        opts?: { expectedClearBoundaryMs?: number | null; agySwitchHeldMessage?: string },
       ) => Promise<import('../shared/agentInputQueue').AgentInputProjection>;
       clearError: (
         sessionId: string,
@@ -6771,20 +6771,48 @@ interface ElectronAPI {
      */
     switchSessionAgent: (
       sessionId: string,
-      targetAgentKind: 'claude-code' | 'codex' | 'pi',
+      targetAgentKind: 'claude-code' | 'codex' | 'pi' | 'agy',
       model: string,
       providerId?: string | null,
       effort?: string,
       fastMode?: boolean | 'ultrafast',
       /** 远程 Agent:同时换 Agent 所在电脑(null = 任务所在电脑)。不传 = 位置不变。 */
-      options?: { agentDeviceId?: string | null; confirmedContextWindow?: number },
+      options?: {
+        agentDeviceId?: string | null; confirmedContextWindow?: number;
+        /** Antigravity: what the user agreed this switch does to the task's permission mode. */
+        agyPermissionAgreement?: { change: 'fromFullAccess' | 'fromUnsupported' | null; mode: string };
+        /**
+         * Only record that agreement on the switch into Antigravity that is pending now (the one
+         * with this model and provider): nothing is registered, replaced, applied or sent.
+         */
+        /** With agyPermissionAgreement on a registration: the user gave it in the dialog of this very pick. Without it the host ignores the agreement and keeps its own record. */
+        agyPermissionAgreedWithThisPick?: boolean;
+        agyPermissionAgreementOnly?: boolean;
+        /**
+         * With agyPermissionAgreementOnly: the user agreed where a message was to go out with it
+         * (a send, a held message's banner). The host then lets a message it held for this go.
+         * Left out by the task's own entry, which sends nothing.
+         */
+        agyPermissionAgreementForSend?: boolean;
+        /** With agyPermissionAgreementOnly: what the host had on record when the user was asked; a different record is replaced only then. */
+        agyPermissionAgreementExpected?: { change: 'fromFullAccess' | 'fromUnsupported' | null; mode: string };
+        /** With agyPermissionAgreementOnly, for a change of mode being confirmed: the new mode and the one the window shows the task in. */
+        agyPermissionChangingTo?: string;
+        agyPermissionChangingFrom?: string;
+        /** For an agreement given for a send: the hold of the message the user was asked about. */
+        agyPermissionHeldMessage?: string;
+        /** With agyPermissionAgreementOnly: the registration the user was asked about, as the host reported it. */
+        agyPermissionRevision?: number;
+      },
       thinking?: boolean,
     ) => Promise<{
       switched: boolean;
-      agentKind: 'claude-code' | 'codex' | 'pi';
+      agentKind: 'claude-code' | 'codex' | 'pi' | 'agy';
       model: string;
       engineReady: boolean;
       deferred?: boolean;
+      /** Answer to agyPermissionAgreementOnly: false when that switch is no longer the pending one. */
+      agyPermissionAgreementRecorded?: boolean;
       sameEngineRevision?: number;
       sameEngineSuperseded?: boolean;
     }>;
@@ -6793,11 +6821,20 @@ interface ElectronAPI {
      * 重开视图 / device-link 远程会话重连后恢复乐观显示用。
      */
     getSessionAgentSwitchIntent: (sessionId: string) => Promise<{
-      targetAgentKind: 'claude-code' | 'codex' | 'pi';
+      targetAgentKind: 'claude-code' | 'codex' | 'pi' | 'agy';
       model: string;
       providerId: string | null;
       effort?: string;
       fastMode?: boolean | 'ultrafast';
+      agentDeviceId?: string | null;
+      /** Antigravity only: what the host has recorded as agreed for this switch (null = nothing). */
+      agyPermissionAgreement?: { change: 'fromFullAccess' | 'fromUnsupported' | null; mode: string } | null;
+      /** Antigravity only: that agreement was given where a message was to go out with it. */
+      agyPermissionAgreementForSend?: true;
+      /** Antigravity only: which registration this is; sent back with an agreement. */
+      agyPermissionRevision?: number;
+      /** Staged by configuration, not picked by the user in this task. */
+      configStaged?: true;
     } | null>;
     // effort/mode 透传 string —— 合法值由 maker capabilities 决定, vite-env 不重复枚举
     setEffort: (sessionId: string, effort: string) => Promise<void>;

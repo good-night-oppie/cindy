@@ -12987,6 +12987,7 @@
         },
         "turn": {
           "groupApprovalOwnerDm": "🔐 群议中之差事待君授权。授权之卡不发于群，于此确认即可。",
+          "agentSwitchPermissionUnconfirmed": "⏸ 此讯未理。此任务将易至 Antigravity，易则权柄有变，须由掌此任务者先于电脑之 Cindy 开之而确认。确认之后，请复发此讯。",
           "agentStartFailed": "❌ 启 Agent 未成：{{reason}}",
           "personalBotLabel": "{{channel}} 个人 bot",
           "error": "❌ 谬误：{{message}}"
@@ -14139,6 +14140,8 @@
       "pluginSenderFallback": "法器",
       "botRowAria": "同伴「{{sender}}」遣来之排队讯",
       "dragAria": "拖第 {{index}} 条待遣之讯以排序",
+      "steerHeldForAgySwitch": "此讯候君确认权限之改，未确认前不可插话。",
+      "steerHeldForAgySwitchRemote": "此讯候任务所在之电脑确认权限之改，未确认前不可插话。",
       "steerAction": "插话",
       "steerRunningTip": "插话于今之差事，不中断方行之工，今之举毕后先理此讯",
       "steerPausedTip": "续差事，并先理此讯",
@@ -14289,7 +14292,29 @@
           "description": "新 Agent 引擎将经交接摘要续接，思考内容等不保其完美承续；切回时仍可续原引擎之会话。切换亦将令 prompt 缓存中断一次，或增 Token 之耗。",
           "confirm": "易 Agent",
           "cancel": "留今之 Agent",
-          "dontShowAgain": "后不复提醒"
+          "dontShowAgain": "后不复提醒",
+          "antigravityFromFullAccess": "既易之后，此任务之权柄由「完全访问」改为「自审」：Antigravity 所请之审，由 Cindy 自审，不复问君。「完全访问」不随入 Antigravity。易后可于任务之权柄菜单复改；各档所许，亦载于彼。",
+          "antigravityFromUnsupported": "既易之后，此任务之权柄改为「预设权柄」：Antigravity 所请之审，由君决之。君今所用之档，Antigravity 无之，其档自有之规（如计划模式之限）不随而入。易后可于任务之权柄菜单复改；各档所许，亦载于彼。"
+        },
+        "sendConfirmation": {
+          "titleFromFullAccess": "以「自审」发之乎？",
+          "titleFromUnsupported": "以「预设权柄」发之乎？",
+          "cancel": "姑且不发",
+          "confirm": "确认并发"
+        },
+        "permissionAgreementNotRecorded": "此番确认未录，诸事未改。请再试之。",
+        "permissionEntry": {
+          "notice": "易至 Antigravity，此任务之权柄将变，此变尚待君确认。点「览而确认」；此处确认，唯许此变，不发讯也。",
+          "titleFromFullAccess": "许改为「自审」乎？",
+          "titleFromUnsupported": "许改为「预设权柄」乎？",
+          "note": "确认之后，不发讯也。"
+        },
+        "permissionConfirmation": {
+          "bodyFromFullAccess": "既易之后，君方所择之「完全访问」改为「自审」：Antigravity 所请之审，由 Cindy 自审，不复问君。「完全访问」不随入 Antigravity。易后可于任务之权柄菜单复改；各档所许，亦载于彼。",
+          "bodyFromUnsupported": "既易之后，此任务之权柄改为「预设权柄」：Antigravity 所请之审，由君决之。君方所择之档，Antigravity 无之，其自有之规（如计划模式之限）不随而入。易后可于任务之权柄菜单复改；各档所许，亦载于彼。",
+          "title": "改为「{{mode}}」乎？",
+          "cancel": "姑且不改",
+          "confirm": "确认更改"
         }
       },
       "agentRelocation": {
@@ -14898,6 +14923,15 @@
       "gatewayQuotaExhausted": "Cindy AI 余资不足，请储值后续之",
       "viewBalance": "览余资",
       "viewBalanceTitle": "开「耗用与计费」，览余资并储值",
+      "agentSwitchPermissionUnconfirmed": "此讯尚未发出。易至 Antigravity，此任务之权柄将变，此变尚待君确认。点「览而确认」；君确认之后，方易而发此讯。",
+      "agentSwitchPermissionUnconfirmedRemote": "此讯尚未发出。易至 Antigravity，此任务之权柄将变，此变须于任务所在之电脑确认，确认之后方易而发之。彼处确认之后，若此讯犹未发，点「再试」。",
+      "agentSwitchPermissionUnconfirmedRemoteNamed": "此讯尚未发出。易至 Antigravity，此任务之权柄将变，此变须于任务所在之电脑「{{device}}」确认，确认之后方易而发之。彼处确认之后，若此讯犹未发，点「再试」。",
+      "agentSwitchPermissionKept": "此讯尚未发出。易至 Antigravity 不改此任务之权限；点「遣」，此讯乃发。",
+      "agentSwitchPermissionKeptSend": "遣",
+      "agentSwitchPermissionAlreadySwitched": "此讯尚未发出。此任务已易至 Antigravity；点「遣」，此讯乃发。",
+      "agentSwitchPermissionAlreadySwitchedRemote": "此讯尚未发出。此任务已易至 Antigravity；点「再试」，此讯乃发。",
+      "agentSwitchPermissionSwitchGone": "此讯尚未发出。其待任务易至 Antigravity，而彼易已失其效。欲易，则复择 Antigravity 之模型，于弹窗点「易 Agent」，复依其后之示确认发送，此讯乃发；不欲易，则点此讯旁之「方候」，择「罢遣」，此讯即除，须复书而发之。",
+      "agentSwitchPermissionReview": "览而确认",
       "credentialSwitchBusy": "Codex 方行于他差事，暂不能依此差事所择之模型来源而易（须重启共用之 Codex 后台进程）。俟其毕，点「再试」即可。",
       "accountBoundaryPending": "Cindy 方易名籍之态，暂不能始此差事。稍候片刻，点「再试」；若屡见之，请重启 Cindy。",
       "codexThreadStale": "Codex 鉴权之式已易，此差事不能续 —— 请新开差事，方生效。",
