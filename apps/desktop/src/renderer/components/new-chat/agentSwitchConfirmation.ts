@@ -250,11 +250,6 @@ export function agySwitchPendingKey(intent: AgySwitchPermissionPendingIntent | n
 }
 
 /**
- * Whether the task view shows the task's own confirmation entry at all: not when it only reads
- * the task, not from another computer (the host takes no agreement from one), and not while a
- * held message's banner is up, which is the same question with a resend attached.
- */
-/**
  * A message held for a switch into Antigravity, in a queue that is paused: the user stopped the
  * queue or went back in the task's history, or closed the banner in another window. The host
  * starts a paused queue on "Continue sending" only, so the held message's banner would offer an
@@ -270,6 +265,11 @@ export function heldMessageBannerYieldsToPausedQueue(input: {
   return input.queuePaused && isAgentSwitchPermissionUnconfirmedError(input.error);
 }
 
+/**
+ * Whether the task view shows the task's own confirmation entry at all: not when it only reads
+ * the task, not from another computer (the host takes no agreement from one), and not while a
+ * held message's banner is up, which is the same question with a resend attached.
+ */
 export function agySwitchPermissionEntryIsOffered(input: {
   readOnly: boolean; remote: boolean; error: string | null | undefined;
 }): boolean {

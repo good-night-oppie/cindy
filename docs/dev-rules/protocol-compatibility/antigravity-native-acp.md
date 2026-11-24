@@ -129,15 +129,19 @@ How this differs from switching a task to Codex, and what the user is told (cind
   with no switch pending it is held again and its banner says that the switch is no
   longer pending. The user picks the engine again, or removes the message.
 
-Evidence, as of f7c0bcaa. Earlier runs of the switch on Windows 11 are recorded on
-cindy#19 and stand for what they covered. What was added after them has not been run on
-a real app: the binding of a confirmation to one message and one hold, and the rules for
-a closed banner, Stop and going back, including the case of two windows. Those are
+Evidence. Earlier runs of the switch on Windows 11 are recorded on cindy#19 and stand
+for what they covered. What was added after them has not been run on a real app: the
+binding of a confirmation to one message and one hold; the rules for a closed banner,
+Stop and going back, including the case of two windows; the banner giving way over a
+paused queue; answers to question cards, moves and interjections around a held message;
+the banner of a task that already runs Antigravity; and the kept agreement. Those are
 covered by tests of the host's switch handler joined to the real queue through
 register.ts's own wiring, with a stand-in engine, and by component tests of the window's
-question; "two windows" there is two series of calls to one host. The lines that pass
-the hold's name from the desktop task view and from the phone's task page are not
-executed by any test, and nothing here was seen on a phone.
+question with the real banner; "two windows" and "a controlling computer" there are
+series of calls to one host. Not executed by any test: the lines that pass the hold's
+name from the desktop task view and from the phone's task page, the task view's own
+lines for the paused queue and for "already runs Antigravity", and the host lines that
+route an answer to a question card. Nothing here was seen on a phone.
 
 ## MCP and other capability gaps
 

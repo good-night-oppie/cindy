@@ -6836,6 +6836,65 @@ describe('AgentInputCoordinator send transaction', () => {
       expect(host.dispatched).toEqual(['third', 'second']);
     });
 
+    // The review of 812f91cd on the remote Retry. A computer controlling the task cannot agree
+    // to the permission change; its Retry on the banner of a held message is the user's "send
+    // this one", naming the hold. With the agreement recorded on the task's own computer (from
+    // its entry: recorded, nothing sent) the two together are enough, and the message goes
+    // once. A second click, a click naming an earlier hold, and a click over a paused queue send
+    // nothing; and without the agreement the remote Retry sends nothing either.
+    const fromRemote = <T,>(fn: () => T): T => runDeviceLinkInvokeContext(
+      { controllerDeviceId: 'controller-1', channel: MAKER_INVOKE.INPUT_RETRY_LAST_ERROR }, fn);
+    it('a remote Retry naming the held message sends it once when this computer has agreed, and never by itself', async () => {
+      const sid = 'remote-retry-on-held-message';
+      const { host, about } = await twoQueuedFirstHeld(sid);
+      const { h } = host;
+      // No agreement yet: the remote Retry is tried and refused by the send step; nothing goes.
+      await fromRemote(() => host.retry(about));
+      await host.settle();
+      expect(host.dispatched).toEqual([]);
+      const heldAgain = host.heldMessage();
+      expect(heldAgain).toEqual(expect.any(String));
+      expect(heldAgain).not.toBe(about);
+
+      // A remote answer is not an agreement.
+      await host.confirmToSendFromRemote();
+      await host.settle();
+      expect(host.pendingSwitches.get(sid)?.agyPermissionAgreement).toBeUndefined();
+      expect(host.dispatched).toEqual([]);
+
+      // This computer agrees from the task's entry: recorded, nothing sent.
+      await host.confirmWithoutSending();
+      await host.settle();
+      expect(host.dispatched).toEqual([]);
+
+      // A click that names the earlier hold: nothing.
+      await fromRemote(() => host.retry(about));
+      await host.settle();
+      expect(host.dispatched).toEqual([]);
+
+      // The click on the banner as it is now: the held message, once.
+      await fromRemote(() => host.retry(heldAgain));
+      await fromRemote(() => host.retry(heldAgain));
+      await host.settle();
+      expect(host.dispatched).toEqual(['first']);
+      await host.turnEnds();
+      expect(host.dispatched).toEqual(['first', 'second']);
+    });
+
+    it('a remote Retry over a paused queue sends nothing', async () => {
+      const sid = 'remote-retry-paused';
+      const { host } = await twoQueuedFirstHeld(sid);
+      const { h } = host;
+      await host.confirmWithoutSending();
+      h.coordinator.stop(sid, { keepQueue: true, pauseQueue: true });
+      await host.settle();
+      const named = h.coordinator.getProjection(sid).pendingQueue[0]?.agySwitchHoldId;
+      await fromRemote(() => host.retry(named));
+      await host.settle();
+      expect(host.dispatched).toEqual([]);
+      expect(h.coordinator.getProjection(sid).queuePaused).toBe(true);
+    });
+
     it('Continue sending from a window showing an old state, on a queue that is not paused, lets nothing held go', async () => {
       const sid = 'continue-sending-not-paused';
       const { host } = await twoQueuedFirstHeld(sid);

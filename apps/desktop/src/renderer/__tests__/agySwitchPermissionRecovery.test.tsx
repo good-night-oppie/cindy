@@ -14,6 +14,8 @@ import {
 } from '@/components/new-chat/agentSwitchConfirmation';
 import { AgySwitchPermissionPendingNotice } from '@/components/chat/AgySwitchPermissionPendingNotice';
 import { useAgySwitchPermissionRecovery } from '@/components/new-chat/useAgySwitchPermissionRecovery';
+import { ErrorBanner } from '@/components/chat/ErrorBanner';
+import { agySwitchPermissionChange } from '../../shared/agentKindConversion';
 import { agySwitchAgreementPurposeOfComposerDialog, recordAgySwitchPermissionAgreementWithHost } from '@/components/new-chat/agySwitchPermissionHost';
 
 const h = vi.hoisted(() => ({
@@ -28,7 +30,7 @@ const h = vi.hoisted(() => ({
   held: 'hold-1' as string | null,
   toastError: vi.fn(),
 }));
-vi.mock('react-i18next', () => ({ useTranslation: () => ({ t: (key: string) => key }) }));
+vi.mock('react-i18next', () => ({ useTranslation: () => ({ t: (key: string) => key, i18n: { resolvedLanguage: 'en', language: 'en' } }) }));
 vi.mock('@/lib/makerChatStore', () => ({ makerChatStore: { getAgentSwitchIntent: () => h.intent, getAgySwitchHeldMessage: () => h.held } }));
 vi.mock('@/lib/makerTransport', () => ({ makerApiFor: () => ({ switchSessionAgent: h.registerWithHost }) }));
 vi.mock('@/lib/toast', () => ({ toast: { error: h.toastError } }));
@@ -81,6 +83,34 @@ function TaskArea({ projection, mode, onResend, onContinue }: {
   );
 }
 const area = (props: Parameters<typeof TaskArea>[0]) => <ConfirmDialogProvider><TaskArea {...props} /></ConfirmDialogProvider>;
+
+/**
+ * The same part of the task view with the real banner mounted: ErrorBanner gets the props
+ * CCAgentSessionView gives it for a held message (whether a switch is pending, whether the mode
+ * is kept, whether the task already runs Antigravity) and the hook's action as its retry.
+ */
+function BannerArea({ projection, mode, agent, onResend, onContinue }: {
+  projection: Projection; mode: string; agent: string; onResend: () => void; onContinue: () => void;
+}) {
+  const { confirm } = useConfirmDialog();
+  const yields = heldMessageBannerYieldsToPausedQueue(projection);
+  const retry = useAgySwitchPermissionRecovery({
+    sessionId: 'task-1', error: yields ? null : projection.error, runningAgent: agent, permissionMode: mode,
+    remote: false, confirm, retry: onResend,
+    pendingSwitchKey: h.intent ? `${h.intent.target}|${h.intent.agyPermissionRevision ?? ''}|${h.hostAgreed}` : null,
+  });
+  return (
+    <>
+      {projection.error && !yields && (
+        <ErrorBanner error={projection.error} retryText="the held message" onRetry={retry} onCancel={() => undefined}
+          agySwitchPending={h.intent?.target === 'agy'} agySwitchKeepsPermissions={agySwitchPermissionChange(mode) === null}
+          agyTaskRunsAntigravity={agent === 'agy'} />
+      )}
+      {projection.queuePaused && <button type="button" onClick={onContinue}>Continue sending</button>}
+    </>
+  );
+}
+const bannerArea = (props: Parameters<typeof BannerArea>[0]) => <ConfirmDialogProvider><BannerArea {...props} /></ConfirmDialogProvider>;
 const settle = () => act(async () => { await Promise.resolve(); });
 
 // DD 7085158660, item 5. This window remembered an answer about another mode (the user had
@@ -362,6 +392,57 @@ describe('a message the host held for an unconfirmed permission change', () => {
     fireEvent.click(screen.getByRole('button', { name: 'Banner action' }));
     expect(onResend).toHaveBeenCalledTimes(1);
     expect(screen.getByRole('button', { name: 'Continue sending' })).toBeTruthy();
+  });
+
+  // JJ 7105543769 and 7105632393, DD 7107111403: each wording of the held message's banner, with
+  // the real banner and the real hook. Over a paused queue none of them is shown and nothing is
+  // asked or sent; once the queue runs the banner is back with its own text, and its button,
+  // where it has one, sends the message it names exactly once.
+  const B = 'chat.errorBanner.';
+  it.each([
+    ['the permissions would change (Review and confirm)', 'bypassPermissions', 'claude-code', true, B + 'agentSwitchPermissionUnconfirmed', B + 'agentSwitchPermissionReview', true],
+    ['the permissions are kept (Send)', 'ask', 'claude-code', true, B + 'agentSwitchPermissionKept', B + 'agentSwitchPermissionKeptSend', false],
+    ['the task already runs Antigravity (Send)', 'auto', 'agy', false, B + 'agentSwitchPermissionAlreadySwitched', B + 'agentSwitchPermissionKeptSend', false],
+    ['the switch is gone (no action)', 'bypassPermissions', 'claude-code', false, B + 'agentSwitchPermissionSwitchGone', null, false],
+  ] as const)('held banner, %s: hidden over a paused queue; back when the queue runs, and its action sends once', async (_name, mode, agent, pending, text, button, asks) => {
+    h.intent = pending ? { target: 'agy', model: 'gemini-test', providerId: null, agyPermissionRevision: 7 } : null;
+    forgetAgySwitchPermissionAgreed('task-1');
+    const onResend = vi.fn();
+    const onContinue = vi.fn();
+    const shown = render(bannerArea({ projection: { error: HELD, queuePaused: true }, mode, agent, onResend, onContinue }));
+    await settle();
+    await settle();
+    expect(screen.queryByText(text)).toBeNull();
+    expect(screen.queryByRole('alertdialog')).toBeNull();
+    for (const name of [B + 'agentSwitchPermissionReview', B + 'agentSwitchPermissionKeptSend', B + 'retry']) {
+      expect(screen.queryByRole('button', { name })).toBeNull();
+    }
+    expect(screen.getByRole('button', { name: 'Continue sending' })).toBeTruthy();
+    expect(onResend).not.toHaveBeenCalled();
+    expect(h.registerWithHost).not.toHaveBeenCalled();
+
+    // The queue runs again and the host holds the message: its banner is back.
+    shown.rerender(bannerArea({ projection: { error: HELD, queuePaused: false }, mode, agent, onResend, onContinue }));
+    expect(await screen.findByText(text)).toBeTruthy();
+    if (button === null) {
+      await settle();
+      expect(screen.queryByRole('button', { name: B + 'retry' })).toBeNull();
+      expect(onResend).not.toHaveBeenCalled();
+      return;
+    }
+    if (asks) {
+      // Asked automatically, once; the answer sends.
+      fireEvent.click(await screen.findByRole('button', { name: CONFIRM }));
+    } else {
+      await settle();
+      expect(onResend).not.toHaveBeenCalled();
+      expect(screen.queryByRole('alertdialog')).toBeNull();
+      fireEvent.click(screen.getByRole('button', { name: button }));
+    }
+    await waitFor(() => expect(onResend).toHaveBeenCalledExactlyOnceWith('hold-1'));
+    await settle();
+    expect(onResend).toHaveBeenCalledTimes(1);
+    expect(onContinue).not.toHaveBeenCalled();
   });
 
   it('gives way only for a held message over a paused queue', () => {
