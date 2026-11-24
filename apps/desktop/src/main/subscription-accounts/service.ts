@@ -94,7 +94,8 @@ export async function executeSubscriptionAccountCommand(command: SubscriptionAcc
   }
   if (command.action === 'add' || command.action === 'connect' || command.action === 'login' || command.action === 'create') {
     if (kind === 'anthropic') requestAnthropicModelProbe();
-    else
+    // Antigravity's model list does not depend on the account.
+    else if (kind !== 'antigravity')
       void getMaker()
         .refreshAgentLocalModels('codex', { credentialMode: 'oauth-bearer' })
         .catch(() => {});

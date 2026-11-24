@@ -21613,7 +21613,16 @@
     "quotaUpdating": "Kontingent wird aktualisiert",
     "quotaResetSoon": "Bald zurückgesetzt",
     "quotaAverageHint": "Wochenkontingent · Konten gleich gewichtet",
-    "quotaResetHint": "Beim aktuellen Verbrauch bleibt beim Zurücksetzen voraussichtlich Kontingent übrig: gelb innerhalb von 24 Stunden, rot innerhalb von 6 Stunden."
+    "quotaResetHint": "Beim aktuellen Verbrauch bleibt beim Zurücksetzen voraussichtlich Kontingent übrig: gelb innerhalb von 24 Stunden, rot innerhalb von 6 Stunden.",
+    "antigravitySignIn": {
+      "title": "Sign in to another Google account for Antigravity",
+      "waiting": "Starting the sign-in…",
+      "openLink": "Open the Google sign-in page",
+      "codeLabel": "After you sign in, paste the code or the address of the page you land on",
+      "submit": "Continue",
+      "checking": "Finishing the sign-in…",
+      "rejected": "That didn't work. Start adding the account again."
+    }
   },
   "sessionNotify": {
     "finished": "Diese Aufgabe hat ihre Runde abgeschlossen. Ihre endgültige Antwort:",

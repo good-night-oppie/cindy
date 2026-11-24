@@ -3,9 +3,18 @@ import type { ClaudeSubscriptionUsageSnapshot } from './claudeSubscriptionUsage.
 
 export const SUBSCRIPTION_ACCOUNTS_CHANNEL = 'maker:subscription-accounts';
 export const SUBSCRIPTION_ACCOUNTS_CHANGED = 'subscription-accounts:changed';
+/**
+ * Antigravity sign-in on this computer only: read the link of a sign-in this window started, or
+ * hand the pasted code to the waiting CLI. Not a device-link resource (no remote or shared use).
+ */
+export const ANTIGRAVITY_LOGIN_CHANNEL = 'maker:subscription-accounts:antigravity-login';
+export type AntigravityLoginRequest =
+  | { op: 'link'; loginKey: string }
+  | { op: 'code'; loginKey: string; code: string };
 /** Appended to legacy remote quota queries when the caller needs the CLI default account itself. */
 export const DEFAULT_ACCOUNT_USAGE_SCOPE = 'default-subscription-account';
-export type SubscriptionProvider = 'anthropic' | 'openai';
+/** `antigravity`: accounts of the Antigravity CLI (agy), one CLI data directory each (cindy#1). */
+export type SubscriptionProvider = 'anthropic' | 'openai' | 'antigravity';
 /** Account-scoped target for the existing Codex reset control plane; never a model route. */
 export const CODEX_POOL_RESET_PREFIX = 'openai-account:';
 export function codexResetScope(accountId: string): string {
@@ -271,7 +280,7 @@ export function isUnusedDefaultAccount(account: SubscriptionAccountView): boolea
   );
 }
 export function isSubscriptionProvider(value: unknown): value is SubscriptionProvider {
-  return value === 'anthropic' || value === 'openai';
+  return value === 'anthropic' || value === 'openai' || value === 'antigravity';
 }
 /**
  * Shape check for a provider that may own subscription accounts (built-in, created or a legacy

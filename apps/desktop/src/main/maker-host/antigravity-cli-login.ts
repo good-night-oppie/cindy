@@ -1,5 +1,5 @@
 import { execFileSync } from 'node:child_process';
-import { statSync } from 'node:fs';
+import { existsSync, statSync } from 'node:fs';
 import { homedir } from 'node:os';
 import { join } from 'node:path';
 
@@ -36,6 +36,32 @@ function hasWindowsCredential(): boolean {
  * reads, copies or forwards it, so a Google AI subscription is only ever used through the CLI.
  * Linux keeps it in a file under ~/.gemini; Windows keeps it in Credential Manager.
  */
+/** The Antigravity CLI this computer runs: an explicit override, its usual install place, or PATH. */
+export function resolveAntigravityCliBinary(): string {
+  const override = process.env['CINDY_AGY_BINARY'];
+  if (override && override.trim()) return override.trim();
+  const candidates = process.platform === 'win32'
+    ? [process.env['LOCALAPPDATA'] ? join(process.env['LOCALAPPDATA'], 'agy', 'bin', 'agy.exe') : '']
+    : ['/usr/local/bin/agy', join(homedir(), '.local', 'bin', 'agy')];
+  for (const candidate of candidates) {
+    if (candidate && existsSync(candidate)) return candidate;
+  }
+  return process.platform === 'win32' ? 'agy.exe' : 'agy';
+}
+
+/**
+ * Whether an additional Antigravity account directory holds a sign-in (existence check only).
+ * Such an account always keeps its sign-in in a file in its own CLI data directory, on every
+ * platform; see packages/maker-core/src/agents/agy/account-profile.ts.
+ */
+export function hasAntigravityAccountLogin(accountDir: string): boolean {
+  try {
+    return statSync(join(accountDir, 'gemini', 'antigravity-cli', 'antigravity-oauth-token')).isFile();
+  } catch {
+    return false;
+  }
+}
+
 export function hasAntigravityCliLogin(home: string = homedir()): boolean {
   try {
     if (statSync(join(home, ...ANTIGRAVITY_CLI_DIR_SEGMENTS, 'antigravity-oauth-token')).isFile()) return true;

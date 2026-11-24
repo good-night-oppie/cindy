@@ -5220,6 +5220,9 @@ contextBridge.exposeInMainWorld('electronAPI', {
     // 已建立任务实际在用的账号(只读，用量显示用)。
     sessionAccount: (query: import('../shared/subscriptionAccounts').SubscriptionSessionAccountQuery): Promise<unknown> =>
       ipcRenderer.invoke('maker:subscription-accounts', query),
+    // Antigravity sign-in started from this window (link to open, pasted code to hand over).
+    antigravityLogin: (request: import('../shared/subscriptionAccounts').AntigravityLoginRequest): Promise<{ link?: string | null; accepted?: boolean }> =>
+      ipcRenderer.invoke('maker:subscription-accounts:antigravity-login', request),
   },
   providerGroup: {
     command: (command: ProviderGroupCommand): Promise<unknown> =>

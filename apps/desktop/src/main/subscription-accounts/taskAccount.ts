@@ -39,12 +39,13 @@ export interface TaskPoolAccount {
 
 const OPENAI_KINDS = ['codex', 'cc', 'claude-code', 'pi'];
 const CLAUDE_KINDS = ['cc', 'claude-code'];
+const ANTIGRAVITY_KINDS = ['agy'];
 
 /** Which pool a local task uses and the account it is on; null when it is not a local pool task. */
 export function readTaskPoolAccount(sessionId: string, row: TaskAccountSession): TaskPoolAccount | null {
   if (row.status === 'deleted' || row.remoteHostId || row.agentDeviceId) return null;
   const ref = resolveSubscriptionPoolProvider(row.providerId);
-  if (!ref || !(ref.kind === 'openai' ? OPENAI_KINDS : CLAUDE_KINDS).includes(row.agentKind ?? '')) return null;
+  if (!ref || !(ref.kind === 'openai' ? OPENAI_KINDS : ref.kind === 'antigravity' ? ANTIGRAVITY_KINDS : CLAUDE_KINDS).includes(row.agentKind ?? '')) return null;
   const provider = ref.kind;
   const binding = readAccountBinding(`task:${sessionId}`, provider)
     ?? (row.sdkSessionId ? readAccountBinding(`native:${row.sdkSessionId}`, provider) : undefined);

@@ -13,10 +13,14 @@ const h = vi.hoisted(() => ({
   execute: vi.fn(),
   availability: vi.fn(),
   sessionRead: vi.fn(),
+  agyLink: vi.fn(),
+  agyCode: vi.fn(),
   owner: 'owner-a',
   generation: 1,
   bindings: {} as Record<string, { providerId: 'anthropic' | 'openai'; accountId: string; via?: string }>,
   pools: {} as Partial<Record<'anthropic' | 'openai', SubscriptionPoolConfig>>,
+  // The Antigravity file (store.ts): its own pools and bindings.
+  antigravity: { pools: {} as Record<string, SubscriptionPoolConfig>, bindings: {} as Record<string, { providerId: string; accountId: string }> },
   beforeWrite: undefined as (() => void) | undefined,
   access: { disabledModels: {}, disabledProviders: {} } as { disabledModels: Record<string, true>; disabledProviders: Record<string, true> },
   remoteAllowed: new Set<string>(),
@@ -64,6 +68,15 @@ vi.mock('../../maker-host/override-settings-file.js', () => ({
           if (next.providers) h.created = next.providers;
         },
       }
+    : options.label === 'subscription-accounts-antigravity'
+    ? {
+        invalidateIfChanged: () => {},
+        isUnreadable: () => false,
+        read: () => h.antigravity,
+        updateAtomic: async (edit: (input: { value: typeof h.antigravity }) => Partial<typeof h.antigravity>) => {
+          h.antigravity = { ...h.antigravity, ...edit({ value: h.antigravity }) };
+        },
+      }
     : {
         invalidateIfChanged: () => {},
         isUnreadable: () => h.poolUnreadable,
@@ -101,12 +114,14 @@ vi.mock('../runtime.js', () => ({
   readLegacySubscriptionPoolUsage: vi.fn(async () => undefined),
   readSubscriptionSessionUsage: vi.fn(async () => undefined),
   readSubscriptionSessionAccount: h.sessionRead,
+  readAntigravityLoginLink: h.agyLink,
+  submitAntigravityLoginCode: h.agyCode,
 }));
 import { registerSubscriptionAccountsIpc } from '../ipc.js';
 import { onSubscriptionAccountsChanged } from '../runtime.js';
 import { broadcast } from '../../device-link/index.js';
 import { accountDirectory, accountOwnerPrefix, migrateLegacyCodexAccounts, readBoundClaudeConfigDir, readLegacyCodexAccountId, normalizePoolFile,
-  readProviderBoundAccountIds, writeAccountBindings } from '../store.js';
+  readAccountBinding, readBoundSubscriptionAccountIds, readPool, readProviderBoundAccountIds, updatePool, writeAccountBindings } from '../store.js';
 import { SUBSCRIPTION_ACCOUNTS_CHANNEL } from '../../../shared/subscriptionAccounts.js';
 import { mapIpcErrorToI18nKey } from '../../../shared/ipcError.js';
 import { legacyCodexAccountCanRun, openAiRouteAllowsModel, setLegacyCodexAccountPaused } from '../legacyAccountAccess.js';
@@ -123,6 +138,70 @@ import {
 } from '../placement.js';
 registerSubscriptionAccountsIpc();
 const invoke = (command: unknown) => h.handlers.get(SUBSCRIPTION_ACCOUNTS_CHANNEL)!({}, command);
+
+// Rule: the Antigravity CLI waits for a pasted code (CLI 1.5.15). The window that started the
+// sign-in reads the link and hands the code over on this computer only; a remote or shared-task
+// caller gets neither, and the code is not returned. Unit tier: the production IPC handler.
+describe('Antigravity sign-in channel', () => {
+  const call = (request: unknown) => h.handlers.get('maker:subscription-accounts:antigravity-login')!({}, request);
+  it('serves the window on this computer and refuses every remote caller', async () => {
+    h.trusted = true; h.context = null;
+    h.agyLink.mockReset().mockReturnValue('https://accounts.google.com/o/oauth2/auth?state=fixture');
+    h.agyCode.mockReset().mockReturnValue(true);
+    expect(await call({ op: 'link', loginKey: 'k1' })).toEqual({ link: 'https://accounts.google.com/o/oauth2/auth?state=fixture' });
+    expect(await call({ op: 'code', loginKey: 'k1', code: 'fixture-code' })).toEqual({ accepted: true });
+    expect(h.agyCode).toHaveBeenCalledExactlyOnceWith('k1', 'fixture-code');
+    await expect(call({ op: 'code', loginKey: '../x', code: 'c' })).rejects.toThrow();
+    for (const context of [{ controllerDeviceId: 'other-computer' }, { sharedTask: {} }]) {
+      h.context = context;
+      await expect(call({ op: 'link', loginKey: 'k1' })).rejects.toThrow();
+    }
+    h.context = null; h.trusted = false;
+    await expect(call({ op: 'link', loginKey: 'k1' })).rejects.toThrow();
+    h.trusted = true;
+    expect(h.agyCode).toHaveBeenCalledTimes(1);
+  });
+});
+
+// Rule: cindy#1 (owner, 2026-11-23) - Antigravity accounts. A client that does not know the kind
+// rewrites subscription-accounts.json from what it understands, so these accounts and their task
+// bindings are kept in a file of their own. No existing case has a third kind. Unit tier: the
+// two files are in-memory stand-ins; the production normalizer, path builder and writers run.
+describe('Antigravity accounts are stored apart from the file older clients rewrite', () => {
+  it('writes the pool and task bindings to its own file and leaves the shared file as it was', async () => {
+    h.pools = {}; h.bindings = {}; h.antigravity = { pools: {}, bindings: {} };
+    const id = `cindy-${accountOwnerPrefix()}-11111111-1111-4111-8111-111111111111`;
+    await updatePool('antigravity', pool => ({ ...pool, accounts: [...pool.accounts, { id, paused: false, limit: 4, weight: 1 }] }));
+    await writeAccountBindings(['task:t1'], 'antigravity', id);
+    expect(h.pools).toEqual({});
+    expect(h.bindings).toEqual({});
+    expect(readPool('antigravity')?.accounts.map(account => account.id)).toEqual(['default', id]);
+    expect(readAccountBinding('task:t1', 'antigravity')?.accountId).toBe(id);
+    expect([...readBoundSubscriptionAccountIds('antigravity')]).toEqual([id]);
+    expect(readPool('openai')).toBeNull();
+    // An additional account lives under Cindy's own folder, never at or inside the CLI's ~/.gemini.
+    expect(accountDirectory('antigravity', id)).toBe(path.join(homedir(), '.cindy', 'agy-accounts', id));
+  });
+
+  it('keeps each kind only in the file it belongs to when the files are read back', () => {
+    const account = { id: 'default', paused: false, limit: 4, weight: 1 };
+    const raw = {
+      pools: { openai: { strategy: 'least', accounts: [account] }, antigravity: { strategy: 'least', accounts: [account] } },
+      bindings: { 'openai:task:a': { providerId: 'openai', accountId: 'default' }, 'antigravity:task:b': { providerId: 'antigravity', accountId: 'default' } },
+    };
+    const shared = normalizePoolFile(raw);
+    expect(Object.keys(shared.pools)).toEqual(['openai']);
+    expect(Object.keys(shared.bindings)).toEqual(['openai:task:a']);
+    const own = normalizePoolFile(raw, ['antigravity']);
+    expect(Object.keys(own.pools)).toEqual(['antigravity']);
+    expect(Object.keys(own.bindings)).toEqual(['antigravity:task:b']);
+  });
+
+  it('creates no separate provider for an Antigravity account', async () => {
+    const id = `cindy-${accountOwnerPrefix()}-22222222-2222-4222-8222-222222222222`;
+    await expect(createSubscriptionProvider('antigravity', id, 'Antigravity', () => '12345678')).rejects.toThrow('stay in the Antigravity provider');
+  });
+});
 
 // Unit: CLI-origin accounts were rejected by the actual placement writer. Moving out and back
 // must persist like any account while the official CLI home and history remain unchanged.

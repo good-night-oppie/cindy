@@ -21817,7 +21817,16 @@
     "quotaUpdating": "Quota en attente de mise à jour",
     "quotaResetSoon": "Réinitialisation proche",
     "quotaAverageHint": "Quota hebdomadaire · Poids égal par compte",
-    "quotaResetHint": "Au rythme actuel, du quota pourrait rester à la réinitialisation : jaune sous 24 heures, rouge sous 6 heures."
+    "quotaResetHint": "Au rythme actuel, du quota pourrait rester à la réinitialisation : jaune sous 24 heures, rouge sous 6 heures.",
+    "antigravitySignIn": {
+      "title": "Sign in to another Google account for Antigravity",
+      "waiting": "Starting the sign-in…",
+      "openLink": "Open the Google sign-in page",
+      "codeLabel": "After you sign in, paste the code or the address of the page you land on",
+      "submit": "Continue",
+      "checking": "Finishing the sign-in…",
+      "rejected": "That didn't work. Start adding the account again."
+    }
   },
   "sessionNotify": {
     "finished": "Cette tâche a terminé son tour. Sa réponse finale :",

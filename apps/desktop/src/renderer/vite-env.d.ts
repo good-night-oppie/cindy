@@ -4336,6 +4336,8 @@ interface ElectronAPI {
     command(command: import('../shared/subscriptionAccounts').SubscriptionAccountCommand): Promise<import('../shared/subscriptionAccounts').SubscriptionPoolView>;
     /** Validate the reply with parseSubscriptionSessionAccountView. */
     sessionAccount?(query: import('../shared/subscriptionAccounts').SubscriptionSessionAccountQuery): Promise<unknown>;
+    /** Antigravity sign-in started from this window; absent on older builds. */
+    antigravityLogin?(request: import('../shared/subscriptionAccounts').AntigravityLoginRequest): Promise<{ link?: string | null; accepted?: boolean }>;
   };
   providerGroup: {
     command<C extends import('../shared/providerGroup').ProviderGroupCommand>(

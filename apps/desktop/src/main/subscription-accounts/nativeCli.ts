@@ -2,7 +2,7 @@
 import { spawn } from 'node:child_process';
 import { homedir } from 'node:os';
 import path from 'node:path';
-import { open } from 'node:fs/promises';
+import { mkdir, open } from 'node:fs/promises';
 import { statSync, type Stats } from 'node:fs';
 import { cleanProcessEnv, type AuthState } from '@cindy/maker-core';
 import { getReadyBinaryPath } from '../agent-binaries/index.js';
@@ -14,6 +14,92 @@ import {
 import { parseClaudeOAuthUsageResponse } from '../../shared/claudeSubscriptionUsage.js';
 import { providerGroupCodexUsageFromReads } from '../provider-group/usage.js';
 import type { SubscriptionProvider } from '../../shared/subscriptionAccounts.js';
+import { hasAntigravityAccountLogin, hasAntigravityCliLogin, resolveAntigravityCliBinary } from '../maker-host/antigravity-cli-login.js';
+
+/** The default Antigravity account is the CLI's own sign-in in its usual place. */
+const isAntigravityDefaultDirectory = (directory: string) => directory === path.join(homedir(), '.gemini');
+
+/**
+ * What the Antigravity sign-in needs from its caller. The CLI prints a Google sign-in link and
+ * waits for the authorization code on its input; it opens no browser itself.
+ */
+export interface AntigravityLoginPrompt {
+  /** Show or open the sign-in link. It is a one-time link, not a credential; do not log it. */
+  openLink(url: string): void | Promise<void>;
+  /** The code (or landing-page address) the person pastes. Passed to the CLI only, never logged. */
+  readCode(signal: AbortSignal): Promise<string>;
+}
+
+/**
+ * Sign an additional Antigravity account in, into its own directory. The same arguments and
+ * marker as a task launch for that account, so the sign-in is written where the task reads it.
+ */
+export async function loginAntigravityAccount(
+  directory: string,
+  signal: AbortSignal,
+  prompt: AntigravityLoginPrompt | undefined,
+  deps: { spawn?: typeof spawn; binary?: string | null } = {},
+): Promise<void> {
+  // Cindy does not start the CLI's own sign-in: that one belongs to the person's terminal.
+  if (isAntigravityDefaultDirectory(directory)) throw new Error('agy_default_login_in_cli');
+  if (!prompt) throw new Error('agy_login_needs_code_entry');
+  const binary = deps.binary === undefined ? resolveAntigravityCliBinary() : deps.binary;
+  if (!binary) throw new Error('Antigravity CLI unavailable');
+  if (signal.aborted) throw new Error('login_cancelled');
+  const dataDir = path.join(directory, 'gemini');
+  await mkdir(dataDir, { recursive: true, mode: 0o700 });
+  await new Promise<void>((resolve, reject) => {
+    const child = (deps.spawn ?? spawn)(binary, ['acp', '--login', '--gemini-dir', dataDir], {
+      cwd: directory,
+      // The same marker as a task launch for the account (maker-core agy/account-profile.ts):
+      // a value already there is kept, otherwise the standard four fields naming this computer.
+      env: (() => { const env = { ...cleanProcessEnv() }; return { ...env, SSH_CONNECTION: env.SSH_CONNECTION?.trim() || '127.0.0.1 0 127.0.0.1 0' }; })(),
+      stdio: ['pipe', 'pipe', 'ignore'],
+      windowsHide: true,
+    });
+    const stop = () => child.kill();
+    const timer = setTimeout(stop, 5 * 60_000);
+    signal.addEventListener('abort', stop, { once: true });
+    if (signal.aborted) stop();
+    let failure: Error | undefined;
+    let asked = false;
+    let seen = '';
+    child.stdout?.on('data', (chunk: Buffer) => {
+      if (asked) return;
+      seen = (seen + chunk.toString('utf8')).slice(-8192);
+      const link = /https:\/\/accounts\.google\.com\/\S+/.exec(seen)?.[0];
+      // The link line is complete once the CLI has gone on to ask for the code.
+      if (!link || !/\n[^\n]*https:\/\/accounts\.google\.com\/\S+\s*\n/.test(seen)) return;
+      asked = true;
+      seen = '';
+      void (async () => {
+        await prompt.openLink(link);
+        const code = (await prompt.readCode(signal)).trim();
+        if (!code || /[\r\n]/.test(code)) throw new Error('login_failed');
+        child.stdin?.end(`${code}\n`);
+      })().catch((error: unknown) => {
+        failure = signal.aborted ? new Error('login_cancelled') : error instanceof Error ? error : new Error('login_failed');
+        stop();
+      });
+    });
+    const cleanup = () => {
+      clearTimeout(timer);
+      signal.removeEventListener('abort', stop);
+    };
+    child.once('error', () => {
+      cleanup();
+      reject(new Error('Antigravity CLI unavailable'));
+    });
+    child.once('close', (code) => {
+      cleanup();
+      if (signal.aborted) reject(new Error('login_cancelled'));
+      else if (failure) reject(failure);
+      else if (code !== 0) reject(new Error('login_failed'));
+      else resolve();
+    });
+  });
+  if (!hasAntigravityAccountLogin(directory)) throw new Error('login_failed');
+}
 
 /** Preserve the old adapter's owner/revocation checks; do not adopt ~/.codex on upgrade. */
 export async function readLegacyCodexAccount(): Promise<AuthState> {
@@ -79,6 +165,14 @@ export async function readNativeAccount(
   directory: string,
   options?: { force?: boolean },
 ): Promise<AuthState & { plan?: string; planTier?: string; planType?: string; loginExpiresAt?: string }> {
+  if (provider === 'antigravity') {
+    // Existence only. The CLI has no way to ask who is signed in, so there is no identity or
+    // plan, and a sign-in that the service no longer accepts is found only when a task runs.
+    return {
+      authenticated: isAntigravityDefaultDirectory(directory) ? hasAntigravityCliLogin() : hasAntigravityAccountLogin(directory),
+      authSource: 'oauth',
+    };
+  }
   if (provider === 'anthropic') {
     const result = await refreshClaudeCliLoginStatus({
       configDir: directory === path.join(homedir(), '.claude') ? undefined : directory,
@@ -111,7 +205,14 @@ export async function readNativeAccount(
   };
 }
 
-export async function readNativeAccountUsage(provider: SubscriptionProvider, directory: string) {
+export async function readNativeAccountUsage(provider: SubscriptionProvider, directory: string): Promise<{
+  claudeUsage?: ReturnType<typeof parseClaudeOAuthUsageResponse> | null;
+  codexUsage?: ReturnType<typeof providerGroupCodexUsageFromReads>;
+  codexCredits?: ReturnType<typeof codexCredits>;
+  codexPlan?: string;
+}> {
+  // The Antigravity CLI reports no usage and no reset time.
+  if (provider === 'antigravity') return {};
   if (provider === 'anthropic') {
     const usage = await readClaudeCliPlanUsage(
       directory === path.join(homedir(), '.claude') ? undefined : directory,
@@ -283,8 +384,9 @@ export async function loginNativeAccount(
   provider: SubscriptionProvider,
   directory: string,
   signal: AbortSignal,
-  options?: { renew?: boolean; expectedEmail?: string },
+  options?: { renew?: boolean; expectedEmail?: string; antigravityPrompt?: AntigravityLoginPrompt },
 ): Promise<void> {
+  if (provider === 'antigravity') return loginAntigravityAccount(directory, signal, options?.antigravityPrompt);
   if (provider === 'anthropic') {
     const result = await runClaudeCliLogin(
       signal,

@@ -79,7 +79,7 @@ export function parseSubscriptionAccountCommand(raw: unknown): SubscriptionAccou
     (value.target === 'default' || value.target === 'new')
   )
     return { action: 'connect', providerId, loginKey, target: value.target };
-  if (value.action === 'create' && isSubscriptionProvider(providerId) && validLoginKey)
+  if (value.action === 'create' && isSubscriptionProvider(providerId) && providerId !== 'antigravity' && validLoginKey)
     return { action: 'create', providerId, loginKey };
   if (value.action === 'place' && accountIdValid(accountId) && accountId !== 'default'
     && (value.target === null || isSubscriptionPoolProviderIdShape(value.target)))

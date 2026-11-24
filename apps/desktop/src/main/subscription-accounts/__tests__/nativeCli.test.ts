@@ -46,6 +46,9 @@ import {
   loginLegacyCodexProviderAccount,
 } from '../nativeCli.js';
 import { refreshClaudeCliLoginStatus, runClaudeCliLogin } from '../../maker-host/claude-native-cli.desktop.js';
+import { loginAntigravityAccount } from '../nativeCli.js';
+import { mkdirSync, writeFileSync } from 'node:fs';
+import { homedir } from 'node:os';
 
 const children: (EventEmitter & {
   stdin: EventEmitter & { write: ReturnType<typeof vi.fn> };
@@ -317,5 +320,88 @@ describe('official Codex profiles', () => {
     await login;
     expect(h.spawn.mock.calls.map((c) => c[1])).toEqual([['app-server'], ['login']]);
     expect(children.every((c) => c.kill.mock.calls.length === 1)).toBe(true);
+  });
+});
+
+// Rule: cindy#1 (owner, 2026-11-23) - an additional Antigravity account signs in into its own
+// directory through the official CLI: the CLI prints a Google link and waits for the code on its
+// input (observed on CLI 1.5.15). No existing case covers this CLI. Unit tier: an in-memory
+// process; the account directory is a temporary folder and the "sign-in file" is a fixture.
+describe('Antigravity account sign-in', () => {
+  const LINK = 'https://accounts.google.com/o/oauth2/auth?client_id=fixture&state=fixture';
+  function fakeCli(dir: string, options: { writesSignIn?: boolean; exit?: number } = {}) {
+    const calls: { args: string[]; cwd: string; env: Record<string, string>; stdio: unknown }[] = [];
+    let child!: EventEmitter & { stdin: { end: ReturnType<typeof vi.fn> }; stdout: EventEmitter; kill: ReturnType<typeof vi.fn> };
+    const spawn = vi.fn((_binary: string, args: string[], opts: { cwd: string; env: Record<string, string>; stdio: unknown }) => {
+      calls.push({ args, cwd: opts.cwd, env: opts.env, stdio: opts.stdio });
+      child = Object.assign(new EventEmitter(), {
+        stdout: new EventEmitter(),
+        stdin: { end: vi.fn(() => {
+          if (options.writesSignIn !== false) {
+            mkdirSync(path.join(dir, 'gemini', 'antigravity-cli'), { recursive: true });
+            writeFileSync(path.join(dir, 'gemini', 'antigravity-cli', 'antigravity-oauth-token'), 'fixture, not a credential');
+          }
+          queueMicrotask(() => child.emit('close', options.exit ?? 0));
+        }) },
+        kill: vi.fn(() => queueMicrotask(() => child.emit('close', null))),
+      });
+      queueMicrotask(() => {
+        child.stdout.emit('data', Buffer.from('Open this link in a browser to log in with Google:\n\n  https://accounts.goo'));
+        child.stdout.emit('data', Buffer.from(`${LINK.slice('https://accounts.goo'.length)}\n\nThen paste the authorization code, or the full URL of the page you land on, and press Enter:\n`));
+      });
+      return child;
+    });
+    return { spawn: spawn as never, calls, child: () => child };
+  }
+  let dir = '';
+  beforeEach(async () => { dir = await mkdtemp(path.join(tmpdir(), 'cindy-agy-account-')); });
+  afterEach(async () => { await rm(dir, { recursive: true, force: true }); });
+
+  it('hands the link to the caller, passes the pasted code to the CLI only, and ends signed in', async () => {
+    const cli = fakeCli(dir);
+    const openLink = vi.fn();
+    expect((await readNativeAccount('antigravity', dir)).authenticated).toBe(false);
+    await loginAntigravityAccount(dir, new AbortController().signal,
+      { openLink, readCode: async () => ' fixture-code ' }, { spawn: cli.spawn, binary: '/fixture/agy' });
+    expect(openLink).toHaveBeenCalledExactlyOnceWith(LINK);
+    expect(cli.child().stdin.end).toHaveBeenCalledExactlyOnceWith('fixture-code\n');
+    // The same data directory and marker a task launch for this account uses.
+    expect(cli.calls[0]!.args).toEqual(['acp', '--login', '--gemini-dir', path.join(dir, 'gemini')]);
+    expect(cli.calls[0]!.env.SSH_CONNECTION).toBe('127.0.0.1 0 127.0.0.1 0');
+    expect(cli.calls[0]!.stdio).toEqual(['pipe', 'pipe', 'ignore']);
+    expect(await readNativeAccount('antigravity', dir)).toEqual({ authenticated: true, authSource: 'oauth' });
+    expect(await readNativeAccountUsage('antigravity', dir)).toEqual({});
+  });
+
+  it.each([
+    ['the CLI exits with an error', { exit: 1 }, 'login_failed'],
+    ['the CLI exits without leaving a sign-in', { writesSignIn: false }, 'login_failed'],
+  ] as const)('is not signed in when %s', async (_name, options, reason) => {
+    const cli = fakeCli(dir, options);
+    await expect(loginAntigravityAccount(dir, new AbortController().signal,
+      { openLink: () => {}, readCode: async () => 'fixture-code' }, { spawn: cli.spawn, binary: '/fixture/agy' })).rejects.toThrow(reason);
+  });
+
+  it('stops the CLI when the person cancels while the code is awaited', async () => {
+    const cli = fakeCli(dir);
+    const abort = new AbortController();
+    const pending = loginAntigravityAccount(dir, abort.signal, {
+      openLink: () => {},
+      readCode: signal => new Promise((_resolve, reject) => signal.addEventListener('abort', () => reject(new Error('gone')), { once: true })),
+    }, { spawn: cli.spawn, binary: '/fixture/agy' });
+    await new Promise(resolve => setTimeout(resolve, 0));
+    abort.abort();
+    await expect(pending).rejects.toThrow('login_cancelled');
+    expect(cli.child().kill).toHaveBeenCalled();
+    expect(cli.child().stdin.end).not.toHaveBeenCalled();
+  });
+
+  it('never starts the sign-in of the CLI\u2019s own account, and starts none without a way to enter the code', async () => {
+    const cli = fakeCli(dir);
+    const signal = new AbortController().signal;
+    await expect(loginAntigravityAccount(path.join(homedir(), '.gemini'), signal,
+      { openLink: () => {}, readCode: async () => 'x' }, { spawn: cli.spawn, binary: '/fixture/agy' })).rejects.toThrow('agy_default_login_in_cli');
+    await expect(loginAntigravityAccount(dir, signal, undefined, { spawn: cli.spawn, binary: '/fixture/agy' })).rejects.toThrow('agy_login_needs_code_entry');
+    expect(cli.calls).toHaveLength(0);
   });
 });

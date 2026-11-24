@@ -62,6 +62,8 @@ async function providerFor(
   // without an explicit provider. Its account must be registered for the bridge.
   if (!requested && agent.kind === 'claude-code' && options.model?.startsWith(CHATGPT_MODEL_PREFIX))
     return 'openai';
+  // An Antigravity task names no other source: its only route is the CLI's own subscription.
+  if (!requested && agent.kind === 'agy' && readPool('antigravity')) ref = { kind: 'antigravity', providerId: 'antigravity' };
   if (!requested && auth && (agent.kind === 'claude-code' || agent.kind === 'codex')) {
     const native = agent.kind === 'claude-code' ? 'anthropic' : 'openai';
     // An implicit route may use the native login or the gateway. Ask the same
@@ -75,6 +77,7 @@ async function providerFor(
   }
   if (!ref) return null;
   return (agent.kind === 'claude-code' && ref.kind === 'anthropic') ||
+    (agent.kind === 'agy' && ref.kind === 'antigravity') ||
     (ref.kind === 'openai' && ['codex', 'claude-code', 'pi'].includes(agent.kind))
     ? ref.providerId
     : null;
@@ -342,7 +345,8 @@ export function withSubscriptionAccounts<T extends BaseAgent>(agent: T, auth?: S
     get(target, property) {
       if (property === 'refreshLocalModels')
         return async (options?: RefreshLocalModelsOptions) => {
-          if (target.kind === 'pi') return target.refreshLocalModels(options);
+          // Antigravity's model list does not depend on the account.
+          if (target.kind === 'pi' || target.kind === 'agy') return target.refreshLocalModels(options);
           const provider = target.kind === 'claude-code' ? 'anthropic' : 'openai';
           if (
             !readPool(provider) ||

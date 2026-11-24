@@ -126,7 +126,7 @@ export interface ProviderView extends Provider {
    * kind (built-in subscriptions with a pool, providers Cindy created, registered legacy Codex
    * connections). Older hosts omit it; clients then keep their built-in-only behavior.
    */
-  subscriptionAccountPool?: 'openai' | 'anthropic';
+  subscriptionAccountPool?: 'openai' | 'anthropic' | 'antigravity';
   subscriptionAccount?: { source: 'local' | 'oauth' | 'unknown'; identity?: string; reconnectRequired?: boolean };
   /** Public account identity and credential origin, never credential material. */
   openAiAccount?: { source: 'local' | 'oauth' | 'unknown'; identity?: string; reconnectRequired?: boolean; accountKey?: string };

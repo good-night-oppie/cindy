@@ -299,3 +299,34 @@ describe('SubscriptionAccountsSection usage', () => {
     expect(screen.queryByText('/home/.claude-second')).toBeNull();
   });
 });
+
+// Rule: an additional Antigravity account signs in through a Google link and a pasted code
+// (CLI 1.5.15); there is no terminal in the app. No existing case covers this kind. Unit tier:
+// the real section, IPC stand-ins. Minimal input: adding an account to the Antigravity provider.
+describe('SubscriptionAccountsSection Antigravity sign-in', () => {
+  it('shows the sign-in link while adding an account and hands the pasted code to this computer', async () => {
+    let finishAdd!: () => void;
+    const agyView: SubscriptionPoolView = { providerId: 'antigravity', configured: true, strategy: 'least', accounts: [
+      { id: 'default', paused: false, limit: 4, weight: 1, directory: '/home/.gemini', status: 'ready', running: 0 }] };
+    const command = vi.fn(async (c: { action: string }) => c.action === 'add'
+      ? new Promise<SubscriptionPoolView>((resolve) => { finishAdd = () => resolve(agyView); }) : agyView);
+    const antigravityLogin = vi.fn(async (r: { op: string }) => r.op === 'link'
+      ? { link: 'https://accounts.google.com/o/oauth2/auth?state=fixture' } : { accepted: true });
+    const openExternal = vi.fn();
+    Object.assign((window as unknown as { electronAPI: Record<string, unknown> }).electronAPI, {
+      subscriptionAccounts: { command, onChanged: vi.fn(() => () => undefined), antigravityLogin }, openExternal });
+    render(<SubscriptionAccountsSection providerId="antigravity" kind="antigravity" />);
+    fireEvent.click(await screen.findByRole('button', { name: /subscriptionAccounts\.add/ }));
+    fireEvent.click(await screen.findByRole('button', { name: 'subscriptionAccounts.antigravitySignIn.openLink' }));
+    expect(openExternal).toHaveBeenCalledWith('https://accounts.google.com/o/oauth2/auth?state=fixture');
+    const addCall = command.mock.calls.find(([c]) => c.action === 'add')![0] as unknown as { loginKey: string };
+    fireEvent.change(screen.getByLabelText('subscriptionAccounts.antigravitySignIn.codeLabel'), { target: { value: ' fixture-code ' } });
+    const submit = screen.getByRole('button', { name: 'subscriptionAccounts.antigravitySignIn.submit' }) as HTMLButtonElement;
+    await waitFor(() => expect(submit.disabled).toBe(false));
+    fireEvent.click(submit);
+    await waitFor(() => expect(antigravityLogin).toHaveBeenCalledWith({ op: 'code', loginKey: addCall.loginKey, code: 'fixture-code' }));
+    expect(await screen.findByText('subscriptionAccounts.antigravitySignIn.checking')).toBeTruthy();
+    await act(async () => { finishAdd(); });
+    await waitFor(() => expect(screen.queryByTestId('antigravity-sign-in')).toBeNull());
+  });
+});

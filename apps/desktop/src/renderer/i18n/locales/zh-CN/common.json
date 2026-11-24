@@ -21532,7 +21532,16 @@
     "quotaUpdating": "余量待更新",
     "quotaResetSoon": "即将重置",
     "quotaAverageHint": "每周配额 · 按账号等权平均",
-    "quotaResetHint": "按当前使用速度，重置时可能仍有余量：24 小时内为黄色，6 小时内为红色。"
+    "quotaResetHint": "按当前使用速度，重置时可能仍有余量：24 小时内为黄色，6 小时内为红色。",
+    "antigravitySignIn": {
+      "title": "为 Antigravity 登录另一个 Google 账号",
+      "waiting": "正在准备登录…",
+      "openLink": "打开 Google 登录页",
+      "codeLabel": "登录后，把页面上的授权码或最后打开的网页地址粘贴到这里",
+      "submit": "继续",
+      "checking": "正在完成登录…",
+      "rejected": "没有成功。请重新添加账号。"
+    }
   },
   "sessionNotify": {
     "finished": "这个任务这一轮做完了，最终答复如下：",

@@ -30,8 +30,9 @@ export function publishSubscriptionPoolProviders(ports: SubscriptionPoolPublishe
   try {
     const created = ports.readCreatedSubscriptionProvidersIfReadable();
     if (created === null) return;
+    // No provider is created for an Antigravity account (placement.ts), so none is published.
     ports.setSubscriptionPoolProviders(Object.entries(created)
-      .map(([id, entry]) => ({ id, kind: entry.kind, name: entry.name })));
+      .flatMap(([id, entry]) => entry.kind === 'antigravity' ? [] : [{ id, kind: entry.kind, name: entry.name }]));
   } catch (err) {
     // A thrown read also keeps the previous list; the next refresh retries.
     ports.log.warn('publishing subscription providers failed', { err: String(err) });

@@ -21613,7 +21613,16 @@
     "quotaUpdating": "Quota updating",
     "quotaResetSoon": "Resets soon",
     "quotaAverageHint": "Weekly quota · Equal weight per account",
-    "quotaResetHint": "At the current pace, quota may remain at reset: yellow within 24 hours, red within 6 hours."
+    "quotaResetHint": "At the current pace, quota may remain at reset: yellow within 24 hours, red within 6 hours.",
+    "antigravitySignIn": {
+      "title": "Sign in to another Google account for Antigravity",
+      "waiting": "Starting the sign-in…",
+      "openLink": "Open the Google sign-in page",
+      "codeLabel": "After you sign in, paste the code or the address of the page you land on",
+      "submit": "Continue",
+      "checking": "Finishing the sign-in…",
+      "rejected": "That didn't work. Start adding the account again."
+    }
   },
   "sessionNotify": {
     "finished": "This task finished its turn. Its final answer:",

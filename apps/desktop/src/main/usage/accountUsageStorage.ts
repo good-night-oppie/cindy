@@ -1,11 +1,11 @@
 import { activeOwnerScopeKey, isAppSessionBoundaryPending } from '../appSessionState.js';
 import { getCurrentDbClientUserId, getDbClient } from '../localDb/client/current.js';
 
-export type AccountUsageProvider = 'anthropic' | 'openai';
+export type AccountUsageProvider = 'anthropic' | 'openai' | 'antigravity';
 
 /** The database is owner-scoped; placement in a different provider never changes account identity. */
 export function accountUsageStorageKey(provider: AccountUsageProvider, accountId: string): string {
-  return `${provider === 'anthropic' ? 'claude-code' : 'codex'}:${accountId}`;
+  return `${provider === 'anthropic' ? 'claude-code' : provider === 'antigravity' ? 'agy' : 'codex'}:${accountId}`;
 }
 
 // One in-flight write and a clear/latest replacement per source, serialized on the account row.

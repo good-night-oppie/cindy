@@ -24,6 +24,8 @@ import {
 import { broadcast } from '../device-link/index.js';
 import { setRemoteSubscriptionPoolQuotaReader } from '../device-link/dispatch.desktop.js';
 import { readLegacySubscriptionQuota } from './legacyQuota.js';
+import { readAntigravityLoginLink, submitAntigravityLoginCode } from './runtime.js';
+import { ANTIGRAVITY_LOGIN_CHANNEL } from '../../shared/subscriptionAccounts.js';
 
 /** 远程调用来自同账号的其他电脑：不是分享受邀者，也不是共享任务访客。 */
 function isOwnComputerContext(context: DeviceLinkInvokeContext | null): boolean {
@@ -53,6 +55,18 @@ export function registerSubscriptionAccountsIpc(): void {
     }
     const usage = await readSubscriptionPoolUsage(providerId);
     return { providerId, pooled: usage !== undefined, usage: usage ?? null };
+  });
+  // Local window only. The code is passed to the CLI and is never logged or returned.
+  ipcMain.handle(ANTIGRAVITY_LOGIN_CHANNEL, async (event, raw: unknown) => {
+    if (getDeviceLinkInvokeContext()) throwIpcError('PERMISSION_DENIED', 'Antigravity sign-in is available on this computer only');
+    assertTrustedAppRendererEvent(event);
+    const value = raw && typeof raw === 'object' && !Array.isArray(raw) ? raw as Record<string, unknown> : {};
+    if (typeof value.loginKey !== 'string' || !/^[A-Za-z0-9_-]{1,100}$/.test(value.loginKey))
+      throwIpcError('INVALID_PARAMS', 'Invalid sign-in');
+    const loginKey = value.loginKey as string;
+    if (value.op === 'link') return { link: readAntigravityLoginLink(loginKey) };
+    if (value.op === 'code' && typeof value.code === 'string') return { accepted: submitAntigravityLoginCode(loginKey, value.code) };
+    throwIpcError('INVALID_PARAMS', 'Invalid sign-in');
   });
   ipcMain.handle(SUBSCRIPTION_ACCOUNTS_CHANNEL, async (event, raw: unknown) => {
     const context = getDeviceLinkInvokeContext();

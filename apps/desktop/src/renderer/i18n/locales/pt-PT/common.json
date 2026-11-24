@@ -21817,7 +21817,16 @@
     "quotaUpdating": "Quota a aguardar atualização",
     "quotaResetSoon": "Reposição em breve",
     "quotaAverageHint": "Quota semanal · Peso igual por conta",
-    "quotaResetHint": "Ao ritmo atual, pode restar quota na reposição: amarelo até 24 horas, vermelho até 6 horas."
+    "quotaResetHint": "Ao ritmo atual, pode restar quota na reposição: amarelo até 24 horas, vermelho até 6 horas.",
+    "antigravitySignIn": {
+      "title": "Sign in to another Google account for Antigravity",
+      "waiting": "Starting the sign-in…",
+      "openLink": "Open the Google sign-in page",
+      "codeLabel": "After you sign in, paste the code or the address of the page you land on",
+      "submit": "Continue",
+      "checking": "Finishing the sign-in…",
+      "rejected": "That didn't work. Start adding the account again."
+    }
   },
   "sessionNotify": {
     "finished": "Esta tarefa concluiu o turno. Resposta final:",

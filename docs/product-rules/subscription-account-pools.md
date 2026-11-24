@@ -115,6 +115,35 @@ Claude 保留官方 `subscriptionType` 与 `planTier`，已知具体档位显示
   读不出、把账号算进错误的供应商，或丢掉账号与任务的绑定；回到新版后恢复。字段与降级约定落地时写入
   [多订阅账号协议约定](../dev-rules/protocol-compatibility/provider-multi-subscription-accounts.md)。
 
+## Antigravity 的多个账号（2026-11-23 用户要求，分批实现）
+
+用户要求 Antigravity 也能像 Claude Code、Codex 一样登录多个账号，由 Cindy 分配给任务。
+
+**实现状态**：引擎按所选账号使用独立数据目录、账号的存放与分配已实现；设置界面里的添加账号入口、登录时输入授权码的界面、
+自动换号与上下文交接尚未实现。没有设置过账号池时，Antigravity 任务与以前完全一样，只用这台电脑上命令行自己的登录。
+
+- **账号类别**是 `antigravity`，与内置 Antigravity 供应商同名。所有账号都留在这一个供应商里按账号池规则分配，
+  暂不提供「作为单独的供应商」「拿出」与跨供应商移动；需要这些时另行裁决。
+- **目录**：第一个账号是命令行自己的登录（默认位置，Cindy 不传目录、不改动它）。新增账号在
+  `~/.cindy/agy-accounts/<Cindy 生成的标识>/`，其中 `gemini` 是命令行的数据目录，登录文件由命令行自己写在里面。
+  目录名不含邮箱，不接受界面或远程传入的路径，不放在命令行自己的 `~/.gemini` 之内或之上。
+- **存放**：账号与任务归属单独记在 owner 本机的 `subscription-accounts-antigravity.json`，不写进
+  `subscription-accounts.json`。原因与账号归属文件相同：不认识这个类别的客户端每次写账号池文件都会丢掉它不认识的内容；
+  旧客户端不读写新文件，所以最多是看不到这些账号，不会抹掉它们。
+- **登录**交给未修改的官方命令行（`agy acp --login`，指向该账号的数据目录）。命令行给出一个 Google 登录链接并等待授权码；
+  Cindy 只负责打开链接、把用户粘贴的授权码原样交给命令行，不保存、不记录授权码与链接，不读取或复制登录文件。
+  Cindy 不替命令行自己的那个登录发起登录，那属于用户的终端。
+- **状态**只按登录文件是否存在判断。命令行没有「当前是谁」「套餐」「用量」「重置时间」的接口，所以没有账号身份、
+  无法识别重复登录的同一账号、不显示额度；登录被服务端作废只有在任务运行时才会发现。
+- **分配**：新任务按策略、暂停、并发上限与权重在这个供应商的账号里选；已建立的任务、重开与续聊固定原账号。
+  设置账号池之前建立的任务没有记录，续聊时固定为命令行自己的登录。原生对话存在账号的数据目录里，换账号后接不上，
+  因此在自动换号与上下文交接实现之前，账号出问题时任务照常报原账号的真实错误，不悄悄改用别的账号。
+- **平台**：账号怎样与命令行自己的登录隔离、哪些电脑可以用、启动前的自检，见
+  [Antigravity 原生 ACP](../dev-rules/protocol-compatibility/antigravity-native-acp.md) 的「One sign-in per account directory」。
+  目前 Linux（沙箱内）与 Windows 可以启动，macOS 不启动。
+- 实现见 `subscription-accounts/store.ts`、`nativeCli.ts`、`agent.ts`、`maker-host/antigravity-cli-login.ts` 与
+  `packages/maker-core/src/agents/agy/account-profile.ts`；回归见 `__tests__/ipc.test.ts`、`nativeCli.test.ts`、`runtime.test.ts`。
+
 ## 账号池的既有规则
 
 - **ChatGPT credits 准入修复（2026-11-13）**：账号池不能把套餐 5 小时／周窗口用满当成请求不可用。

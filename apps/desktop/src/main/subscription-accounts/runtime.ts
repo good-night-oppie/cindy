@@ -44,6 +44,7 @@ import type {
 import {
   DEFAULT_SUBSCRIPTION_ACCOUNT,
   MAX_SUBSCRIPTION_ACCOUNTS,
+  isSubscriptionProvider,
   parseSubscriptionSessionAccountView,
   SUBSCRIPTION_ACCOUNTS_CHANNEL,
   CODEX_POOL_RESET_PREFIX,
@@ -137,7 +138,15 @@ interface OwnerRuntime {
   pendingStarts: Map<string, { accountId: string; token: string; until: number }>;
   /** Keyed by the provider that owns the picked accounts (subscription-account placement). */
   lastPicked: Map<string, string>;
-  logins: Map<string, { abort: AbortController; accountId: string }>;
+  logins: Map<string, {
+    abort: AbortController;
+    accountId: string;
+    /**
+     * An Antigravity sign-in in progress: the link the CLI printed, and where the code the person
+     * pastes goes. Held in memory for this sign-in only; neither is logged or written anywhere.
+     */
+    agy?: { link?: string; code?: (value: string) => void };
+  }>;
   invalidated: Map<string, { token: string; reason: string }>;
   /** Actual account failures outrank optimistic cached quota for new assignments. */
   quotaCooling: Map<string, Record<string, number>>;
@@ -209,6 +218,8 @@ function currentRuntime(): OwnerRuntime {
 }
 const keyOf = (provider: SubscriptionProvider, id: string) => `${provider}:${id}`;
 function usageFingerprint(provider: SubscriptionProvider, info: AccountSnapshot): string | undefined {
+  // The Antigravity CLI reports no usage: nothing is stored or restored for its accounts.
+  if (provider === 'antigravity') return undefined;
   return provider === 'openai' ? info.accountKey : info.auth.identity
     ? createHash('sha256').update(`claude-usage:${info.auth.identity}`).digest('hex').slice(0, 16) : undefined;
 }
@@ -221,6 +232,7 @@ function accountStillPresent(state: OwnerRuntime, provider: SubscriptionProvider
 }
 
 async function persistUsage(state: OwnerRuntime, provider: SubscriptionProvider, id: string, info: AccountSnapshot): Promise<void> {
+  if (provider === 'antigravity') return;
   if (!info.auth.authenticated || !info.usage || !accountStillPresent(state, provider, id)) return;
   const fingerprint = usageFingerprint(provider, info);
   const payload = provider === 'anthropic' ? info.usage.claudeUsage && {
@@ -326,7 +338,7 @@ function loadCooling(): Map<string, Record<string, number>> {
   try {
     const now = Date.now();
     for (const [provider, accounts] of Object.entries(readSubscriptionAccountCooling())) {
-      if (provider !== 'anthropic' && provider !== 'openai') continue;
+      if (!isSubscriptionProvider(provider)) continue;
       for (const [id, value] of Object.entries(accounts)) {
         const scopes = currentCooling(value, now);
         if (Object.keys(scopes).length) loaded.set(keyOf(provider, id), scopes);
@@ -475,6 +487,9 @@ function updatePool(
   );
 }
 function defaultAccountBound(provider: SubscriptionProvider): boolean {
+  // Antigravity has no native binding record: Cindy holds no credential of it, and whether the
+  // CLI's own sign-in is used is the Antigravity provider's own switch (provider settings).
+  if (provider === 'antigravity') return true;
   // Placement is never authorization. A moved CLI profile still needs its owner's existing
   // native binding, and explicit revocation must also stop the profile at its new provider.
   return (
@@ -2096,6 +2111,28 @@ export async function acquireSubscriptionAccount(
   };
 }
 
+/**
+ * The sign-in link of an Antigravity sign-in that the caller started. The sign-in key is the
+ * random value the caller chose when it started the sign-in, so only the starter can read it.
+ */
+export function readAntigravityLoginLink(loginKey: string): string | null {
+  return currentRuntime().logins.get(`antigravity:${loginKey}`)?.agy?.link ?? null;
+}
+
+/**
+ * Hand the code the person pasted to the waiting Antigravity CLI. The value goes to the CLI's
+ * input only: it is not kept, logged, or returned. False when no sign-in is waiting for a code.
+ */
+export function submitAntigravityLoginCode(loginKey: string, code: string): boolean {
+  const entry = currentRuntime().logins.get(`antigravity:${loginKey}`)?.agy;
+  const value = code.trim();
+  if (!entry?.code || !value || value.length > 4096 || /[\r\n]/.test(value)) return false;
+  const deliver = entry.code;
+  entry.code = undefined;
+  deliver(value);
+  return true;
+}
+
 export async function runSubscriptionAccountCommand(
   command: SubscriptionAccountCommand,
 ): Promise<SubscriptionPoolView> {
@@ -2308,11 +2345,25 @@ export async function runSubscriptionAccountCommand(
           await loginLegacyCodexAccount(abort.signal);
         else if (renewClaude)
           await loginNativeAccount(provider, directory, abort.signal, { renew: true, expectedEmail });
+        else if (provider === 'antigravity') {
+          const entry = state.logins.get(key);
+          await loginNativeAccount(provider, directory, abort.signal, { antigravityPrompt: {
+            openLink: (url) => {
+              if (entry) entry.agy = { ...entry.agy, link: url };
+              changed(provider);
+            },
+            readCode: (signal) => new Promise<string>((resolve, reject) => {
+              if (signal.aborted) return reject(new Error('login_cancelled'));
+              signal.addEventListener('abort', () => reject(new Error('login_cancelled')), { once: true });
+              if (entry) entry.agy = { ...entry.agy, code: resolve };
+            }),
+          } });
+        }
         else await loginNativeAccount(provider, directory, abort.signal);
       }
       assertOwner(state);
       if (abort.signal.aborted) throw new Error('login_cancelled');
-      if (accountId === 'default' && !legacyCodexDefault(provider))
+      if (accountId === 'default' && provider !== 'antigravity' && !legacyCodexDefault(provider))
         bindNativeProviderAuth(provider, { sharedSystem: true });
       // Do not let a pre-login read land after the post-login identity check.
       await state.flights.get(keyOf(provider, accountId))?.promise.catch(() => {});
@@ -2378,7 +2429,7 @@ export async function runSubscriptionAccountCommand(
 
 /** Display name of a provider's brand; a created provider is renamed after its account. */
 function providerBrandName(kind: SubscriptionProvider): string {
-  return kind === 'anthropic' ? 'Claude' : 'OpenAI';
+  return kind === 'anthropic' ? 'Claude' : kind === 'antigravity' ? 'Antigravity' : 'OpenAI';
 }
 
 /**

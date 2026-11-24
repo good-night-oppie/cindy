@@ -48,13 +48,13 @@ const h = vi.hoisted(() => ({
 }));
 // Persisted placement is replaced like the pool file; its own rules are covered in ipc.test.ts.
 vi.mock('../placement.js', () => {
-  type Kind = 'openai' | 'anthropic';
+  type Kind = 'openai' | 'anthropic' | 'antigravity';
   const owner = (kind: string, id: string) => h.placement[`${kind}:${id}`] ?? kind;
   const legacyAccount = (providerId: string) => h.pools.openai?.legacyCodexAccounts?.[providerId];
   const providerAccounts = <T extends { id: string }>(kind: string, accounts: readonly T[], providerId = kind) =>
     accounts.filter((a) => owner(kind, a.id) === providerId);
   const resolveSubscriptionPoolProvider = (providerId: string | null | undefined) => {
-    if (providerId === 'openai' || providerId === 'anthropic') return { kind: providerId as Kind, providerId, ownAccount: 'default' };
+    if (providerId === 'openai' || providerId === 'anthropic' || providerId === 'antigravity') return { kind: providerId as Kind, providerId, ownAccount: 'default' };
     const created = providerId ? h.created[providerId] : undefined;
     if (providerId && created) return { kind: created.kind, providerId, ownAccount: created.account, created: true as const };
     const legacy = providerId ? legacyAccount(providerId) : undefined;
@@ -93,7 +93,7 @@ vi.mock('../placement.js', () => {
       for (const id of typeof accountId === 'string' ? [accountId] : accountId) place(kind, id, providerId);
     },
     discardUnusedSubscriptionAccountPlacement: async (kind: string, id: string) => { delete h.placement[`${kind}:${id}`]; },
-    createSubscriptionProvider: async (kind: Kind, accountId: string, name: string, createId: () => string, prepare?: (id: string) => void, additionalAccountIds: readonly string[] = []) => {
+    createSubscriptionProvider: async (kind: 'openai' | 'anthropic', accountId: string, name: string, createId: () => string, prepare?: (id: string) => void, additionalAccountIds: readonly string[] = []) => {
       const providerId = `${kind}-sub-${createId()}`;
       prepare?.(providerId);
       h.created[providerId] = { kind, name, account: accountId };
@@ -195,6 +195,8 @@ vi.mock('../store.js', () => ({
   },
 }));
 import {
+  readAntigravityLoginLink,
+  submitAntigravityLoginCode,
   acquireSubscriptionAccount,
   hasUnavailableSubscriptionPoolAccount,
   needsSubscriptionAccountHandoff as probeSubscriptionAccountHandoff,
@@ -412,11 +414,86 @@ it.each(['anthropic', 'openai'].flatMap(provider => [false, true].map(resume => 
   await handle.close();
 });
 
+// Rule: cindy#1 (owner, 2026-11-23) - Antigravity tasks take an account from the Antigravity
+// provider's accounts, as Codex tasks do. No existing case starts the agy engine through the
+// pool. Unit tier: the engine, CLI reads and the files are this file's stand-ins.
+describe('Antigravity tasks and the account pool', () => {
+  const start = () => vi.fn(async (_options: StartSessionOptions) => ({ id: `native-${Math.random()}`, send: async () => {}, close: async () => {} }));
+  const dirOf = (call: [StartSessionOptions]) => call[0][NATIVE_SUBSCRIPTION_ACCOUNT]?.configDir;
+
+  it('hands new tasks the provider’s accounts in turn, and no account while there is no pool', async () => {
+    const engine = start();
+    const agent = withSubscriptionAccounts({ kind: 'agy', startSession: engine } as unknown as BaseAgent);
+    await (await agent.startSession({ providerId: 'antigravity', sessionId: 'before-pool' } as StartSessionOptions)).close();
+    expect(engine.mock.calls[0]![0][NATIVE_SUBSCRIPTION_ACCOUNT]).toBeUndefined();
+
+    h.pools.antigravity = { strategy: 'round', accounts: [account('default'), account('second')] };
+    for (const sessionId of ['a', 'b', 'c']) await (await agent.startSession({ providerId: 'antigravity', sessionId } as StartSessionOptions)).close();
+    expect(engine.mock.calls.slice(1).map(call => dirOf(call as [StartSessionOptions])).sort())
+      .toEqual(['antigravity/default', 'antigravity/default', 'antigravity/second'].sort());
+    const first = engine.mock.calls[1]![0][NATIVE_SUBSCRIPTION_ACCOUNT]!;
+    expect(first.defaultProfile).toBe(first.configDir === 'antigravity/default');
+    // A task that names no source is an Antigravity task all the same.
+    await (await agent.startSession({ sessionId: 'no-source' } as StartSessionOptions)).close();
+    expect(dirOf(engine.mock.calls.at(-1) as [StartSessionOptions])).toContain('antigravity/');
+  });
+
+  it('keeps a task on its account when it is reopened, and an older task on the computer’s own sign-in', async () => {
+    h.pools.antigravity = { strategy: 'round', accounts: [account('default'), account('second')] };
+    const engine = start();
+    const agent = withSubscriptionAccounts({ kind: 'agy', startSession: engine } as unknown as BaseAgent);
+    // Started before there were accounts: no binding recorded.
+    await (await agent.startSession({ providerId: 'antigravity', sessionId: 'old', resumeSessionId: 'old-native' } as StartSessionOptions)).close();
+    expect(dirOf(engine.mock.calls[0] as [StartSessionOptions])).toBe('antigravity/default');
+    const lease = await acquireSubscriptionAccount('antigravity', undefined, ['task:pinned'], false, { accountId: 'second', resuming: false });
+    await lease!.bind(['task:pinned', 'native:pinned-native']); lease!.release();
+    for (let i = 0; i < 3; i++) {
+      await (await agent.startSession({ providerId: 'antigravity', sessionId: 'pinned', resumeSessionId: 'pinned-native' } as StartSessionOptions)).close();
+      expect(dirOf(engine.mock.calls.at(-1) as [StartSessionOptions])).toBe('antigravity/second');
+    }
+  });
+
+  // Rule: the CLI prints a sign-in link and waits for a pasted code (CLI 1.5.15). Only the caller
+  // that started the sign-in (it chose the random sign-in key) reads the link, and a code reaches
+  // the waiting CLI once. Unit tier: the CLI sign-in is this file's stand-in.
+  it('gives the sign-in link to the caller that started it, and hands the pasted code to the CLI once', async () => {
+    h.pools.antigravity = { strategy: 'round', accounts: [account('default')] };
+    let received: string | undefined;
+    h.login.mockImplementationOnce(async (_p: string, _d: string, _s: AbortSignal, options: { antigravityPrompt: { openLink(u: string): void; readCode(s: AbortSignal): Promise<string> } }) => {
+      options.antigravityPrompt.openLink('https://accounts.google.com/o/oauth2/auth?state=fixture');
+      received = await options.antigravityPrompt.readCode(new AbortController().signal);
+    });
+    expect(submitAntigravityLoginCode('fixture-login', 'early')).toBe(false);
+    const adding = runSubscriptionAccountCommand({ action: 'add', providerId: 'antigravity', loginKey: 'fixture-login' });
+    await vi.waitFor(() => expect(readAntigravityLoginLink('fixture-login')).toContain('accounts.google.com'));
+    expect(readAntigravityLoginLink('another-login')).toBeNull();
+    expect(submitAntigravityLoginCode('fixture-login', 'two\nlines')).toBe(false);
+    expect(submitAntigravityLoginCode('fixture-login', ' fixture-code ')).toBe(true);
+    expect(submitAntigravityLoginCode('fixture-login', 'again')).toBe(false);
+    await adding;
+    expect(received).toBe('fixture-code');
+    expect(readAntigravityLoginLink('fixture-login')).toBeNull();
+  });
+
+  it('does not hand an Antigravity account to another engine, or another kind’s account to Antigravity', async () => {
+    h.pools.antigravity = { strategy: 'round', accounts: [account('default'), account('second')] };
+    h.pools.openai = { strategy: 'round', accounts: [account('default'), account('second')] };
+    const codex = start();
+    await (await withSubscriptionAccounts({ kind: 'codex', startSession: codex } as unknown as BaseAgent)
+      .startSession({ providerId: 'antigravity', sessionId: 'codex-names-antigravity' } as StartSessionOptions)).close();
+    expect(codex.mock.calls[0]![0][NATIVE_SUBSCRIPTION_ACCOUNT]).toBeUndefined();
+    const agy = start();
+    await (await withSubscriptionAccounts({ kind: 'agy', startSession: agy } as unknown as BaseAgent)
+      .startSession({ providerId: 'openai', sessionId: 'agy-names-openai' } as StartSessionOptions)).close();
+    expect(agy.mock.calls[0]![0][NATIVE_SUBSCRIPTION_ACCOUNT]).toBeUndefined();
+  });
+});
+
 // Unit: each clear captures the current owner's database. Switching owner during the account
 // config write must reject before either remove path can clear the new owner's default ID.
 it.each(['anthropic', 'openai'].flatMap(provider => ['remove', 'remove-provider'].map(action => ({ provider, action }))))
 ('stops $provider $action quota cleanup when the config write crosses owners', async ({ provider: kind, action }) => {
-  const provider = kind as SubscriptionProvider;
+  const provider = kind as 'anthropic' | 'openai';
   const providerId = action === 'remove' ? provider : `${provider}-sub-12345678`;
   h.pools[provider] = { strategy: 'least', accounts: [account('default')] };
   if (action === 'remove-provider') {

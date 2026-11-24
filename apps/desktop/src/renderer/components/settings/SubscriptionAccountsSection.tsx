@@ -18,6 +18,7 @@ import {
 } from 'react';
 import { useTranslation } from 'react-i18next';
 import { Button } from '@/components/ui/button';
+import { Input } from '@/components/ui/input';
 import { Select } from '@/components/ui/select';
 import { SegmentedControl } from '@/components/ui/segmented-control';
 import { Switch } from '@/components/ui/switch';
@@ -317,6 +318,9 @@ export function SubscriptionAccountsSection({
           </Button>
         </div>
       </div>
+      {kind === 'antigravity' && busy && login.current && (
+        <AntigravitySignInPrompt loginKey={login.current} />
+      )}
       {failed && (
         <p role="alert" className="mt-3 text-12 text-[var(--text-danger)]">
           {t('subscriptionAccounts.failed')}
@@ -655,5 +659,81 @@ export function SubscriptionAccountsSection({
         </>
       )}
     </section>
+  );
+}
+
+/**
+ * The Antigravity CLI signs an account in by printing a Google link and waiting for the code the
+ * person pastes back (CLI 1.5.15). Shown while a sign-in started from this window is in progress.
+ * The code is handed to this computer's CLI and is not kept by this window after it is sent.
+ */
+function AntigravitySignInPrompt({ loginKey }: { loginKey: string }) {
+  const { t } = useTranslation();
+  const [link, setLink] = useState<string | null>(null);
+  const [code, setCode] = useState('');
+  const [state, setState] = useState<'idle' | 'sending' | 'sent' | 'rejected'>('idle');
+  const signIn = window.electronAPI.subscriptionAccounts.antigravityLogin;
+  useEffect(() => {
+    if (!signIn || link) return;
+    let stopped = false;
+    const read = async () => {
+      try {
+        const reply = await signIn({ op: 'link', loginKey });
+        if (!stopped && reply.link) setLink(reply.link);
+      } catch { /* the sign-in ended or is not this window's */ }
+    };
+    void read();
+    const timer = window.setInterval(() => void read(), 1000);
+    return () => { stopped = true; window.clearInterval(timer); };
+  }, [signIn, link, loginKey]);
+  if (!signIn) return null;
+  const submit = async () => {
+    const value = code.trim();
+    if (!value || state === 'sending') return;
+    setState('sending');
+    try {
+      const reply = await signIn({ op: 'code', loginKey, code: value });
+      setCode('');
+      setState(reply.accepted ? 'sent' : 'rejected');
+    } catch {
+      setState('rejected');
+    }
+  };
+  return (
+    <div data-testid="antigravity-sign-in" className="mt-3 flex flex-col gap-2 rounded-md border p-3"
+      style={{ borderColor: 'var(--settings-theme-card-border)' }}>
+      <p className="text-13 text-[var(--text-primary)]">{t('subscriptionAccounts.antigravitySignIn.title')}</p>
+      {!link ? (
+        <p className="flex items-center gap-2 text-12 text-[var(--text-secondary)]">
+          <Spinner size={12} />{t('subscriptionAccounts.antigravitySignIn.waiting')}
+        </p>
+      ) : state === 'sent' ? (
+        <p className="flex items-center gap-2 text-12 text-[var(--text-secondary)]">
+          <Spinner size={12} />{t('subscriptionAccounts.antigravitySignIn.checking')}
+        </p>
+      ) : (
+        <>
+          <div>
+            <Button variant="secondary" size="sm" onClick={() => void window.electronAPI.openExternal(link)}>
+              {t('subscriptionAccounts.antigravitySignIn.openLink')}
+            </Button>
+          </div>
+          <label className="text-12 text-[var(--text-secondary)]" htmlFor={`agy-code-${loginKey}`}>
+            {t('subscriptionAccounts.antigravitySignIn.codeLabel')}
+          </label>
+          <div className="flex gap-2">
+            <Input id={`agy-code-${loginKey}`} value={code} autoComplete="off" spellCheck={false}
+              onChange={setCode}
+              onKeyDown={(event) => { if (event.key === 'Enter') void submit(); }} />
+            <Button size="sm" disabled={!code.trim() || state === 'sending'} onClick={() => void submit()}>
+              {t('subscriptionAccounts.antigravitySignIn.submit')}
+            </Button>
+          </div>
+          {state === 'rejected' && (
+            <p role="alert" className="text-12 text-[var(--text-danger)]">{t('subscriptionAccounts.antigravitySignIn.rejected')}</p>
+          )}
+        </>
+      )}
+    </div>
   );
 }

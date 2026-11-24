@@ -49,10 +49,19 @@ interface PoolFile {
     via?: string;
   }>;
 }
-export function normalizePoolFile(raw: unknown): PoolFile {
+/** Kinds kept in `subscription-accounts.json`, the file every released client reads and rewrites. */
+const SHARED_FILE_KINDS = ['anthropic', 'openai'] as const;
+/**
+ * Antigravity accounts and their task bindings are kept in a file of their own. A client that
+ * does not know the kind rewrites the whole of `subscription-accounts.json` from what it
+ * understands on every write (a task start writes a binding), which would silently remove them;
+ * such a client neither reads nor writes this file. Same reason as the placement file.
+ */
+const ANTIGRAVITY_FILE_KINDS = ['antigravity'] as const;
+export function normalizePoolFile(raw: unknown, kinds: readonly SubscriptionProvider[] = SHARED_FILE_KINDS): PoolFile {
   const value = raw as Partial<PoolFile> | null;
   const pools: PoolFile['pools'] = {};
-  for (const provider of ['anthropic', 'openai'] as const) {
+  for (const provider of kinds) {
     const pool = value?.pools?.[provider];
     if (!pool || !Array.isArray(pool.accounts)) continue;
     const seen = new Set<string>();
@@ -87,7 +96,7 @@ export function normalizePoolFile(raw: unknown): PoolFile {
     if (
       key.length <= 256 &&
       binding &&
-      (binding.providerId === 'anthropic' || binding.providerId === 'openai') &&
+      kinds.includes(binding.providerId) &&
       accountIdValid(binding.accountId)
     )
       bindings[key] = binding;
@@ -105,6 +114,23 @@ const store = createOverrideSettingsFile<PoolFile>({
   preserveUnreadableFile: true,
   logLoadedValue: false,
 });
+const antigravityStore = createOverrideSettingsFile<PoolFile>({
+  filePath: () => ownerScopedUserDataPath('subscription-accounts-antigravity.json'),
+  scopeKey: activeOwnerScopeKey,
+  defaults: { pools: {}, bindings: {} },
+  normalize: raw => normalizePoolFile(raw, ANTIGRAVITY_FILE_KINDS),
+  log: desktopMakerLogger,
+  label: 'subscription-accounts-antigravity',
+  maxBytes: 8 * 1024 * 1024,
+  preserveUnreadableFile: true,
+  logLoadedValue: false,
+});
+const storeOf = (provider: SubscriptionProvider) => provider === 'antigravity' ? antigravityStore : store;
+/**
+ * Where the additional Antigravity accounts live: under Cindy's own folder, never at, above or
+ * inside the CLI's own `~/.gemini`. The CLI data directory of an account is `gemini` inside it.
+ */
+export const antigravityAccountsRoot = () => path.join(homedir(), '.cindy', 'agy-accounts');
 export const accountOwnerPrefix = () => {
   const owner = getActiveAppSession().dataOwnerId;
   if (!owner) throw new Error('An active owner is required');
@@ -113,6 +139,8 @@ export const accountOwnerPrefix = () => {
 export function accountDirectory(provider: SubscriptionProvider, id: string): string {
   if (!accountIdValid(id) || (id !== 'default' && !id.startsWith(`cindy-${accountOwnerPrefix()}-`)))
     throw new Error('Subscription account is unavailable');
+  // The default account is the CLI's own sign-in; its directory is shown, and never passed to the CLI.
+  if (provider === 'antigravity') return id === 'default' ? path.join(homedir(), '.gemini') : path.join(antigravityAccountsRoot(), id);
   const legacy = provider === 'openai' ? readLegacyCodexProviderId(id) : undefined;
   if (legacy) return legacyCodexAccountHome(getUserDataDir(), getActiveAppSession().dataOwnerId, legacy);
   return path.join(
@@ -121,8 +149,9 @@ export function accountDirectory(provider: SubscriptionProvider, id: string): st
   );
 }
 export function readPool(provider: SubscriptionProvider): SubscriptionPoolConfig | null {
-  store.invalidateIfChanged();
-  return store.read().pools[provider] ?? null;
+  const file = storeOf(provider);
+  file.invalidateIfChanged();
+  return file.read().pools[provider] ?? null;
 }
 /** OpenAI 池里从旧 Codex 连接导入的账号(旧连接 ID → 账号)；账号池文件读不了时返回 null，不当成没有。 */
 export function readOpenAiLegacyAccountsIfReadable(): Readonly<Record<string, string>> | null {
@@ -180,23 +209,24 @@ export async function updatePool(
   provider: SubscriptionProvider,
   edit: (value: SubscriptionPoolConfig) => SubscriptionPoolConfig,
 ): Promise<void> {
-  await store.updateAtomic(({ value }) => ({
+  await storeOf(provider).updateAtomic(({ value }) => ({
     pools: { ...value.pools, [provider]: edit(value.pools[provider] ?? defaultPool()) },
   }));
 }
 export function readAccountBinding(key: string, provider: SubscriptionProvider) {
-  const bindings = store.read().bindings;
+  const bindings = storeOf(provider).read().bindings;
   const binding = bindings[`${provider}:${key}`] ?? bindings[key];
   return binding?.providerId === provider ? binding : undefined;
 }
-let boundAccountIndex: { bindings: PoolFile['bindings']; providers: Map<string, ReadonlySet<string>>;
-  kinds: Map<SubscriptionProvider, Set<string>> } | undefined;
+let boundAccountIndex: { bindings: PoolFile['bindings']; antigravity: PoolFile['bindings'];
+  providers: Map<string, ReadonlySet<string>>; kinds: Map<SubscriptionProvider, Set<string>> } | undefined;
 function boundAccounts() {
   const bindings = store.read().bindings;
-  if (boundAccountIndex?.bindings !== bindings) {
+  const antigravity = antigravityStore.read().bindings;
+  if (boundAccountIndex?.bindings !== bindings || boundAccountIndex.antigravity !== antigravity) {
     const providers = new Map<string, Set<string>>();
     const kinds = new Map<SubscriptionProvider, Set<string>>();
-    for (const binding of Object.values(bindings)) {
+    for (const binding of [...Object.values(bindings), ...Object.values(antigravity)]) {
       const all = kinds.get(binding.providerId) ?? new Set<string>();
       all.add(binding.accountId);
       kinds.set(binding.providerId, all);
@@ -205,7 +235,7 @@ function boundAccounts() {
       accounts.add(binding.accountId);
       providers.set(key, accounts);
     }
-    boundAccountIndex = { bindings, providers, kinds };
+    boundAccountIndex = { bindings, antigravity, providers, kinds };
   }
   return boundAccountIndex;
 }
@@ -232,7 +262,7 @@ export async function writeAccountBindings(
   via?: string,
 ): Promise<void> {
   const through = via && via !== providerId ? { via } : {};
-  await store.updateAtomic(({ value }) => ({
+  await storeOf(providerId).updateAtomic(({ value }) => ({
     bindings: {
       ...value.bindings,
       ...Object.fromEntries(

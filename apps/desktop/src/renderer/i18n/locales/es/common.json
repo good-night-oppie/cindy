@@ -21817,7 +21817,16 @@
     "quotaUpdating": "Cuota pendiente de actualizar",
     "quotaResetSoon": "Se restablece pronto",
     "quotaAverageHint": "Cuota semanal · Mismo peso por cuenta",
-    "quotaResetHint": "Al ritmo actual, puede quedar cuota al restablecerse: amarillo si faltan hasta 24 horas y rojo si faltan hasta 6 horas."
+    "quotaResetHint": "Al ritmo actual, puede quedar cuota al restablecerse: amarillo si faltan hasta 24 horas y rojo si faltan hasta 6 horas.",
+    "antigravitySignIn": {
+      "title": "Sign in to another Google account for Antigravity",
+      "waiting": "Starting the sign-in…",
+      "openLink": "Open the Google sign-in page",
+      "codeLabel": "After you sign in, paste the code or the address of the page you land on",
+      "submit": "Continue",
+      "checking": "Finishing the sign-in…",
+      "rejected": "That didn't work. Start adding the account again."
+    }
   },
   "sessionNotify": {
     "finished": "Esta tarea terminó su turno. Su respuesta final:",

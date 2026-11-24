@@ -21532,7 +21532,16 @@
     "quotaUpdating": "餘量待新",
     "quotaResetSoon": "將重置",
     "quotaAverageHint": "週限額 · 諸帳號等權均值",
-    "quotaResetHint": "依今耗速，重置時或尚有餘：距重置 24 小時內示黃，6 小時內示紅。"
+    "quotaResetHint": "依今耗速，重置時或尚有餘：距重置 24 小時內示黃，6 小時內示紅。",
+    "antigravitySignIn": {
+      "title": "Sign in to another Google account for Antigravity",
+      "waiting": "Starting the sign-in…",
+      "openLink": "Open the Google sign-in page",
+      "codeLabel": "After you sign in, paste the code or the address of the page you land on",
+      "submit": "Continue",
+      "checking": "Finishing the sign-in…",
+      "rejected": "That didn't work. Start adding the account again."
+    }
   },
   "sessionNotify": {
     "finished": "此差事此輪已畢，終答如下：",

@@ -26,6 +26,7 @@ import {
 
 const PROVIDER_ID = /^[a-z0-9_-]{1,40}$/;
 /** Providers Cindy creates for subscription accounts; never collides with connection ids (`<brand>-<hex>`). */
+// Antigravity accounts all stay in the built-in Antigravity provider for now; none is created.
 const CREATED_PROVIDER_ID = /^(openai|anthropic)-sub-[a-f0-9]{8}$/;
 const MAX_PLACEMENTS = 1024;
 const MAX_PROVIDER_NAME = 64;
@@ -48,7 +49,7 @@ interface PlacementFile {
 }
 
 const keyOf = (kind: SubscriptionProvider, accountId: string) => `${kind}:${accountId}`;
-const isKind = (value: unknown): value is SubscriptionProvider => value === 'openai' || value === 'anthropic';
+const isKind = (value: unknown): value is SubscriptionProvider => value === 'openai' || value === 'anthropic' || value === 'antigravity';
 
 export function normalizePlacementFile(raw: unknown): PlacementFile {
   const value = raw as Partial<PlacementFile> | null;
@@ -239,6 +240,7 @@ export async function createSubscriptionProvider(
   additionalAccountIds: readonly string[] = [],
 ): Promise<string> {
   const ids = [accountId, ...additionalAccountIds];
+  if (kind === 'antigravity') throw new Error('Antigravity accounts stay in the Antigravity provider');
   if (ids.some(id => !accountIdValid(id))) throw new Error('Account cannot be moved');
   const owner = activeOwnerScopeKey();
   let providerId = '';
