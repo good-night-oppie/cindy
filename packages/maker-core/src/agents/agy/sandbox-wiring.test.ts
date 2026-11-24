@@ -10,6 +10,8 @@ import { AgentStartupStoppedError } from '../base-agent.js';
 import type { AgentEvent } from '../../types/events.js';
 import { createConsoleLogger } from '../../interfaces/logger.js';
 import { setAgyTaskDirStoreFile } from './host-path-guard.js';
+import { AGY_CLI_LOGIN_FILE } from './system-sandbox.js';
+import { NATIVE_SUBSCRIPTION_ACCOUNT, type NativeSubscriptionAccount } from '../../interfaces/auth-adapter.js';
 
 // Sessions here register their task folder; keep that registry out of the real ~/.cindy.
 setAgyTaskDirStoreFile(path.join(os.tmpdir(), `agy-task-dirs-${process.pid}-wiring.json`));
@@ -72,6 +74,57 @@ describe('agy launch goes through the system sandbox', () => {
     expect(args).toEqual(expect.arrayContaining([path.join(stateRoot, 'gemini'), path.join(os.homedir(), '.gemini')]));
     expect(env.AGY_AUTH_HINT).toBe('t');
     expect(env.DBUS_SESSION_BUS_ADDRESS).toBeUndefined();
+  });
+
+  // cindy#1 7121057746, review cindy#24 7122987514: in the sandbox an account is its own private
+  // state root, on both permission paths, and the computer's own sign-in file is not shown next
+  // to it. Existing cases cover only the shared state root. Unit tier: the launch is captured,
+  // nothing is spawned; the home folder and its sign-in file are this test's own.
+  describe.each([['Default permissions', 'default'], ['Full access', 'bypassPermissions']] as const)('with an account, %s', (_name, permissionMode) => {
+    async function launchWith(name: string, account?: NativeSubscriptionAccount) {
+      const fs = await import('node:fs');
+      const home = path.join(root, `home-${name}`);
+      const token = path.join(home, ...AGY_CLI_LOGIN_FILE);
+      fs.mkdirSync(path.dirname(token), { recursive: true });
+      fs.writeFileSync(token, 'fixture, not a credential');
+      const task = path.join(root, `task-${name}`);
+      fs.mkdirSync(task, { recursive: true });
+      const sharedState = path.join(root, `shared-state-${name}`);
+      const homedir = vi.spyOn(os, 'homedir').mockReturnValue(home);
+      try {
+        const { agent, captured } = agentWith({ agySandbox: { probe: OK_PROBE, stateRoot: sharedState, shareCliLogin: true } });
+        await expect(agent.startSession({ workingDir: task, model: 'gpt-oss-120b-medium', permissionMode,
+          ...(account ? { [NATIVE_SUBSCRIPTION_ACCOUNT]: account } : {}) })).rejects.toBeInstanceOf(AgentStartupStoppedError);
+        return { captured, home, token, sharedState };
+      } finally { homedir.mockRestore(); }
+    }
+    const pairsAfter = (args: readonly string[], flag: string) =>
+      args.flatMap((arg, index) => arg === flag ? [[args[index + 1], args[index + 2]]] : []);
+
+    it('shows the computer\u2019s own sign-in file when no account was chosen', async () => {
+      const { captured, home, token, sharedState } = await launchWith(`own-${permissionMode}`);
+      expect(captured).toHaveLength(1);
+      const args = captured[0]!.args ?? [];
+      expect(pairsAfter(args, '--ro-bind')).toContainEqual([token, token]);
+      expect(pairsAfter(args, '--bind')).toContainEqual([path.join(sharedState, 'gemini'), path.join(home, '.gemini')]);
+    });
+
+    it('puts the account\u2019s data directory in place of ~/.gemini and does not show the computer\u2019s own sign-in file', async () => {
+      const accountDir = path.join(root, `account-${permissionMode}`);
+      const account = { id: 'second', configDir: accountDir, assertCurrent: () => {},
+        readState: async () => ({ authenticated: true }) } as NativeSubscriptionAccount;
+      const { captured, home, token, sharedState } = await launchWith(`account-${permissionMode}`, account);
+      // One launch: the mount keeps the sign-in separate, so no check is run, and nothing is
+      // started a second time on the computer's own sign-in.
+      expect(captured).toHaveLength(1);
+      const { args = [], env = {} } = captured[0]!;
+      expect(pairsAfter(args, '--bind')).toContainEqual([path.join(accountDir, 'gemini'), path.join(home, '.gemini')]);
+      expect(args).not.toContain(path.join(sharedState, 'gemini'));
+      expect(args).not.toContain(token);
+      expect(args).not.toContain('--gemini-dir');
+      expect(args.slice(args.lastIndexOf('--'))).toEqual(['--', realpathSync(process.execPath), 'acp', '--disable-telemetry']);
+      expect(env.SSH_CONNECTION).toBeUndefined();
+    });
   });
 
   it('uses the real path of a symlinked task folder for the sandbox and the agy cwd', async () => {

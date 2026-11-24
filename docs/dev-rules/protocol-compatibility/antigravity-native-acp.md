@@ -65,6 +65,59 @@ markers to disguise the launch context. Login and unlock remain explicit owner
 operations. Record only environment-variable presence and process identities for
 diagnostics, never arbitrary environment values or command lines.
 
+### One sign-in per account directory
+
+The host may pass an account it selected (`NATIVE_SUBSCRIPTION_ACCOUNT`, the same
+capability Claude Code and Codex receive). The account directory holds the CLI data
+directory `gemini`, and the CLI's sign-in for that account is a file inside it. Without
+an account, or with the default profile, the launch is unchanged and uses the computer's
+own CLI sign-in.
+
+- **Linux, in the system sandbox (Default permissions, Auto-review and Full access).**
+  The account directory is the sandbox's private state root, so `<account>/gemini` is
+  what the CLI sees as `~/.gemini`. The computer's own sign-in file is not shown, even
+  when `shareCliLogin` is on, and a start that fails is not tried again on the
+  computer's own sign-in. Not yet run with a real account on Linux.
+- **Windows, no system sandbox.** The CLI is started with
+  `--gemini-dir <account>/gemini`. The CLI keeps its sign-in in the system credential
+  store, one entry for the whole user whatever the data directory, unless it sees a
+  remote-shell session; then it keeps the sign-in in the data directory. The host
+  therefore sets `SSH_CONNECTION` for an account launch: the value already in Cindy's
+  own environment when there is one, otherwise `127.0.0.1 0 127.0.0.1 0` (the standard
+  four fields, naming this computer only). This is the one case where the host adds a
+  launch-context marker on purpose: it selects the storage for a directory the owner
+  signed in to for this use, it copies no credential, and it is never set for the
+  computer's own sign-in. Observed on CLI 1.5.15 on Windows 11 with two sign-ins, in
+  both worker modes (cindy#1 7122494557, 7122577933); the CLI does not document it.
+  Which Google account each sign-in belongs to was not checked.
+- **macOS and other hosts without the system sandbox.** Not observed, so an account is
+  not started there (`platform-not-verified`).
+
+Because the behaviour is not documented, the host checks it. Before agy is started with
+an account outside the sandbox, the host starts it once the same way - the same command,
+arguments (so the same worker mode), environment and tool servers - on a new, empty
+data directory. The CLI must initialize and then answer that it is not signed in. If it
+creates a session, that build takes its sign-in from a place shared by the whole user,
+and the host starts nothing with the account (`AgyAccountSignInNotSeparateError`). Any
+other outcome, including an authentication error before a session was asked for, also
+starts nothing.
+
+This is a check of the moment, not a proof about the build: with an empty credential
+store every build answers "not signed in". Nothing is therefore remembered. The check
+runs before every account start outside the sandbox (one extra CLI start each time),
+and the start that follows it at once can then at worst find no sign-in at all. The
+provider's "connected" state is a display fact and is not used for this.
+
+Known limits:
+
+- Commands the CLI runs in an account's task inherit `SSH_CONNECTION`. A tool that
+  behaves differently in a remote shell will do so there. Not examined.
+- A conversation is stored in the data directory. A task that moves to another account
+  cannot resume its native conversation there.
+- Token refresh inside an account directory over days was not observed.
+- The CLI has no usage or reset-time interface, so an account's remaining quota cannot
+  be shown, and no interface to ask which account is signed in.
+
 ## MCP and other capability gaps
 
 The official guide documents HTTP MCP with --process-per-session. The current
