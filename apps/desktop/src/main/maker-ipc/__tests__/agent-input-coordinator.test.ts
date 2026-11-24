@@ -6684,11 +6684,13 @@ describe('AgentInputCoordinator send transaction', () => {
       await host.settle();
       expect(host.dispatched).toEqual([]);
 
-      // Whatever state the merge left the queue in, the merged message goes only on an answer
-      // that names it. A banner that is showing answers with the hold it reads now; with none
-      // showing the user continues the queue.
-      if (host.h.coordinator.getProjection(sid).recovery) await host.confirmToSend();
-      else host.h.coordinator.resume(sid, { continueSending: true });
+      // The merged message is still first and its banner is still showing: it is the banner of
+      // the merged message now, and answers with the hold it reads now (DD 7107128275: the state
+      // after a merge was not pinned down).
+      const merged1 = host.h.coordinator.getProjection(sid);
+      expect(merged1.recovery).toEqual({ kind: 'queue-head', clientId: 'q-1' });
+      expect(merged1.queuePaused).toBe(false);
+      await host.confirmToSend();
       await host.settle();
       expect(host.dispatched).toEqual(['first\nsecond']);
     });
@@ -6893,6 +6895,28 @@ describe('AgentInputCoordinator send transaction', () => {
       await host.settle();
       expect(host.dispatched).toEqual([]);
       expect(h.coordinator.getProjection(sid).queuePaused).toBe(true);
+    });
+
+    // DD 7107128275: a held message stored by a version that did not name holds comes back with
+    // its mark and no name. "Continue sending" names it and lets it go; without that line it was
+    // stopped again and no test noticed.
+    it('a held message stored without a hold name is sent by Continue sending after a restart', async () => {
+      const sid = 'held-row-from-an-older-version';
+      const host = hostWithQueue(sid);
+      const { h } = host;
+      h.setLoadQueueSnapshot(async () => [{ ...makeItem('q-1', 'stored'), awaitsAgySwitchConfirmation: true }]);
+      await h.coordinator.ensureQueueRestored(sid);
+      await host.pick(true);
+      await host.settle();
+      const restored = h.coordinator.getProjection(sid);
+      expect(restored.queuePaused).toBe(true);
+      expect(restored.pendingQueue[0]).toMatchObject({ clientId: 'q-1', awaitsAgySwitchConfirmation: true });
+      expect(restored.pendingQueue[0]?.agySwitchHoldId).toBeUndefined();
+      expect(host.dispatched).toEqual([]);
+
+      h.coordinator.resume(sid, { continueSending: true });
+      await host.settle();
+      expect(host.dispatched).toEqual(['stored']);
     });
 
     it('Continue sending from a window showing an old state, on a queue that is not paused, lets nothing held go', async () => {
