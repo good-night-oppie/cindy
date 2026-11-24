@@ -1026,6 +1026,9 @@ describe('Bot canonical Session lifecycle', () => {
     const { readBotLinkedProjects } = await import('../../../maker-ipc/botLinkedProjectStore');
     const { ownerScopedUserDataPath } = await import('../../../appSessionState');
     expect(await readBotLinkedProjects(ownerScopedUserDataPath(), 'bot-1')).toContainEqual({ path: h.userDataDir, addedAt: 'now' });
+    const key = 'companion.workbench.v1';
+    expect(await host.readValues('bot-1', 'desk')).toContainEqual({ key, value: expect.objectContaining(workbench) });
+    expect(await host.readValues('bot-1')).toContainEqual({ key, value: null, unread: true });
   });
 
   // #7095: the default companion seeded on a fresh computer is demoted mid-meeting; the take-over then

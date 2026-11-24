@@ -127,6 +127,7 @@ export async function readCompanionValues(botId: string, selfDeviceId: string | 
     const workbench = await readCompanionWorkbench(userDataDir, botId, selfDeviceId);
     return workbench.directories.length || Object.keys(workbench.tasks).length ? [{ key: COMPANION_WORKBENCH_KEY, value: workbench }] : [];
   });
+  else values.push({ key: COMPANION_WORKBENCH_KEY, value: null, unread: true });
   // A V2 teammate's project rules and automations (project.ts); its other project files stay here.
   if (projectMode !== null) {
     const workspace = path.join(botProfileDir(userDataDir, botId), 'workspace');
@@ -172,7 +173,7 @@ function createMaterializer(input: {
     applyRoutines: async (botId, routines, _remove, fence) => {
       fence.assertCurrent();
       await applyCompanionRoutines({ botId, ownerRoot: ownerScopedUserDataPath(), rows: routines,
-        selfDeviceId: input.selfDeviceId?.() ?? null, assertCurrent: fence.assertCurrent, ...(input.log ? { log: input.log } : {}) });
+        selfDeviceId: fence.selfDeviceId ?? input.selfDeviceId?.() ?? null, assertCurrent: fence.assertCurrent, ...(input.log ? { log: input.log } : {}) });
     },
     applyProjectRules: async (botId, content, fence) => {
       fence.assertCurrent();
@@ -193,7 +194,7 @@ function createMaterializer(input: {
     },
     applyAutomations: async (botId, rows, fence) => {
       fence.assertCurrent();
-      await applyProjectAutomations({ botId, rows, io: companionProjectIo(), selfDeviceId: input.selfDeviceId?.() ?? null,
+      await applyProjectAutomations({ botId, rows, io: companionProjectIo(), selfDeviceId: fence.selfDeviceId ?? input.selfDeviceId?.() ?? null,
         assertCurrent: fence.assertCurrent, ...(input.log ? { log: input.log } : {}) });
     },
     applyWorkbench: async (botId, value, fence, options) => {
@@ -467,7 +468,7 @@ export function createCompanionCloudHost(input: {
         `${createHash('sha256').update(`${endpoint}\n${humanActorId}`).digest('hex')}.json`),
       current, log: input.log,
     }),
-    readValues: botId => readCompanionValues(botId, input.selfDeviceId?.() ?? null),
+    readValues: (botId, deviceId) => readCompanionValues(botId, deviceId ?? input.selfDeviceId?.() ?? null),
     repairProfileSources: async (botId, fields, values, fence) => {
       fence.assertCurrent();
       const userDataDir = ownerScopedUserDataPath();
