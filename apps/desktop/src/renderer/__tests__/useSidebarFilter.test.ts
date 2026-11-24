@@ -888,7 +888,8 @@ describe('Harness filter persistence', () => {
   beforeEach(() => installMemoryLocalStorage());
   afterEach(() => uninstallLocalStorage());
 
-  it.each(['all', 'cc', 'codex', 'pi'] as const)(
+  // 'agy': tasks that run Antigravity can be filtered for like the other engines (cindy#1, gap 43).
+  it.each(['all', 'cc', 'codex', 'pi', 'agy'] as const)(
     'restores %s from the existing preference key',
     (vendor) => {
       persistVendor(vendor);

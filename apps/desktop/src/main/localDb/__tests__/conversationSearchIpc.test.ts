@@ -43,6 +43,17 @@ beforeEach(() => {
   });
 });
 
+// cindy#1, gap 43: task search can be narrowed to Antigravity tasks. The channel validates the
+// filter against a fixed list and used to reject 'agy' as an invalid parameter.
+describe('local-db:conversations:search — agentKind=agy', () => {
+  it('accepts filters.agentKind agy and passes it to the search', async () => {
+    await handler()(null, { query: 'needle', filters: { agentKind: 'agy' } });
+    expect(h.searchConversations).toHaveBeenCalledWith(
+      expect.objectContaining({ filters: expect.objectContaining({ agentKind: 'agy' }) }),
+    );
+  });
+});
+
 describe('local-db:conversations:search — agentKind=pi', () => {
   it('accepts filters.agentKind pi so remote Pi search is not rejected', async () => {
     await handler()(null, {

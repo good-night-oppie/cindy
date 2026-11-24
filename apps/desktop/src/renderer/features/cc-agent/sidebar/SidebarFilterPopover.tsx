@@ -122,6 +122,7 @@ const VENDOR_OPTIONS: ReadonlyArray<Option<FilterVendor>> = [
   { value: 'cc', labelKey: 'ccAgent.sidebar.filterVendor.cc', Icon: SquareTerminal },
   { value: 'codex', labelKey: 'ccAgent.sidebar.filterVendor.codex', Icon: SquareTerminal },
   { value: 'pi', labelKey: 'ccAgent.sidebar.filterVendor.pi', Icon: SquareTerminal },
+  { value: 'agy', labelKey: 'ccAgent.sidebar.filterVendor.agy', Icon: SquareTerminal },
 ];
 
 const LAST_ACTIVITY_OPTIONS: ReadonlyArray<Option<FilterLastActivity>> = [
