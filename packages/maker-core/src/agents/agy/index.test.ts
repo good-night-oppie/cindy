@@ -34,6 +34,7 @@ class FakeAgy implements AcpTransport {
   /** Overrides what set_config_option reports back (receipt mismatch). */
   receiptOverride?: (configId: string, value: string) => Record<string, string | undefined>;
   failSessionNew?: { code: number; message: string; data?: unknown };
+  failInitialize?: { code: number; message: string };
   cancelResolves = true;
   cancelWriteBlocked = false;
   stderr = '';
@@ -46,7 +47,9 @@ class FakeAgy implements AcpTransport {
     const reply = (result: unknown) => queueMicrotask(() => this.emit({ jsonrpc: '2.0', id: message.id, result }));
     const fail = (error: { code: number; message: string }) => queueMicrotask(() => this.emit({ jsonrpc: '2.0', id: message.id, error }));
     switch (message.method) {
-      case 'initialize': return reply({ protocolVersion: 1, agentInfo: { name: 'Antigravity ACP Server', version: '1.5.9' },
+      case 'initialize':
+        if (this.failInitialize) return fail(this.failInitialize);
+        return reply({ protocolVersion: 1, agentInfo: { name: 'Antigravity ACP Server', version: '1.5.9' },
         agentCapabilities: { loadSession: true, promptCapabilities: { image: true, embeddedContext: true }, sessionCapabilities: { resume: {}, load: {} } },
         authMethods: [{ id: 'oauth-personal' }] });
       case 'session/new':
@@ -638,79 +641,136 @@ describe('AgyAgent auto-review roots inside the system sandbox', () => {
   });
 });
 
-// Rule: cindy#1 7121057746 / 7122577933 - one Antigravity sign-in per account directory, and a
-// task for one account never silently runs on another sign-in. No existing case passes an
-// account to agy. Unit tier: in-memory transports, no real CLI, sign-in or credential store.
-// Minimal failing input: a second account whose directory is not the computer's own.
-// Standalone file wall time: see the PR.
+// Rule: cindy#1 7121057746 / 7122577933 and QQ's review cindy#24 7122987514 - one Antigravity
+// sign-in per account directory, and a task for one account never silently runs on another
+// sign-in. No existing case passes an account to agy. Unit tier: in-memory transports, no real
+// CLI, sign-in or credential store. Minimal failing input: a second account whose directory is
+// not the computer's own. Standalone file wall time: see the PR.
 describe('AgyAgent started with an account the host chose', () => {
   const accountDir = joinPath(osTmpdir(), 'agy-account-fixture');
   const accountOf = (extra: Partial<NativeSubscriptionAccount> = {}): NativeSubscriptionAccount => ({
     id: 'second', configDir: accountDir, assertCurrent: vi.fn(), readState: vi.fn(async () => ({ authenticated: true })), ...extra,
   } as NativeSubscriptionAccount);
-  /** The first launch is the check on an empty data directory; the second is the task's. */
-  function launches(emptyDirectoryIsSignedIn: boolean) {
-    const check = new FakeAgy();
-    if (!emptyDirectoryIsSignedIn) check.failSessionNew = { code: -32000, message: 'Authentication required' };
-    const task = new FakeAgy();
-    const seen: { args: readonly string[]; cwd: string; env: NodeJS.ProcessEnv }[] = [];
-    const createAgyTransport = vi.fn((options: { args: readonly string[]; cwd: string; env: NodeJS.ProcessEnv }) => {
-      seen.push(options);
-      return seen.length === 1 ? check : task;
-    });
-    return { check, task, seen, ...create(task, { createAgyTransport }) };
+  type Seen = { binaryPath: string; args: readonly string[]; cwd: string; env: NodeJS.ProcessEnv };
+  const notSignedIn = () => { const fake = new FakeAgy(); fake.failSessionNew = { code: -32000, message: 'Authentication required' }; return fake; };
+  /** Each launch gets the next transport: checks answer "not signed in" unless a case says otherwise. */
+  function launches(transports: FakeAgy[], extra: Partial<AgyAgentDeps> = {}) {
+    const seen: Seen[] = [];
+    const createAgyTransport = vi.fn((options: Seen) => { seen.push(options); return transports[seen.length - 1]!; });
+    return { seen, ...create(transports.at(-1), { createAgyTransport, ...extra }) };
   }
 
   it('starts agy on the account\u2019s own data directory, after an empty directory was seen not signed in', async () => {
     const fs = await import('node:fs');
-    const { seen, check, start } = launches(false);
+    const check = notSignedIn();
+    const { seen, start } = launches([check, new FakeAgy()]);
     const account = accountOf();
     const handle = await start({ [NATIVE_SUBSCRIPTION_ACCOUNT]: account });
     try {
       expect(seen).toHaveLength(2);
-      const [checked, started] = seen as [typeof seen[number], typeof seen[number]];
-      // The check: same arguments and environment as the task's launch, on a directory with nothing in it.
-      expect(checked.args.slice(0, 3)).toEqual(['acp', '--disable-telemetry', '--gemini-dir']);
-      expect(checked.args[3]).not.toBe(joinPath(accountDir, 'gemini'));
-      expect(fs.existsSync(checked.args[3]!)).toBe(false);
-      expect(check.closeCount).toBe(1);
+      const [checked, started] = seen as [Seen, Seen];
       expect(started.args).toEqual(['acp', '--disable-telemetry', '--gemini-dir', joinPath(accountDir, 'gemini')]);
-      expect(started.env.SSH_CONNECTION).toBe(checked.env.SSH_CONNECTION);
-      expect(started.env.SSH_CONNECTION).toEqual(expect.any(String));
+      // The check: the same command, arguments and environment, on a directory with nothing in it.
+      expect(checked.binaryPath).toBe(started.binaryPath);
+      expect(checked.args.slice(0, 3)).toEqual(started.args.slice(0, 3));
+      expect(checked.args[3]).not.toBe(started.args[3]);
+      expect(fs.existsSync(checked.args[3]!)).toBe(false);
+      expect(checked.env).toEqual(started.env);
+      expect(check.closeCount).toBe(1);
+      // A standard four-field marker naming this computer only.
+      expect(started.env.SSH_CONNECTION).toBe(process.env.SSH_CONNECTION ?? '127.0.0.1 0 127.0.0.1 0');
       expect(account.assertCurrent).toHaveBeenCalled();
     } finally { await handle.close(); }
   });
 
-  it('starts nothing with the account when an empty data directory is signed in', async () => {
-    const { seen, task, start } = launches(true);
+  it('keeps a remote-shell marker that is already there', async () => {
+    const before = process.env.SSH_CONNECTION;
+    process.env.SSH_CONNECTION = '203.0.113.7 50000 203.0.113.9 22';
+    try {
+      const { seen, start } = launches([notSignedIn(), new FakeAgy()]);
+      await (await start({ [NATIVE_SUBSCRIPTION_ACCOUNT]: accountOf() })).close();
+      expect(seen.map(launch => launch.env.SSH_CONNECTION)).toEqual(['203.0.113.7 50000 203.0.113.9 22', '203.0.113.7 50000 203.0.113.9 22']);
+    } finally {
+      if (before === undefined) delete process.env.SSH_CONNECTION; else process.env.SSH_CONNECTION = before;
+    }
+  });
+
+  it('checks the worker mode the task is started in, with the task\u2019s tool servers', async () => {
+    const local = 'http://127.0.0.1:9000/mcp';
+    const check = notSignedIn();
+    const task = new FakeAgy();
+    const { seen, start } = launches([check, task], {
+      preparePiExtraSpawnConfig: vi.fn(async () => ({ mcpBridge: { token: 'fixture', servers: [{ name: 'helper', url: local }] } })) as unknown as AgyAgentDeps['preparePiExtraSpawnConfig'],
+    });
+    const handle = await start({ sessionId: 'fixture-task', [NATIVE_SUBSCRIPTION_ACCOUNT]: accountOf() });
+    try {
+      expect(seen).toHaveLength(2);
+      expect(seen[1]!.args).toEqual(['acp', '--disable-telemetry', '--process-per-session', '--gemini-dir', joinPath(accountDir, 'gemini')]);
+      expect(seen[0]!.args.slice(0, 4)).toEqual(['acp', '--disable-telemetry', '--process-per-session', '--gemini-dir']);
+      const asked = (fake: FakeAgy) => fake.written.find(frame => frame.method === 'session/new')?.params?.mcpServers;
+      expect(asked(check)).toEqual(asked(task));
+      expect(asked(check)).toHaveLength(1);
+    } finally { await handle.close(); }
+  });
+
+  it('remembers a pass only for the same build and arguments, and only while the shared sign-in exists', async () => {
+    const binaryPath = (await import('node:fs')).realpathSync(process.execPath);
+    let shared = false;
+    const prepare = vi.fn(async () => ({ mcpBridge: { token: 'fixture', servers: [{ name: 'helper', url: 'http://127.0.0.1:9000/mcp' }] } }));
+    const order = [
+      notSignedIn(), new FakeAgy(), // 1: nothing shared to tell apart, so nothing is remembered
+      notSignedIn(), new FakeAgy(), // 2: checked again; the shared sign-in exists now, so remembered
+      new FakeAgy(),                // 3: same build, same arguments: no check
+      notSignedIn(), new FakeAgy(), // 4: worker mode is another launch: checked
+    ];
+    const { seen, start } = launches(order, { binaryPath, agyOwnCliSignedIn: () => shared,
+      preparePiExtraSpawnConfig: prepare as unknown as AgyAgentDeps['preparePiExtraSpawnConfig'] });
+    const run = async (options = {}) => { await (await start({ [NATIVE_SUBSCRIPTION_ACCOUNT]: accountOf(), ...options })).close(); return seen.length; };
+    expect(await run()).toBe(2);
+    shared = true;
+    expect(await run()).toBe(4);
+    expect(await run()).toBe(5);
+    expect(await run({ sessionId: 'fixture-task' })).toBe(7);
+    expect(seen[5]!.args).toContain('--process-per-session');
+  });
+
+  it.each([
+    ['an empty data directory is signed in', (check: FakeAgy) => { check.failSessionNew = undefined; }, 'signed-in-without-account'],
+    ['the check fails for another reason', (check: FakeAgy) => { check.failSessionNew = { code: -32603, message: 'fixture internal error' }; }, 'check-failed'],
+    // An authentication error before a session was asked for says nothing about the data directory.
+    ['the CLI refuses to initialize with an authentication error', (check: FakeAgy) => { check.failInitialize = { code: -32000, message: 'Authentication required' }; }, 'check-failed'],
+  ] as const)('starts nothing with the account when %s', async (_name, arrange, detail) => {
+    const check = notSignedIn();
+    arrange(check);
+    const task = new FakeAgy();
+    const { seen, start } = launches([check, task]);
     const refused = await start({ [NATIVE_SUBSCRIPTION_ACCOUNT]: accountOf() }).then(() => undefined, error => error);
     expect(refused).toBeInstanceOf(AgentStartupStoppedError);
-    expect(String(refused)).toContain(new AgyAccountSignInNotSeparateError('signed-in-without-account').message);
+    expect(String(refused)).toContain(new AgyAccountSignInNotSeparateError(detail).message);
     expect(seen).toHaveLength(1);
     expect(task.written).toHaveLength(0);
   });
 
-  it('starts nothing with the account when the check itself fails', async () => {
-    const { seen, check, task, start } = launches(false);
-    check.failSessionNew = { code: -32603, message: 'fixture internal error' };
-    const refused = await start({ [NATIVE_SUBSCRIPTION_ACCOUNT]: accountOf() }).then(() => undefined, error => error);
-    expect(refused).toBeInstanceOf(AgentStartupStoppedError);
-    expect(String(refused)).toContain(new AgyAccountSignInNotSeparateError('check-failed').message);
-    expect(seen).toHaveLength(1);
-    expect(task.written).toHaveLength(0);
+  it('starts nothing with the account on a computer without the system sandbox where this was not observed', async () => {
+    const platform = Object.getOwnPropertyDescriptor(process, 'platform')!;
+    Object.defineProperty(process, 'platform', { ...platform, value: 'darwin' });
+    try {
+      const { seen, start } = launches([notSignedIn(), new FakeAgy()], { agySandbox: { allowWithoutSystemSandbox: true } });
+      const refused = await start({ workingDir: osTmpdir(), [NATIVE_SUBSCRIPTION_ACCOUNT]: accountOf() }).then(() => undefined, error => error);
+      expect(String(refused)).toContain(new AgyAccountSignInNotSeparateError('platform-not-verified').message);
+      expect(seen).toHaveLength(0);
+    } finally { Object.defineProperty(process, 'platform', platform); }
   });
 
   it('starts nothing for an account that is no longer current', async () => {
-    const { seen, start } = launches(false);
+    const { seen, start } = launches([notSignedIn(), new FakeAgy()]);
     const gone = accountOf({ assertCurrent: () => { throw new Error('fixture account removed'); } });
     await expect(start({ [NATIVE_SUBSCRIPTION_ACCOUNT]: gone })).rejects.toThrow('fixture account removed');
     expect(seen).toHaveLength(0);
   });
 
   it('leaves the launch as it was for the computer\u2019s own sign-in', async () => {
-    const seen: { args: readonly string[]; env: NodeJS.ProcessEnv }[] = [];
-    const fake = new FakeAgy();
-    const { start } = create(fake, { createAgyTransport: options => { seen.push(options); return fake; } });
+    const { seen, start } = launches([new FakeAgy()]);
     const handle = await start({ [NATIVE_SUBSCRIPTION_ACCOUNT]: accountOf({ defaultProfile: true }) });
     try {
       expect(seen).toHaveLength(1);

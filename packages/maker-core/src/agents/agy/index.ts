@@ -61,7 +61,9 @@ import {
   type AgySandboxProbe,
 } from './system-sandbox.js';
 import { openAgyTaskFile, registerAgyTaskDir } from './host-path-guard.js';
-import { AGY_ACCOUNT_FILE_SIGN_IN_ENV, AgyAccountSignInNotSeparateError, agyAccountCliArgs } from './account-profile.js';
+import {
+  AgyAccountSignInNotSeparateError, agyAccountCliArgs, agyAccountHostLaunchVerified, agyAccountSignInEnv, agyArgsForAccountDir,
+} from './account-profile.js';
 import { NATIVE_SUBSCRIPTION_ACCOUNT } from '../../interfaces/auth-adapter.js';
 
 export { AGY_MIN_VERSION, AgyBinaryUnavailableError, parseAgyVersion } from './version.js';
@@ -115,6 +117,12 @@ export interface AgyAgentDeps extends AgentDeps {
     /** Expose the CLI's existing Google sign-in file read-only inside the sandbox (see system-sandbox). */
     shareCliLogin?: boolean;
   };
+  /**
+   * Whether the CLI's own sign-in, the one shared by the whole user, exists right now (existence
+   * only). The account check proves something only while it does; see
+   * assertAgyAccountSignInIsSeparate. Absent means unknown.
+   */
+  agyOwnCliSignedIn?: () => boolean;
   /** UI locale for agy user notices (JJ's wording exists in zh-CN and en). */
   uiLocale?: () => string | null | undefined;
 }
@@ -157,7 +165,7 @@ export class AgyAgent extends BaseAgent {
   }>();
   private disposed = false;
   private probePromise: Promise<void> | null = null;
-  /** CLI builds (path -> file identity) already seen to keep an account's sign-in separate. */
+  /** Launches (build path, command and arguments -> file identity) seen to keep an account's sign-in separate. */
   private accountSignInChecked = new Map<string, string>();
 
   constructor(protected override deps: AgyAgentDeps) {
@@ -198,35 +206,61 @@ export class AgyAgent extends BaseAgent {
   }
 
   /**
-   * Before a CLI build is first started with an account's own data directory outside the system
-   * sandbox: start it once on an empty data directory, with the same environment. It must say
-   * that it is not signed in. If it is signed in, this build takes its sign-in from somewhere
-   * shared by the whole user (the system credential store), and a task for one account would
-   * silently run on another: refuse, and start nothing with the account.
+   * Before agy is started with an account's own data directory outside the system sandbox: start
+   * it once the same way - the same command, arguments (so the same worker mode), environment and
+   * tool servers - on a new, empty data directory. It must initialize, and then say that it is
+   * not signed in. If it creates a session, this build takes its sign-in from somewhere shared by
+   * the whole user (the system credential store), and a task for one account would silently run
+   * on another: refuse, and start nothing with the account. Anything else also starts nothing.
+   *
+   * "Not signed in" proves the sign-in is separate only while the shared sign-in exists; with an
+   * empty credential store every build answers the same. So a pass is remembered (per build and
+   * launch arguments) only when the host says the shared sign-in exists; otherwise the check runs
+   * before every such start, and a start right after it can at worst find no sign-in at all.
    */
-  private async assertAgyAccountSignInIsSeparate(binaryPath: string, env: NodeJS.ProcessEnv): Promise<void> {
+  private async assertAgyAccountSignInIsSeparate(binaryPath: string,
+    launch: { command: string; args: readonly string[]; env: NodeJS.ProcessEnv }, mcpServers: readonly unknown[]): Promise<void> {
     let build = '';
     try { const info = await stat(binaryPath); build = `${info.mtimeMs}:${info.size}`; } catch { /* injected transport */ }
-    if (build && this.accountSignInChecked.get(binaryPath) === build) return;
     const emptyAccountDir = realpathSync(await mkdtemp(path.join(os.tmpdir(), 'cindy-agy-account-check-')));
+    let checkArgs: string[];
+    try { checkArgs = agyArgsForAccountDir(launch.args, emptyAccountDir); } catch (error) {
+      await rm(emptyAccountDir, { recursive: true, force: true }).catch(() => {});
+      throw new AgyAccountSignInNotSeparateError('check-failed', error);
+    }
+    // The remembered pass belongs to this build started with exactly these arguments.
+    const remembered = JSON.stringify([binaryPath, launch.command, agyArgsForAccountDir(launch.args, '')]);
+    if (build && this.accountSignInChecked.get(remembered) === build) {
+      await rm(emptyAccountDir, { recursive: true, force: true }).catch(() => {});
+      return;
+    }
+    let sharedSignInExists = false;
+    try { sharedSignInExists = this.deps.agyOwnCliSignedIn?.() === true; } catch { /* unknown */ }
     let signedIn = false;
     try {
       const cwd = path.join(emptyAccountDir, 'task');
       await mkdir(cwd);
-      const transport = (this.deps.createAgyTransport ?? spawnAcpTransport)({
-        binaryPath, args: [...AGY_ACP_ARGS, ...agyAccountCliArgs(emptyAccountDir)], cwd, env,
-      });
+      const transport = (this.deps.createAgyTransport ?? spawnAcpTransport)({ binaryPath: launch.command, args: checkArgs, cwd, env: launch.env });
       const client = new AcpClient(transport, { requestTimeoutMs: CONTROL_TIMEOUT });
       try {
-        await client.request('initialize', {
-          protocolVersion: 1,
-          clientCapabilities: { fs: { readTextFile: false, writeTextFile: false }, terminal: false },
-          clientInfo: { name: 'cindy', version: '1.0.0' },
-        });
-        await client.request('session/new', { cwd, mcpServers: [] });
-        signedIn = true;
-      } catch (error) {
-        if (!isAuthError(error)) throw new AgyAccountSignInNotSeparateError('check-failed', error);
+        let init: Record<string, unknown>;
+        try {
+          init = record(await client.request('initialize', {
+            protocolVersion: 1,
+            clientCapabilities: { fs: { readTextFile: false, writeTextFile: false }, terminal: false },
+            clientInfo: { name: 'cindy', version: '1.0.0' },
+          }));
+        } catch (error) {
+          // A build that cannot even initialize has said nothing about where its sign-in is.
+          throw new AgyAccountSignInNotSeparateError('check-failed', error);
+        }
+        if (init.protocolVersion !== 1) throw new AgyAccountSignInNotSeparateError('check-failed');
+        try {
+          await client.request('session/new', { cwd, mcpServers });
+          signedIn = true;
+        } catch (error) {
+          if (!isAuthError(error)) throw new AgyAccountSignInNotSeparateError('check-failed', error);
+        }
       } finally {
         try { await client.close(); } catch { /* the check's own process; its answer is already known */ }
       }
@@ -236,7 +270,7 @@ export class AgyAgent extends BaseAgent {
       }
     }
     if (signedIn) throw new AgyAccountSignInNotSeparateError('signed-in-without-account');
-    if (build) this.accountSignInChecked.set(binaryPath, build);
+    if (build && sharedSignInExists) this.accountSignInChecked.set(remembered, build);
   }
 
   /** Discover the catalog in an empty task directory with the normal isolation policy. */
@@ -734,13 +768,17 @@ export class AgyAgent extends BaseAgent {
       // Outside the sandbox there is no mount to put the account's data directory in place of
       // ~/.gemini, so the CLI is told where it is and to keep the sign-in there.
       const hostLaunchAccountDir = fullAccessLaunch || useSandbox ? undefined : accountDir;
+      // Only where it was observed to work. The injected-transport seam has no platform of its own.
+      if (hostLaunchAccountDir && unsandboxedByPlatform && !agyAccountHostLaunchVerified(process.platform)) {
+        throw new AgyAccountSignInNotSeparateError('platform-not-verified');
+      }
       const acpArgs = [...AGY_ACP_ARGS, ...(mcpServers.length ? ['--process-per-session'] : []),
         ...(hostLaunchAccountDir ? agyAccountCliArgs(hostLaunchAccountDir) : [])];
       const hostEnv = (): NodeJS.ProcessEnv => {
         // issue #13: the branch that runs without the sandbox must never hand agy the full
         // process env. On the test-transport seam it stays exactly as before.
         const base = unsandboxedByPlatform ? filterAgyUnsandboxedEnv(env, os.homedir(), agyWorkingDir, Object.keys(authEnv)) : env;
-        return hostLaunchAccountDir ? { ...base, ...AGY_ACCOUNT_FILE_SIGN_IN_ENV } : base;
+        return hostLaunchAccountDir ? { ...base, ...agyAccountSignInEnv(process.env) } : base;
       };
       const launch = fullAccessLaunch
         ? await prepareAgyFullAccessLaunch({ binaryPath: this.deps.binaryPath, args: acpArgs, taskDir: agyWorkingDir,
@@ -758,7 +796,7 @@ export class AgyAgent extends BaseAgent {
         this.deps.logger.debug('agy binary accepted', { version });
       }
       if (hostLaunchAccountDir) {
-        await this.assertAgyAccountSignInIsSeparate(this.deps.binaryPath, launch.env);
+        await this.assertAgyAccountSignInIsSeparate(this.deps.binaryPath, launch, mcpServers);
         assertCurrent();
       }
       // The account may have been removed or signed out while this start was being prepared.

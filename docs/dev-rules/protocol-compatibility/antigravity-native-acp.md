@@ -73,27 +73,40 @@ directory `gemini`, and the CLI's sign-in for that account is a file inside it. 
 an account, or with the default profile, the launch is unchanged and uses the computer's
 own CLI sign-in.
 
-- **Linux, in the system sandbox.** The account directory is the sandbox's private
-  state root, so `<account>/gemini` is what the CLI sees as `~/.gemini`. The computer's
-  own sign-in file is not shown, even when `shareCliLogin` is on. Not yet run with a
-  real account on Linux.
-- **Windows and macOS, no system sandbox.** The CLI is started with
-  `--gemini-dir <account>/gemini`. On Windows the CLI keeps its sign-in in the system
-  credential store, one entry for the whole user whatever the data directory, unless it
-  sees a remote-shell session; then it keeps the sign-in in the data directory. The host
-  therefore sets `SSH_CONNECTION` for an account launch. This is the one case where the
-  host adds a launch-context marker on purpose: it selects the storage for a directory
-  the owner signed in to for this use, it copies no credential, and it is never set for
-  the computer's own sign-in. Observed on CLI 1.5.15 on Windows 11 with two accounts
-  (cindy#1 7122494557, 7122577933); the CLI does not document it. macOS was not run.
+- **Linux, in the system sandbox (Default permissions, Auto-review and Full access).**
+  The account directory is the sandbox's private state root, so `<account>/gemini` is
+  what the CLI sees as `~/.gemini`. The computer's own sign-in file is not shown, even
+  when `shareCliLogin` is on, and a start that fails is not tried again on the
+  computer's own sign-in. Not yet run with a real account on Linux.
+- **Windows, no system sandbox.** The CLI is started with
+  `--gemini-dir <account>/gemini`. The CLI keeps its sign-in in the system credential
+  store, one entry for the whole user whatever the data directory, unless it sees a
+  remote-shell session; then it keeps the sign-in in the data directory. The host
+  therefore sets `SSH_CONNECTION` for an account launch: the value already in Cindy's
+  own environment when there is one, otherwise `127.0.0.1 0 127.0.0.1 0` (the standard
+  four fields, naming this computer only). This is the one case where the host adds a
+  launch-context marker on purpose: it selects the storage for a directory the owner
+  signed in to for this use, it copies no credential, and it is never set for the
+  computer's own sign-in. Observed on CLI 1.5.15 on Windows 11 with two sign-ins, in
+  both worker modes (cindy#1 7122494557, 7122577933); the CLI does not document it.
+  Which Google account each sign-in belongs to was not checked.
+- **macOS and other hosts without the system sandbox.** Not observed, so an account is
+  not started there (`platform-not-verified`).
 
-Because the behaviour is not documented, the host checks it. Before a CLI build (path,
-modification time, size) is first started with an account outside the sandbox, the host
-starts it once with the same arguments and environment on a new, empty data directory.
-The CLI must answer that it is not signed in. If it creates a session, that build takes
-its sign-in from a place shared by the whole user, and the host starts nothing with the
-account (`AgyAccountSignInNotSeparateError`). Any other failure of the check also
-starts nothing. The check costs one extra CLI start per build and per app run.
+Because the behaviour is not documented, the host checks it. Before agy is started with
+an account outside the sandbox, the host starts it once the same way - the same command,
+arguments (so the same worker mode), environment and tool servers - on a new, empty
+data directory. The CLI must initialize and then answer that it is not signed in. If it
+creates a session, that build takes its sign-in from a place shared by the whole user,
+and the host starts nothing with the account (`AgyAccountSignInNotSeparateError`). Any
+other outcome, including an authentication error before a session was asked for, also
+starts nothing.
+
+"Not signed in" proves separation only while the shared sign-in exists: with an empty
+credential store every build answers the same. A pass is therefore remembered (per CLI
+build - path, modification time, size - and launch arguments, for this app run) only when
+the host reports that the computer's own sign-in exists. Otherwise the check runs before
+every account start; a start right after it can then at worst find no sign-in at all.
 
 Known limits:
 
@@ -103,7 +116,7 @@ Known limits:
   cannot resume its native conversation there.
 - Token refresh inside an account directory over days was not observed.
 - The CLI has no usage or reset-time interface, so an account's remaining quota cannot
-  be shown.
+  be shown, and no interface to ask which account is signed in.
 - The CLI updates itself; the check runs again for the new build.
 
 ## MCP and other capability gaps
