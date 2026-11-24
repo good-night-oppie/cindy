@@ -8,6 +8,8 @@ import { createConsoleLogger } from '../../interfaces/logger.js';
 import { tmpdir as osTmpdir } from 'node:os';
 import { join as joinPath } from 'node:path';
 import { setAgyTaskDirStoreFile } from './host-path-guard.js';
+import { NATIVE_SUBSCRIPTION_ACCOUNT, type NativeSubscriptionAccount } from '../../interfaces/auth-adapter.js';
+import { AgyAccountSignInNotSeparateError } from './account-profile.js';
 
 // Sessions here register their task folder; keep that registry out of the real ~/.cindy.
 setAgyTaskDirStoreFile(joinPath(osTmpdir(), `agy-task-dirs-${process.pid}-index.json`));
@@ -633,5 +635,87 @@ describe('AgyAgent auto-review roots inside the system sandbox', () => {
     } finally {
       fs.rmSync(root, { recursive: true, force: true });
     }
+  });
+});
+
+// Rule: cindy#1 7121057746 / 7122577933 - one Antigravity sign-in per account directory, and a
+// task for one account never silently runs on another sign-in. No existing case passes an
+// account to agy. Unit tier: in-memory transports, no real CLI, sign-in or credential store.
+// Minimal failing input: a second account whose directory is not the computer's own.
+// Standalone file wall time: see the PR.
+describe('AgyAgent started with an account the host chose', () => {
+  const accountDir = joinPath(osTmpdir(), 'agy-account-fixture');
+  const accountOf = (extra: Partial<NativeSubscriptionAccount> = {}): NativeSubscriptionAccount => ({
+    id: 'second', configDir: accountDir, assertCurrent: vi.fn(), readState: vi.fn(async () => ({ authenticated: true })), ...extra,
+  } as NativeSubscriptionAccount);
+  /** The first launch is the check on an empty data directory; the second is the task's. */
+  function launches(emptyDirectoryIsSignedIn: boolean) {
+    const check = new FakeAgy();
+    if (!emptyDirectoryIsSignedIn) check.failSessionNew = { code: -32000, message: 'Authentication required' };
+    const task = new FakeAgy();
+    const seen: { args: readonly string[]; cwd: string; env: NodeJS.ProcessEnv }[] = [];
+    const createAgyTransport = vi.fn((options: { args: readonly string[]; cwd: string; env: NodeJS.ProcessEnv }) => {
+      seen.push(options);
+      return seen.length === 1 ? check : task;
+    });
+    return { check, task, seen, ...create(task, { createAgyTransport }) };
+  }
+
+  it('starts agy on the account\u2019s own data directory, after an empty directory was seen not signed in', async () => {
+    const fs = await import('node:fs');
+    const { seen, check, start } = launches(false);
+    const account = accountOf();
+    const handle = await start({ [NATIVE_SUBSCRIPTION_ACCOUNT]: account });
+    try {
+      expect(seen).toHaveLength(2);
+      const [checked, started] = seen as [typeof seen[number], typeof seen[number]];
+      // The check: same arguments and environment as the task's launch, on a directory with nothing in it.
+      expect(checked.args.slice(0, 3)).toEqual(['acp', '--disable-telemetry', '--gemini-dir']);
+      expect(checked.args[3]).not.toBe(joinPath(accountDir, 'gemini'));
+      expect(fs.existsSync(checked.args[3]!)).toBe(false);
+      expect(check.closeCount).toBe(1);
+      expect(started.args).toEqual(['acp', '--disable-telemetry', '--gemini-dir', joinPath(accountDir, 'gemini')]);
+      expect(started.env.SSH_CONNECTION).toBe(checked.env.SSH_CONNECTION);
+      expect(started.env.SSH_CONNECTION).toEqual(expect.any(String));
+      expect(account.assertCurrent).toHaveBeenCalled();
+    } finally { await handle.close(); }
+  });
+
+  it('starts nothing with the account when an empty data directory is signed in', async () => {
+    const { seen, task, start } = launches(true);
+    const refused = await start({ [NATIVE_SUBSCRIPTION_ACCOUNT]: accountOf() }).then(() => undefined, error => error);
+    expect(refused).toBeInstanceOf(AgentStartupStoppedError);
+    expect(String(refused)).toContain(new AgyAccountSignInNotSeparateError('signed-in-without-account').message);
+    expect(seen).toHaveLength(1);
+    expect(task.written).toHaveLength(0);
+  });
+
+  it('starts nothing with the account when the check itself fails', async () => {
+    const { seen, check, task, start } = launches(false);
+    check.failSessionNew = { code: -32603, message: 'fixture internal error' };
+    const refused = await start({ [NATIVE_SUBSCRIPTION_ACCOUNT]: accountOf() }).then(() => undefined, error => error);
+    expect(refused).toBeInstanceOf(AgentStartupStoppedError);
+    expect(String(refused)).toContain(new AgyAccountSignInNotSeparateError('check-failed').message);
+    expect(seen).toHaveLength(1);
+    expect(task.written).toHaveLength(0);
+  });
+
+  it('starts nothing for an account that is no longer current', async () => {
+    const { seen, start } = launches(false);
+    const gone = accountOf({ assertCurrent: () => { throw new Error('fixture account removed'); } });
+    await expect(start({ [NATIVE_SUBSCRIPTION_ACCOUNT]: gone })).rejects.toThrow('fixture account removed');
+    expect(seen).toHaveLength(0);
+  });
+
+  it('leaves the launch as it was for the computer\u2019s own sign-in', async () => {
+    const seen: { args: readonly string[]; env: NodeJS.ProcessEnv }[] = [];
+    const fake = new FakeAgy();
+    const { start } = create(fake, { createAgyTransport: options => { seen.push(options); return fake; } });
+    const handle = await start({ [NATIVE_SUBSCRIPTION_ACCOUNT]: accountOf({ defaultProfile: true }) });
+    try {
+      expect(seen).toHaveLength(1);
+      expect(seen[0]!.args).toEqual(['acp', '--disable-telemetry']);
+      expect(seen[0]!.env.SSH_CONNECTION).toBe(process.env.SSH_CONNECTION);
+    } finally { await handle.close(); }
   });
 });
