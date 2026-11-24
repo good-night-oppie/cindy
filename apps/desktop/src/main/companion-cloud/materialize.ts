@@ -29,6 +29,8 @@ export interface CompanionLocalProfile { status: string; displayName: string; de
 /** The owner that started the operation; every host write checks it and aborts on change. */
 export interface CompanionWriteFence {
   assertCurrent: () => void;
+  /** This account's device ID from the companion runtime's authenticated /me response. */
+  selfDeviceId?: string;
   signal?: AbortSignal;
 }
 
