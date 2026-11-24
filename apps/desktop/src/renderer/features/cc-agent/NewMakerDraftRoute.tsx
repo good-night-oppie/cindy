@@ -113,7 +113,7 @@ import {
 } from '@/lib/controlledTaskAgentLocation';
 import { useProviderOnboarding } from '@/hooks/useProviderOnboarding';
 import { HomeZeroModelAction } from './HomeZeroModelAction';
-import { resolveDeviceLinkSubmission } from './deviceLinkCreateArgs';
+import { buildDeviceLinkCreateArgs, resolveDeviceLinkSubmission } from './deviceLinkCreateArgs';
 import { hasAcknowledgedRemoteSessionSubscription } from '@/lib/remoteSessionSubscription';
 import {
   commitRemoteSessionHandoff, createRemoteSessionForPreview, previewRemoteCreation,
@@ -388,7 +388,6 @@ import { requestSidebarProjectRestore } from './lib/sidebarProjectRestore';
 const log = createLogger('NewMakerDraftRoute');
 const IS_MAC_PLATFORM = typeof window !== 'undefined' && window.electronAPI?.platform === 'darwin';
 const NO_PLUGIN_ENGINES: readonly PluginEngineChoice[] = Object.freeze([]);
-const NO_PROVIDERS: ProviderView[] = [];
 
 interface DraftWorktreeBranchTarget {
   /** null = 当前电脑；string = device-link 被控工作端。 */
@@ -4921,24 +4920,14 @@ function NewMakerDraftForm({ composerKey: NEW_MAKER_DRAFT_KEY }: { composerKey: 
               }
               return result;
             };
-            const createArgs = resolveDeviceLinkSubmission({
-              agentKind: persistedAgentKind,
+            const createArgs = buildDeviceLinkCreateArgs({
+              agentKind: 'acp',
               workingDir: selectedWorkingDir,
-              candidate: {
-                model: createFields.model,
-                effort: createFields.effort || null,
-                permissionMode: enginePermissionMode,
-                fastMode: false,
-                providerId: createFields.providerId,
-              },
-              deviceProviders: NO_PROVIDERS,
-              capabilityAgentKind,
-              pluginEngine: {
-                providerId: createFields.providerId,
-                model: createFields.model,
-                effort: createFields.effort,
-                permissionMode: enginePermissionMode,
-              },
+              model: createFields.model,
+              effort: createFields.effort || null,
+              permissionMode: enginePermissionMode,
+              fastMode: false,
+              providerId: createFields.providerId,
             });
             const retryId = remoteCreationRetryId(NEW_MAKER_DRAFT_KEY, remoteDeviceId, createArgs);
             const presetSessionId = retryId ?? makeDraftSessionId();

@@ -1298,7 +1298,9 @@ function patchVendorPrefsInternal(
   }
   currentDraft = {
     ...currentDraft,
-    vendor: opts.selectVendor ? vendorAfterRemotePreferenceWrite(activeDataOwnerId, vendor) : currentDraft.vendor,
+    vendor: opts.selectVendor
+      ? (vendor === 'agy' ? vendor : vendorAfterRemotePreferenceWrite(activeDataOwnerId, vendor))
+      : currentDraft.vendor,
     defaultTupleCustomized: currentDraft.defaultTupleCustomized || marksDefaultTuple,
     defaultTupleSelectionCustomized:
       currentDraft.defaultTupleSelectionCustomized || marksSelection,

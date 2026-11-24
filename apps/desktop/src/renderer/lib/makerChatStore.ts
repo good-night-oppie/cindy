@@ -2605,7 +2605,7 @@ export function builtinAgentSwitchIntent(
 /** Same-engine Claude/Codex previews are applied only by the task's host. */
 export function isSameEngineNonPiModelIntent(
   intent: BuiltinAgentSwitchIntentRecord | null,
-  agentKind: AgentSwitchIntentRecord['target'],
+  agentKind: MakerAgentKindWire | 'acp',
 ): boolean {
   return !!intent && (agentKind === 'claude-code' || agentKind === 'codex') &&
     intent.target === agentKind && intent.agentDeviceId === undefined;

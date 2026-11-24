@@ -198,10 +198,11 @@ const INTERRUPTED_ERROR_DONE_FALLBACK_MS = 250;
  */
 const SCHEDULED_TASKS_FEATURE = 'Scheduled tasks';
 
-/** Refuses only the plugin engine; every other value is returned unchanged. */
-function scheduledBuiltinAgentKind(kind: EngineKind): AgentKind;
-function scheduledBuiltinAgentKind(kind: EngineKind | undefined): AgentKind | undefined;
-function scheduledBuiltinAgentKind(kind: EngineKind | undefined): AgentKind | undefined {
+/** Only built-in engines with scheduled execution can use this path. */
+function scheduledBuiltinAgentKind(kind: EngineKind): Exclude<AgentKind, 'agy'>;
+function scheduledBuiltinAgentKind(kind: EngineKind | undefined): Exclude<AgentKind, 'agy'> | undefined;
+function scheduledBuiltinAgentKind(kind: EngineKind | undefined): Exclude<AgentKind, 'agy'> | undefined {
+  if (kind === 'agy') throw new Error('Native Antigravity scheduled execution is not supported');
   if (kind === 'acp') throw new PluginEngineUnsupportedError(SCHEDULED_TASKS_FEATURE);
   return kind;
 }
@@ -222,7 +223,7 @@ function hasScheduledModelOverride(schedule: Schedule): boolean {
 function legacyCrossHarnessModelAgentKind(
   schedule: Schedule,
   currentAgentKind: AgentKind | undefined,
-): AgentKind | undefined {
+): Exclude<AgentKind, 'agy'> | undefined {
   if (schedule.modelAgentKind || !schedule.model?.trim() || !currentAgentKind) return undefined;
   // Bound schedules never use a plugin engine (refused on save); refuse rather than reinterpret one.
   return currentAgentKind !== schedule.agentKind ? scheduledBuiltinAgentKind(schedule.agentKind) : undefined;

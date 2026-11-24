@@ -19,7 +19,8 @@ export function useModelFavoritesHost(): void {
         // Read-only, same owner partition; only main-side plugin reads ask for it.
         const recents = request.recents
           ? accessHostRecentModels(request.ownerStamp.dataOwnerId)
-            .filter((item) => item.providerId.length <= MODEL_FAVORITE_TEXT_MAX_LENGTH)
+            .flatMap((item) => item.agent === 'agy' || item.providerId.length > MODEL_FAVORITE_TEXT_MAX_LENGTH
+              ? [] : [{ ...item, agent: item.agent }])
           : undefined;
         // Long local composite sources cannot be represented by the existing wire
         // protocol. Keep them on disk without breaking older readers' entire list.

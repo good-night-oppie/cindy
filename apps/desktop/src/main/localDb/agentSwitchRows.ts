@@ -3,7 +3,7 @@ import { getDbClient } from './client/current.js';
 import { messages, sessions } from './schema.js';
 import { messageRowid } from './retriedUserTurnSupersede.js';
 import { messageToCamel, persistableSessionEffort, projectSessionRuntimeFields } from './mapper.js';
-import { isPluginEngineKind, normalizeDbAgentKind, type DbEngineKind } from '../../shared/agentKindConversion.js';
+import { isPluginEngineKind, normalizeDbAgentKind, type DbAgentKind, type DbEngineKind } from '../../shared/agentKindConversion.js';
 import { isProviderShareAgentDeviceId } from '../../shared/providerShare.js';
 import { throwIpcError } from '../utils/ipcValidate.js';
 

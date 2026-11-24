@@ -154,7 +154,7 @@ export function providerRegistryTariffEndedAt(
   at?: string | Date,
   agent?: AgentKind,
 ): boolean {
-  if (!registry) return false;
+  if (!registry || agent === 'agy') return false;
   const day = calendarDate(at);
   const registryAgent = agent === 'pi' ? undefined : agent;
   for (const catalogId of candidateCatalogIds(provider, providerId, modelId, registry, agent)) {
