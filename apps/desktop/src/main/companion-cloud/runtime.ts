@@ -41,7 +41,7 @@ export interface CompanionCloudHost {
   retireLocalCopy?: (botId: string, current: () => boolean) => Promise<void>;
   homes: CompanionHomeRegistry;
   openState: (endpoint: string, humanActorId: string, current: () => boolean) => CompanionCloudState;
-  readValues: (botId: string) => Promise<CompanionPreferenceValue[]>;
+  readValues: (botId: string, selfDeviceId?: string) => Promise<CompanionPreferenceValue[]>;
   /** Read-only merge preflight: profiles (any status), task links and home files count as data.
    * Only an explicit false proves absence; missing capability/errors must never allow retirement. */
   hasLocalData?: (botId: string) => Promise<boolean>;
@@ -254,7 +254,7 @@ export function startCompanionCloud(input: {
   const roomName = (botId: string) => input.bots().find(bot => bot.botId === botId)?.name ?? '';
   const store = input.store ? createCompanionStore(input.api, input.store) : undefined;
   const uploader = createCompanionUploader({ api: input.api, state, log: input.log, store,
-    readValues: async (botId, actorId) => resolveCompanionSkillFiles(await input.host.readValues(botId), {
+    readValues: async (botId, actorId) => resolveCompanionSkillFiles(await input.host.readValues(botId, input.selfDeviceId), {
       known: sha256 => state.bot(botId)?.skillFileMedia?.[sha256],
       gaps: state.bot(botId)?.skillFileGaps ?? {},
       ...(input.media ? { upload: async file => {
@@ -290,6 +290,7 @@ export function startCompanionCloud(input: {
   /** Writes started by this account stop as soon as it is no longer current. */
   const fence = {
     assertCurrent: () => { if (!live()) throw new Error('OWNER_CHANGED'); },
+    selfDeviceId: input.selfDeviceId,
     signal: aborts.signal,
   };
   // Install guard: which bots this installation runs ('mine'), another install on this device
@@ -1123,7 +1124,14 @@ export function startCompanionCloud(input: {
       const self = input.selfDeviceId;
       if (!self || !live()) return { ok: false, code: 'NOT_ENABLED' };
       const choices = await runtime.homeChoices(botId);
-      if (choices.homeDeviceId === targetDeviceId) return { ok: true };
+      if (choices.homeDeviceId === targetDeviceId) {
+        // A device selection does not authorize taking over from a different installation.
+        if (targetDeviceId === self && runtime.isShadowed(botId)) {
+          const profileFailure = runtime.profileFailure(botId);
+          return { ok: false, code: 'FAILED', ...(profileFailure ? { profileFailure } : {}) };
+        }
+        return { ok: true };
+      }
       if (choices.mode === 'unavailable') return { ok: false, code: choices.reason === 'HOME_OUTDATED' ? 'HOME_OUTDATED' : 'FAILED' };
       const chosen = choices.targets.find(target => target.deviceId === targetDeviceId);
       if (!chosen) return { ok: false, code: 'TARGET_UNAVAILABLE' };

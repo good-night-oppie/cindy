@@ -1112,6 +1112,22 @@ describe('Bot canonical Session lifecycle', () => {
     expect(state.bot('bot-1')?.mirror?.createdAt).toBe(20 * 60_000);
   });
 
+  it('restores the workbench on its authenticated home without a device-link handshake', async () => {
+    const host = createCompanionCloudHost({ deliverToCanonical: async () => ({ ok: true }),
+      ensureCanonicalSession: async () => 'unused', rebuildContext: async () => 'rebuilt',
+      listDevices: async () => [], selfDeviceId: () => null });
+    const workbench = { directories: [{ path: h.userDataDir, deviceId: 'desk', addedAt: 'now' }], tasks: {} };
+    const apply = host.materializer!.applyWorkbench!;
+    await expect(apply('bot-1', workbench, { assertCurrent() {} })).rejects.toThrow('DEVICE_UNKNOWN');
+    await apply('bot-1', workbench, { selfDeviceId: 'desk', assertCurrent() {} });
+    const { readBotLinkedProjects } = await import('../../../maker-ipc/botLinkedProjectStore');
+    const { ownerScopedUserDataPath } = await import('../../../appSessionState');
+    expect(await readBotLinkedProjects(ownerScopedUserDataPath(), 'bot-1')).toContainEqual({ path: h.userDataDir, addedAt: 'now' });
+    const key = 'companion.workbench.v1';
+    expect(await host.readValues('bot-1', 'desk')).toContainEqual({ key, value: expect.objectContaining(workbench) });
+    expect(await host.readValues('bot-1')).toContainEqual({ key, value: null, unread: true });
+  });
+
   // #7095: the default companion seeded on a fresh computer is demoted mid-meeting; the take-over then
   // writes the cloud profile onto that copy.
   describe('cloud take-over of a copy whose first meeting never finished', () => {
