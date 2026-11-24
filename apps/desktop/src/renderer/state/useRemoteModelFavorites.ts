@@ -9,6 +9,7 @@ import {
 import { getDataOwnerGeneration } from '@/contexts/dataOwnerGeneration';
 import { extractIpcError } from '@/utils/ipcError';
 import type { ModelFavoriteItem, ModelFavoriteConfig, ModelFavoritePatch } from './modelFavorites';
+import { requireWireModelFavorite } from './modelConfigCopy';
 
 export interface FavoriteStore {
   get(uid: string): ModelFavoriteItem | undefined;
@@ -135,9 +136,10 @@ export function useRemoteModelFavorites(deviceId?: string) {
   };
   const store: FavoriteStore = {
     get: (uid) => items.find((item) => item.uid === uid),
-    add: (item) => write({ kind: 'add', item }),
-    update: (uid, patch) => {
-      const before = expected(uid);
+    // This store writes to another computer; Antigravity entries never leave this one.
+    add: async (item) => write({ kind: 'add', item: requireWireModelFavorite(item) }),
+    update: async (uid, patch) => {
+      const before = requireWireModelFavorite(expected(uid));
       const item = { ...before, ...patch };
       return write({
         kind: 'update',
@@ -145,7 +147,7 @@ export function useRemoteModelFavorites(deviceId?: string) {
         item: { ...item, effort: item.effort ?? undefined, fast: item.fast ? true : undefined },
       });
     },
-    remove: (uid) => write({ kind: 'remove', expected: expected(uid) }),
+    remove: async (uid) => write({ kind: 'remove', expected: requireWireModelFavorite(expected(uid)) }),
   };
   return { items, store, error: error || writeErrorKey === key, errorCode };
 }

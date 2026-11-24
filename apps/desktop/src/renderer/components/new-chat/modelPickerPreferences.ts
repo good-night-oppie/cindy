@@ -81,8 +81,8 @@ export function useTransientModelPickerPreferences(deviceId?: string): ModelPick
           const normalized = normalizeModelConfigCopy(config);
           if (!normalized) return;
           const agent = normalized.agent;
-          // 收藏表只覆盖三种既有引擎(见 modelFavorites.ModelFavoriteConfig)。
-          if (agent === 'agy' || favorites().some((item) =>
+          // Antigravity favorites exist only on this computer (see modelFavorites.ModelFavoriteConfig).
+          if ((agent === 'agy' && deviceId) || favorites().some((item) =>
             modelConfigCopyIdentity(item) === modelConfigCopyIdentity(normalized))) return;
           editFavorites([...favorites(), { ...normalized, agent, uid: crypto.randomUUID() }]);
         },
@@ -90,7 +90,8 @@ export function useTransientModelPickerPreferences(deviceId?: string): ModelPick
           editFavorites(favorites().map((item) => {
             if (item.uid !== uid) return item;
             const normalized = normalizeModelConfigCopy({ ...item, ...patch });
-            if (!normalized || normalized.agent === 'agy') return item;
+            // An entry never changes to or from Antigravity (its models exist under no other engine).
+            if (!normalized || (normalized.agent === 'agy') !== (item.agent === 'agy')) return item;
             const agent = normalized.agent;
             return { ...normalized, agent, uid };
           }));

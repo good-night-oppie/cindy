@@ -64,7 +64,12 @@ export function pickWizardRecommend(input: {
   const ollama = pickOllamaRecommend(input);
   if (ollama) items.push(ollama);
 
-  for (const cli of input.cliCandidates ?? []) {
+  // A CLI that is already signed in can be used right away, so it goes before one that is only
+  // installed (stable: the detection order still decides ties).
+  const cliCandidates = [...(input.cliCandidates ?? [])].sort(
+    (a, b) => Number(b.loggedIn) - Number(a.loggedIn),
+  );
+  for (const cli of cliCandidates) {
     if (items.length >= MAX_RECOMMENDATIONS) break;
     if (!cli.providerId || connected.has(cli.providerId)) continue;
     if (items.some((item) => item.kind === 'oauth' && item.providerId === cli.providerId)) {

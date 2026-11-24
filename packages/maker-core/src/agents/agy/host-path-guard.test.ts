@@ -287,7 +287,7 @@ describe('write-type tool calls aimed outside the task folder', () => {
 
   const run = (status: 'completed' | 'failed', rawInput: Record<string, unknown>, kind = 'execute', locale?: string) => {
     const events: AgentEvent[] = [];
-    const t = new AgyTranslator(e => events.push(e), { taskDir: task, homeDir: home, visibleDirs: [], locale: () => locale });
+    const t = new AgyTranslator(e => events.push(e), { isolated: true, taskDir: task, homeDir: home, visibleDirs: [], locale: () => locale });
     t.beginTurn();
     t.update({ sessionUpdate: 'tool_call', toolCallId: '1', kind, rawInput });
     t.update({ sessionUpdate: 'tool_call_update', toolCallId: '1', status,
@@ -319,7 +319,7 @@ describe('write-type tool calls aimed outside the task folder', () => {
     expect(agyWriteOutsideTask(exec('touch /srv/x'), task, home, privateState)).toBe('/srv/x');
     expect(agyWriteOutsideTask(exec('touch ~/.geminiX'), task, home, privateState)).toBe('/home/u/.geminiX');
     const events: AgentEvent[] = [];
-    const t = new AgyTranslator(e => events.push(e), { taskDir: task, homeDir: home, visibleDirs: privateState });
+    const t = new AgyTranslator(e => events.push(e), { isolated: true, taskDir: task, homeDir: home, visibleDirs: privateState });
     t.beginTurn();
     t.update({ sessionUpdate: 'tool_call', toolCallId: 'p', kind: 'execute', rawInput: { CommandLine: 'touch ~/.gemini/state.json' } });
     t.update({ sessionUpdate: 'tool_call_update', toolCallId: 'p', status: 'completed' });

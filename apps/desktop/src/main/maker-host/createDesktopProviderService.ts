@@ -5,6 +5,8 @@ import { isModelContextLimitCustomized, readModelContextLimits } from './model-c
 import { requestCodexApiModelProbe } from './codex-api-model-capabilities.js';
 import { readModelPriceOverrideView } from '../usage/modelPriceOverrideStore.js';
 import { readProviderPresentation } from './provider-presentation-store.js';
+import { hasAntigravityCliLogin } from './antigravity-cli-login.js';
+import { attachAntigravityModels } from './antigravity-models.js';
 import { projectSubscriptionFastPolicy } from './subscription-fast-policy.js';
 import { filterLegacyGptContextProfiles } from './legacy-context-profiles.js';
 import { subscriptionAccountState, isXaiSubscriptionProviderId, resetSubscriptionAccountCaches } from './subscription-account-auth.js';
@@ -54,6 +56,7 @@ import {
   isModelDisabled,
   isProviderDisabled,
   storedCustomProviderId,
+  ANTIGRAVITY_PROVIDER_ID,
   type Catalog,
   type CatalogCapabilityEvidence,
   type CatalogIO,
@@ -935,7 +938,8 @@ export function getDesktopProviderService(options: { allowSideEffects?: boolean 
   if (singleton) return singleton;
   singleton = createProviderService({
     getModelContextLimits: readModelContextLimits,
-    projectProvider: provider => {
+    projectProvider: catalogProvider => {
+      const provider = attachAntigravityModels(catalogProvider);
       const accountKeys = subscriptionProviderAccountKeys(provider.id)
         ?? (provider.connected && provider.openAiAccount?.accountKey ? [provider.openAiAccount.accountKey] : undefined);
       const projected = { ...projectSubscriptionFastPolicy(provider),
@@ -1073,6 +1077,9 @@ export function getDesktopProviderService(options: { allowSideEffects?: boolean 
       };
     },
     // 内置 API-key 供应商(如 gemini 图像来源):连接态 = key 已存(providerSecretStore)。
+    // Added by the user (removed === false) and the CLI holds its own Google sign-in.
+    antigravityConnected: () =>
+      readProviderPresentation(ANTIGRAVITY_PROVIDER_ID).removed === false && hasAntigravityCliLogin(),
     builtinApiKeyConnected: (providerId) =>
       providerId === 'gemini' ? Boolean(getProviderSecretStore().get('gemini')?.trim()) : false,
     customApiKeyConnected: (provider) =>

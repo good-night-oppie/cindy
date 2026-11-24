@@ -1,5 +1,5 @@
 import { useRemoteProviderDisable } from '@/lib/remoteProviderDisable';
-import { sameRunLocationProvider, duplicateSubscriptionProviders, subscriptionModelsCoveredBy } from '@cindy/model-providers';
+import { ANTIGRAVITY_PROVIDER_ID, sameRunLocationProvider, duplicateSubscriptionProviders, subscriptionModelsCoveredBy } from '@cindy/model-providers';
 import { deviceDisplayName } from '@/lib/deviceName';
 import { ProviderShareQuotaViewingContext, useProviderShareQuotaViewing } from '@/features/provider-share/useProviderShareWeeklyQuota';
 import { SpeedIcon } from './SpeedIcon';
@@ -107,7 +107,7 @@ import { useDevicesProviders } from '@/hooks/useDevicesProviders';
 import { effectiveRunLocation, RUN_LOCATION_LOCAL } from '@/lib/providerRunLocation';
 import { modelCatalogKey, type ControlledModelFavoriteSource } from '../../../shared/controlledModelCatalog';
 import { RemoteSourceMark } from '@/components/icons/RemoteSourceMark';
-import { buildUnifiedRail, remoteAgentProviders } from './unifiedModelSelection';
+import { withAntigravityModels, buildUnifiedRail, remoteAgentProviders } from './unifiedModelSelection';
 import {
   collectRemoteProviderGroups,
   providerGroupMemberOfRoute,
@@ -1445,7 +1445,7 @@ function ModelSelectorContentView({
   const unifiedAgents = (browsingSelectedCatalog ? requestedUnifiedAgents : undefined) ??
     (vendorKey && agentKind && !onUnifiedSelect && !sessionEngineFilter ? [agentKind] : undefined);
   const browseTargetLabel =
-    browseVendor === 'codex' ? 'Codex' : browseVendor === 'pi' ? 'Pi' : 'Claude Code';
+    browseVendor === 'codex' ? 'Codex' : browseVendor === 'pi' ? 'Pi' : browseVendor === 'agy' ? 'Antigravity' : 'Claude Code';
   const enqueueAgentSwitch = (
     targetAgentKind: 'claude-code' | 'codex' | 'pi',
     targetModelId: string,
@@ -1457,10 +1457,11 @@ function ModelSelectorContentView({
     // 错误地串在一起，并在回调尚未启动时留下可发送窗口。
     void agentSwitch.onSwitch(targetAgentKind, targetModelId, targetProviderId);
   };
-  // 同时拉三个 agent —— vendorKey 不传时把三边模型一起展示。hooks 必须按固定顺序调用。
+  // 同时拉四个 agent —— vendorKey 不传时把各边模型一起展示。hooks 必须按固定顺序调用。
   const cc = useAgentCapabilities('claude-code', catalogDeviceId);
   const codex = useAgentCapabilities('codex', catalogDeviceId);
   const pi = useAgentCapabilities('pi', catalogDeviceId);
+  const agy = useAgentCapabilities('agy', catalogDeviceId);
   // 本机折扣 GPT 仍按本机 API key gate；device-link 必须只看被控端 provider 状态。
   // 旧被控端不支持 provider:list 时按远端 capabilities 退化，不得误用控制端 key。
   const { hasSavedKey, canReadKey } = useApiKey();
@@ -1490,9 +1491,14 @@ function ModelSelectorContentView({
     () => withFollowedAccountSource(localProviders.providers, taskSourceProvider ?? null),
     [localProviders.providers, taskSourceProvider],
   );
-  const providers = deviceId
+  // 已连接的「Google Gemini」订阅来源挂上 agy 的 ACP 清单;未添加该来源时 agy 模型不出现。
+  const providersBase = deviceId
     ? remoteCatalogProviders
     : providersOverride ?? sshCatalogProviders ?? localTaskProviders;
+  const providers = useMemo<ProviderView[]>(
+    () => withAntigravityModels(providersBase as ProviderView[], agy.capabilities?.availableModels ?? []),
+    [agy.capabilities, providersBase],
+  );
   // SSH 目录里 Codex 来自远端主机：本机账号用量、本机供应商组都不能代表它。
   const sshCodexActive = sshCodex !== undefined;
   const mixedCatalog = !!providersOverride || sshCodexActive;
@@ -1891,6 +1897,10 @@ function ModelSelectorContentView({
     void visibilityVersion;
     const entries = unifiedModelEntries({
       providers: homeProviders.filter((provider) => !runLocationFold.hiddenLocal.has(provider.id)),
+      // Same engine set as the list itself: without it a source that only serves an engine this
+      // picker does not offer (Google Gemini / Antigravity in the teammate picker) got a rail
+      // item that opened an empty list.
+      ...(unifiedAgents ? { agents: unifiedAgents } : {}),
       isVisible: homeDeviceId
         ? (providerId, model, agent) =>
             isDeviceModelVisible(homeModelVisibilityOverrides, agent, providerId, model)
@@ -1899,7 +1909,9 @@ function ModelSelectorContentView({
       scope: 'draft',
     });
     return buildUnifiedRail(entries, undefined, homeDeviceId ? undefined : localProviders.providerOrder);
+    // biome-ignore lint/correctness/useExhaustiveDependencies: unifiedAgents 以 unifiedAgentsKey 表达身份。
   }, [
+    unifiedAgentsKey,
     hasRemoteAgent,
     homeDeviceId,
     homeProviders,
@@ -4465,6 +4477,7 @@ export function ModelSelector({
   const cc = useAgentCapabilities('claude-code', deviceId);
   const codex = useAgentCapabilities('codex', deviceId);
   const pi = useAgentCapabilities('pi', deviceId);
+  const agyTrigger = useAgentCapabilities('agy', deviceId);
   const gatewayPricing = useGatewayModelPricing();
   const referencePricing = useReferenceModelPricing();
   const { accountTier: modelAccessAccountTier } = useModelAccessStatus();
@@ -4481,9 +4494,14 @@ export function ModelSelector({
     () => withFollowedAccountSource(localProviders.providers, taskSourceProvider ?? null),
     [localProviders.providers, taskSourceProvider],
   );
-  const providers = deviceId
+  // trigger 与面板同口径:否则选中 agy 模型后显示「模型信息暂不可用」。
+  const providersBaseTrigger = deviceId
     ? remoteProviders.providers
     : providersOverride ?? sshCatalogProviders ?? localTaskProviders;
+  const providers = useMemo<ProviderView[]>(
+    () => withAntigravityModels(providersBaseTrigger as ProviderView[], agyTrigger.capabilities?.availableModels ?? []),
+    [agyTrigger.capabilities, providersBaseTrigger],
+  );
   // 当前是 SSH Codex 时 trigger 的加载 / 失败 / 来源都以远端清单为准;其余引擎仍看本机目录。
   const sshCodexCurrent = sshCodex !== undefined && agentKind === 'codex';
   // Old device-link hosts expose capabilities only. Never substitute local routes.
@@ -4528,15 +4546,20 @@ export function ModelSelector({
     ],
   );
 
-  const routeProvider = currentProviderId ? providers.find((p) => p.id === currentProviderId) : undefined;
-  const routeModel = routeProvider && agentKind ? getModel(routeProvider, modelId, agentKind) : undefined;
+  // An Antigravity task stores no provider route (the CLI signs itself in) and is kept out of
+  // the in-task engine identity, but its models only ever come from the Google Gemini
+  // subscription source: name the current model through it. Display only.
+  const labelAgentKind = agentKind ?? (currentSelection?.agentKind === 'agy' ? 'agy' as const : null);
+  const labelProviderId = currentProviderId ?? (labelAgentKind === 'agy' ? ANTIGRAVITY_PROVIDER_ID : undefined);
+  const routeProvider = labelProviderId ? providers.find((p) => p.id === labelProviderId) : undefined;
+  const routeModel = routeProvider && labelAgentKind ? getModel(routeProvider, modelId, labelAgentKind) : undefined;
   const currentModel = routeModel
     ? { ...routeModel, displayName: routeModel.name, id: modelId }
     : visibleModels.find((m) => m.id === modelId);
   // Wire IDs can differ from catalog IDs during a switch. Resolve display metadata
   // through the existing alias lookup without changing routing/capability decisions.
-  const displayProvider = agentKind
-    ? modelDisplayProvider(providers, currentProviderId, modelId, agentKind, actualRoute)
+  const displayProvider = labelAgentKind
+    ? modelDisplayProvider(providers, labelProviderId, modelId, labelAgentKind, actualRoute)
     : undefined;
   // 目标目录(另一台电脑 / 共享供应商)已就绪却没有这个模型:新建草稿此刻回落到本机默认
   // 模型(PR #9369 review),名称也回本机目录取 —— trigger 显示真实名字而不是
@@ -4550,7 +4573,7 @@ export function ModelSelector({
         .map((provider) => findCatalogModel(provider, modelId, agentKind, { exact: true })?.name)
         .find((name) => name !== undefined)
     : undefined;
-  const catalogName = (agentKind ? findCatalogModel(displayProvider, modelId, agentKind)?.name : undefined)
+  const catalogName = (labelAgentKind ? findCatalogModel(displayProvider, modelId, labelAgentKind)?.name : undefined)
     ?? currentModel?.displayName;
   const labelKey = JSON.stringify([deviceId ?? null, currentProviderId ?? null, agentKind, modelId]);
   const lastModelName = useRef<{ key: string; name: string | undefined } | null>(null);
@@ -4591,7 +4614,9 @@ export function ModelSelector({
         ? t('newChat.modelSelector.trigger.agent.claudeCode')
         : agentIdentity.vendorKey === 'pi'
           ? t('newChat.modelSelector.trigger.agent.pi')
-          : t('newChat.modelSelector.trigger.agent.codex')
+          : agentIdentity.vendorKey === 'agy'
+            ? 'Antigravity'
+            : t('newChat.modelSelector.trigger.agent.codex')
       : null;
   const baseDisplayIdentityLabel = agentName
     ? `${agentName} · ${displayLabel}`
@@ -4749,7 +4774,7 @@ export function ModelSelector({
     const model = findCatalogModel(provider, selection.model, selection.agentKind);
     const selectionKey = JSON.stringify([deviceId ?? null, selection.providerId, selection.agentKind, selection.model]);
     const name = selectionKey === labelKey ? localizedName : model?.name ? localizedModelName(model.name, t) : undefined;
-    const vendor = selection.agentKind === 'claude-code' ? 'Claude Code' : selection.agentKind === 'pi' ? 'Pi' : 'Codex';
+    const vendor = selection.agentKind === 'claude-code' ? 'Claude Code' : selection.agentKind === 'pi' ? 'Pi' : selection.agentKind === 'agy' ? 'Antigravity' : 'Codex';
     return [vendor, name ?? t('newChat.modelSelector.trigger.placeholder'), provider ? providerDisplayName(provider, t) : selection.providerId,
       selection.effort ? modelEffortLabel(t, model, selection.effort) : null,
       selection.fastMode ? t(selection.fastMode === 'ultrafast' ? 'newChat.modelSelector.speed.ultrafast' : 'newChat.modelSelector.meta.fastBadge') : null].filter(Boolean).join(' · ');

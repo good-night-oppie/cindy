@@ -620,6 +620,7 @@ export interface ChatMessage {
    * agentMeta.goalCompletion 派生(仿 fork divider 从 session 元数据派生),重开会话仍在。
    */
   systemCardType?:
+    | 'agy-file-access'
     | 'plugin-model-route'
     | 'voice-call'
     | 'voice-call-task'
@@ -7880,7 +7881,7 @@ type MakerEventPayload = {
   event?: {
     type: string;
     data: unknown;
-    source?: 'claude-code' | 'codex' | 'pi' | 'vision-bridge';
+    source?: CCAgentStreamEvent['source'];
     agentMeta?: Record<string, unknown>;
     turnContinuationId?: number;
     turnScope?: 'turn' | 'background';
@@ -7932,7 +7933,7 @@ type PendingTextDeltaBatch = {
   text: string;
   dataOwner: DataOwnerGeneration;
   ingress: LiveIngressContext;
-  source?: 'claude-code' | 'codex' | 'pi' | 'vision-bridge';
+  source?: CCAgentStreamEvent['source'];
   persistId?: string;
   agentMeta?: Record<string, unknown>;
 };
@@ -8530,6 +8531,18 @@ function initGlobalListeners(options: GlobalListenerOptions = {}): void {
     // 视觉桥提示（它属于发起会话所在设备的本地 UI 反馈）。
     if (ingress.remoteDeviceId && isVisionBridgeReason(event)) {
       return;
+    }
+
+    // An idle disconnect ends the runtime after a completed turn. Its closed
+    // status clears turn errors, so show the notice independently of that state.
+    if (event.type === 'error' && event.source === 'agy') {
+      const data = event.data as { reason?: string; isTerminal?: boolean } | null;
+      if (data?.reason === 'agy_acp_disconnected' && data.isTerminal === false) {
+        if (!ingress.remoteDeviceId && _activeViewSessions.has(sessionId)) {
+          toast.info(i18n.t('chat.agyIdleExit'), { duration: 8000 });
+        }
+        return;
+      }
     }
 
     if (isTextDeltaEvent(event)) {
@@ -11045,7 +11058,7 @@ function isActiveSessionSnapshot(value: unknown): value is ActiveSessionSnapshot
   const item = value as Record<string, unknown>;
   return (
     typeof item.sessionId === 'string' &&
-    (item.agentKind === 'claude-code' || item.agentKind === 'codex' || item.agentKind === 'pi') &&
+    (item.agentKind === 'claude-code' || item.agentKind === 'codex' || item.agentKind === 'pi' || item.agentKind === 'agy') &&
     typeof item.isTurnRunning === 'boolean'
   );
 }
@@ -16757,6 +16770,8 @@ async function resendBlockedMessage(
 
 function steerQueuedMessage(sessionId: string, clientId: string): Promise<boolean> {
   if (!sessionId || !clientId) return Promise.resolve(false);
+  // No same-turn steer on Antigravity: the row stays queued and is sent when the reply ends.
+  if (getOrCreateState(sessionId).agentKind === 'agy') return Promise.resolve(false);
   // Capture the target before entering the dispatch coordinator. A relay
   // reconnect may clear remoteProjectsStore while the coordinator is waiting;
   // retrying through makerApiFor(sessionId) in that window would address the
@@ -19059,7 +19074,7 @@ function mirrorSessionFields(
   // 新引擎的事件会被旧引擎 reducer 错误处理(2026-07-20 审计实锤)。随引擎翻转
   // 同步清 sdkSessionId(旧引擎的原生会话 id 对新引擎无意义,与 noteAgentSwitched
   // 口径一致)。幂等:发起窗口已 noteAgentSwitched → 同值 no-op。
-  if (patch.agentKind === 'cc' || patch.agentKind === 'codex' || patch.agentKind === 'pi') {
+  if (patch.agentKind === 'cc' || patch.agentKind === 'codex' || patch.agentKind === 'pi' || patch.agentKind === 'agy') {
     const nextKind = dbToMakerAgentKind(patch.agentKind);
     setState(sessionId, (s) => {
       // New hosts publish the full runtime snapshot before explicitly clearing
@@ -19995,6 +20010,13 @@ function mapServerMessages(serverMsgs: Message[]): ChatMessage[] {
   }
   const legacyUserTurnCosts = projectLegacyUserTurnCosts(ordered);
   const mapped = ordered.map((m) => {
+    if (m.role === 'assistant' && m.agentMeta?.agyFileAccessNotice === true && typeof m.content === 'string') {
+      return {
+        clientId: m.clientId, role: 'assistant' as const, content: '', isStreaming: false,
+        systemCardType: 'agy-file-access' as const, systemCardData: { text: decodeRemoteErrorMessage(m.content.replace(/^\[agy_sandbox_blocked\] /, '')), denial: m.agentMeta.agySandboxDenial },
+        botPrivateReply: m.agentMeta.botPrivateReply,
+      };
+    }
     if (m.role === 'assistant' && m.agentMeta?.voiceCall?.version === 1) return {
       clientId: m.clientId, role: 'assistant' as const, content: '', isStreaming: false,
       systemCardType: 'voice-call' as const, systemCardData: { record: m.agentMeta.voiceCall },

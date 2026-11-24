@@ -526,6 +526,7 @@ async function doStart(
       const active = getLiziMcpSessionContext();
       if (
         active?.agentKind !== 'pi' &&
+        active?.agentKind !== 'agy' &&
         active?.agentKind !== 'codex' &&
         active?.agentKind !== 'claude-code'
       ) {

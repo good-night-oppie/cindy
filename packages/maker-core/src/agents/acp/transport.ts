@@ -30,14 +30,15 @@ export function spawnAcpTransport(options: AcpTransportOptions): AcpTransport {
   if (!isAbsolute(options.binaryPath)) throw new Error('ACP binaryPath must be absolute');
   if (!isAbsolute(options.cwd)) throw new Error('ACP cwd must be absolute');
   const maxBytes = options.maxFrameBytes ?? 16 * 1024 * 1024;
-  const grace = options.shutdownGraceMs ?? 1_000;
-  const killWait = options.killTimeoutMs ?? 3_000;
+  const posix = (options.platformOverride ?? process.platform) !== 'win32';
+  const grace = options.shutdownGraceMs ?? (posix ? 1_000 : 1_500);
+  const killWait = options.killTimeoutMs ?? (posix ? 3_000 : 500);
   if (![maxBytes, grace, killWait].every(value => Number.isSafeInteger(value) && value > 0 && value <= 2_147_483_647)) {
     throw new Error('Invalid ACP transport limits');
   }
-  const posix = (options.platformOverride ?? process.platform) !== 'win32';
-  const child = (options.spawnChild ?? spawn)(options.binaryPath, [...(options.args ?? ['acp'])], {
-    cwd: options.cwd, env: options.env, stdio: ['pipe', 'pipe', 'pipe'], shell: false, detached: posix,
+  const args = options.args ?? ['acp'];
+  const child = (options.spawnChild ?? spawn)(options.binaryPath, [...args], {
+    cwd: options.cwd, env: options.env, stdio: ['pipe', 'pipe', 'pipe'], shell: false, detached: posix, windowsHide: true,
   }) as ChildProcessWithoutNullStreams;
   const lines = new Set<(line: string) => void>();
   const closes = new Set<(info: { reason: string }) => void>();
@@ -48,7 +49,7 @@ export function spawnAcpTransport(options: AcpTransportOptions): AcpTransport {
   let reason: string | undefined;
   let exited = child.exitCode !== null || child.signalCode !== null;
   let closing: Promise<void> | undefined;
-  let windowsTreeUnconfirmed = false;
+
   let stderrTail = '';
   const disconnect = (why: string) => {
     if (reason) return;
@@ -66,7 +67,22 @@ export function spawnAcpTransport(options: AcpTransportOptions): AcpTransport {
     if (child.pid === undefined) exited = true;
     fail('ACP process error');
   });
-  child.on('exit', () => { exited = true; disconnect('ACP process exited'); });
+  let drainTimer: ReturnType<typeof setTimeout> | undefined;
+  child.on('exit', () => {
+    exited = true;
+    if (posix) { disconnect('ACP process exited'); return; }
+    // Allow the last ACP reply to drain, even if exit arrives before stdout.
+    // A descendant retaining a pipe must not keep a dead Windows task active.
+    drainTimer = setTimeout(() => {
+      disconnect('ACP process exited');
+      child.stdout.destroy();
+      child.stderr.destroy();
+    }, 1_000).unref();
+  });
+  child.on('close', () => {
+    clearTimeout(drainTimer);
+    disconnect('ACP process exited');
+  });
   child.stdin.on('error', () => fail('ACP input disconnected'));
   child.stdout.on('error', () => fail('ACP output disconnected'));
   child.stdout.on('end', () => fail('ACP output ended'));
@@ -112,21 +128,9 @@ export function spawnAcpTransport(options: AcpTransportOptions): AcpTransport {
     }
     if (!exited) { try { child.kill(signal); } catch { /* verified by waitForExit */ } }
   }
-  async function killWindowsTree(): Promise<boolean> {
-    if (child.pid === undefined || exited) return true;
-    return new Promise(resolve => {
-      // taskkill is a system utility, never a PATH-selected executable or shell command.
-      const systemRoot = process.env.SystemRoot ?? 'C:\\Windows';
-      const killer = spawn(`${systemRoot}\\System32\\taskkill.exe`, ['/PID', String(child.pid), '/T', '/F'], { stdio: 'ignore', shell: false });
-      let finished = false;
-      const done = (success: boolean) => { if (finished) return; finished = true; clearTimeout(timer); resolve(success); };
-      const timer = setTimeout(() => { try { killer.kill(); } catch { /* best effort */ } done(false); }, killWait);
-      killer.once('error', () => done(false)); killer.once('exit', code => done(code === 0));
-    });
-  }
   const transport: AcpTransport = {
     writeLine(line) {
-      if (reason || !child.stdin.writable) return Promise.reject(new Error('ACP transport closed'));
+      if (reason || exited || !child.stdin.writable) return Promise.reject(new Error('ACP transport closed'));
       if (line.includes('\n') || Buffer.byteLength(line) > maxBytes) return Promise.reject(new Error('Invalid ACP output frame'));
       return new Promise((resolve, reject) => {
         child.stdin.write(`${line}\n`, 'utf8', error => error ? reject(new Error('ACP write failed')) : resolve());
@@ -155,7 +159,7 @@ export function spawnAcpTransport(options: AcpTransportOptions): AcpTransport {
       if (closing) return closing;
       disconnect('ACP transport closed');
       closing = (async () => {
-        try { child.stdin.end(); } catch { /* best effort */ }
+        try { child.stdin.end(); } catch { /* verify termination below */ }
         if (posix) {
           signalTree('SIGTERM');
           await waitForExit(grace);
@@ -163,10 +167,12 @@ export function spawnAcpTransport(options: AcpTransportOptions): AcpTransport {
           signalTree('SIGKILL');
           if (!await waitForExit(killWait)) throw new Error('ACP process exit could not be confirmed');
         } else {
-          const treeStopped = !windowsTreeUnconfirmed && await killWindowsTree();
-          if (!treeStopped) windowsTreeUnconfirmed = true;
-          if (!treeStopped) signalTree('SIGKILL');
-          if (!await waitForExit(killWait) || !treeStopped) throw new Error('ACP process tree exit could not be confirmed');
+          // Match local Codex: EOF, then bounded escalation against the direct child.
+          if (await waitForExit(grace)) return;
+          signalTree('SIGTERM');
+          if (await waitForExit(options.shutdownGraceMs ?? 1_000)) return;
+          signalTree('SIGKILL');
+          if (!await waitForExit(killWait)) throw new Error('ACP process exit could not be confirmed');
         }
       })().catch(error => { closing = undefined; throw error; });
       return closing;

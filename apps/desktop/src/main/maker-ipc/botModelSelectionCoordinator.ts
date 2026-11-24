@@ -1,4 +1,4 @@
-type Coordinator = <T>(sessionIds: readonly string[], operation: () => Promise<T>) => Promise<T>;
+type Coordinator = <T>(sessionIds: readonly string[], operation: () => Promise<T>, alreadyLocked?: ReadonlySet<string>) => Promise<T>;
 
 // LocalDB may load before Maker. No automation can race before runtime wiring.
 let coordinator: Coordinator = async (_sessionIds, operation) => operation();
@@ -7,8 +7,8 @@ export function configureBotModelSelectionCoordinator(next: Coordinator): void {
   coordinator = next;
 }
 
-export function coordinateBotModelSelection<T>(sessionIds: readonly string[], operation: () => Promise<T>): Promise<T> {
-  return coordinator(sessionIds, operation);
+export function coordinateBotModelSelection<T>(sessionIds: readonly string[], operation: () => Promise<T>, alreadyLocked?: ReadonlySet<string>): Promise<T> {
+  return coordinator(sessionIds, operation, alreadyLocked);
 }
 
 /** Serialize the profile transaction with baseline writers in every following lane.
@@ -19,11 +19,13 @@ export function createBotModelSelectionCoordinator(deps: {
   cancelRecovery(sessionId: string): void;
   invalidate(sessionId: string): void;
 }): Coordinator {
-  return async (sessionIds, operation) => {
+  return async (sessionIds, operation, alreadyLocked) => {
     const ids = [...new Set(sessionIds)].sort();
     const releases: Array<() => void> = [];
     try {
-      for (const id of ids) releases.push(await deps.acquireSessionLock(id));
+      for (const id of ids) {
+        if (!alreadyLocked?.has(id)) releases.push(await deps.acquireSessionLock(id));
+      }
       const result = await operation();
       for (const id of ids) {
         // The group may have handed recovery to the input coordinator already.

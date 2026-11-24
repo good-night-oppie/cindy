@@ -194,7 +194,7 @@ describe('BotModelChainEditor', () => {
       configurationEnabled: true,
       vendorKey: 'pi',
       unifiedPanel: true,
-      unifiedAgents: ['pi', 'claude-code'],
+      unifiedAgents: ['pi', 'claude-code', 'agy'],
       triggerVariant: 'settings',
     });
   });
@@ -234,7 +234,7 @@ describe('BotModelChainEditor', () => {
     const onChange = vi.fn();
     const view = render(<BotModelChainEditor value={[]} onChange={onChange} />);
     const props = modelSelectorProps.mock.lastCall?.[0];
-    expect(props).toMatchObject({ disabled: false, unifiedAgents: ['pi', 'codex', 'claude-code'],
+    expect(props).toMatchObject({ disabled: false, unifiedAgents: ['pi', 'codex', 'claude-code', 'agy'],
       remoteAgent: { devices: [{ deviceId: 'share:one', name: 'Shared account' }] } });
     props.onUnifiedSelect({ engine: 'codex', modelId: 'remote-model', providerId: 'openai', effort: 'medium', fast: false,
       agentDevice: { deviceId: 'share:one', name: 'Shared account' } });

@@ -1,6 +1,6 @@
 import { useFirstRunGuideConnectionDialog } from '@/features/first-run-guide/firstRunGuideStore';
 import { isBuiltinApiKeyProviderId } from '../../../shared/providerSecrets';
-import { BUNDLED_CATALOG, providerSetupLink, providerPresetOAuth, providerPresetOAuthRuntimes, buildUserProvider, isMimoTokenPlanPreset } from '@cindy/model-providers';
+import { ANTIGRAVITY_PROVIDER_ID, BUNDLED_CATALOG, providerSetupLink, providerPresetOAuth, providerPresetOAuthRuntimes, buildUserProvider, isMimoTokenPlanPreset } from '@cindy/model-providers';
 import { bindProviderPresetRuntime, providerEndpointBindings, bindProviderEndpoint } from '@cindy/model-providers';
 /**
  * AddProviderWizard —— 「添加供应商」三步向导(2026-07 模型供应商重构)。
@@ -112,7 +112,7 @@ const AGENT_LABEL: Record<AgentKind, string> = {
   'claude-code': 'Claude Code',
   codex: 'Codex',
   pi: 'Pi',
-  agy: 'Antigravity',
+  agy: 'Antigravity CLI',
 };
 
 function presetRuntimeBaseUrl(
@@ -856,6 +856,10 @@ export function AddProviderWizard({
             });
             ok = r.ok;
             if (!r.ok && r.reason === 'login_cancelled') return;
+            if (!r.ok && r.reason === 'antigravity_cli_not_signed_in') {
+              toast.error(t('settings.providers.wizard.antigravityNotSignedIn'));
+              return;
+            }
           } finally {
             ownedLogin.finish();
           }
@@ -1879,9 +1883,11 @@ export function AddProviderWizard({
                   </span>
                   <span className="text-12" style={{ color: 'var(--text-tertiary)' }}>
                     {t(
-                      sel.provider.auth.oauth?.flow === 'device-code'
-                        ? 'settings.providers.wizard.deviceOAuthDesc'
-                        : 'settings.providers.wizard.oauthDesc',
+                      sel.provider.id === ANTIGRAVITY_PROVIDER_ID
+                        ? 'settings.providers.wizard.antigravityDesc'
+                        : sel.provider.auth.oauth?.flow === 'device-code'
+                          ? 'settings.providers.wizard.deviceOAuthDesc'
+                          : 'settings.providers.wizard.oauthDesc',
                     )}
                   </span>
                 </div>
@@ -1901,7 +1907,9 @@ export function AddProviderWizard({
                   <>
                       <Button variant="secondary" size="lg" type="button" onClick={() => void handleAuthorize()}>
                         {t(
-                          sel.provider.id === 'xai'
+                          sel.provider.id === ANTIGRAVITY_PROVIDER_ID
+                            ? 'settings.providers.detect.action'
+                            : sel.provider.id === 'xai'
                               ? 'settings.providers.openai.addIndependentAccount'
                               : sel.provider.auth.oauth?.flow === 'device-code'
                                 ? 'settings.providers.wizard.authorizeWithDeviceCode'

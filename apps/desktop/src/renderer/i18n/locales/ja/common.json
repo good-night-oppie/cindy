@@ -4269,6 +4269,13 @@
         "emptyList": "左下の「プロバイダーを追加」から最初のモデルソースを接続してください",
         "emptyModelsConnected": "接続済み — 利用可能なモデルを検出中です。空のままの場合は、しばらくしてから再度お試しください。",
         "discoveryFailed": {
+          "sandboxBlocked": "Linux が bubblewrap の起動をブロックしました。実行を許可してから再試行してください。",
+          "networkIsolationUnavailable": "ネットワークを分離できません。pasta と iproute2 がインストールされ、実行できることを確認してください。",
+          "unsafeTaskDir": "タスクまたは状態フォルダーを安全に分離できません。フォルダーと権限を確認してください。",
+          "sandboxUnsupported": "このコンピューターではモデルの読み込みに必要な分離機能を利用できません。",
+          "agyProbeFailed": "Antigravity のモデル一覧を読み込めませんでした。もう一度お試しください。",
+          "agyCliUnavailable": "対応する Antigravity CLI を実行できません。agy をインストールまたは更新してください。",
+          "bwrapMissing": "Antigravity が隔離環境でモデルを読み込むには bubblewrap が必要です。この Linux マシンで bubblewrap をインストールまたは修復してから、再試行してください。",
           "network": "このプロバイダーに接続できないため、モデル一覧を取得できません。ネットワークまたはプロキシ設定を確認してから再試行してください。",
           "timeout": "このプロバイダーへの接続がタイムアウトしたため、モデル一覧を取得できません。ネットワークを確認してから再試行してください。",
           "upstream": "このプロバイダーは現在モデル一覧を返せません。しばらくしてから再試行してください。",
@@ -4279,6 +4286,13 @@
           "empty": "このプロバイダーから利用可能なモデルが返されませんでした。アカウントの権限を確認してから再試行してください。"
         },
         "discoveryFailedStale": {
+          "sandboxBlocked": "Linux が bubblewrap の起動をブロックしました。実行を許可してから再試行してください。",
+          "networkIsolationUnavailable": "ネットワークを分離できません。pasta と iproute2 がインストールされ、実行できることを確認してください。",
+          "unsafeTaskDir": "タスクまたは状態フォルダーを安全に分離できません。フォルダーと権限を確認してください。",
+          "sandboxUnsupported": "このコンピューターではモデルの読み込みに必要な分離機能を利用できません。",
+          "agyProbeFailed": "Antigravity のモデル一覧を読み込めませんでした。もう一度お試しください。",
+          "agyCliUnavailable": "対応する Antigravity CLI を実行できません。agy をインストールまたは更新してください。",
+          "bwrapMissing": "Antigravity が隔離環境でモデルを読み込むには bubblewrap が必要です。この Linux マシンで bubblewrap をインストールまたは修復してから、再試行してください。",
           "network": "このプロバイダーに接続できません。以下は前回取得したモデル一覧です。ネットワークまたはプロキシ設定を確認してから再試行してください。",
           "timeout": "このプロバイダーへの接続がタイムアウトしました。以下は前回取得したモデル一覧です。ネットワークを確認してから再試行してください。",
           "upstream": "このプロバイダーは現在モデル一覧を返せません。以下は前回取得した一覧です。しばらくしてから再試行してください。",
@@ -4340,6 +4354,8 @@
         "metaApiKey": "API key",
         "metaNoAuth": "ローカル / セルフホスト · 認証なし",
         "customAction": "見つかりませんか？カスタム追加",
+        "antigravityDesc": "このパソコンで Antigravity CLI にログインしている Google アカウントを使います。API キーは不要です。",
+        "antigravityNotSignedIn": "このパソコンの Antigravity CLI にはまだログインしていません。ターミナルで agy を実行し、Google アカウントでログインしてから、もう一度お試しください。",
         "oauthDesc": "ブラウザーでログインします。API キーは不要です。",
         "deviceOAuthDesc": "ワンタイムデバイスコードを使い、プロバイダーの認証ページで認証します",
         "authorizeInBrowser": "ブラウザで認証",
@@ -13993,6 +14009,13 @@
       "listAria": "権限モード",
       "autoFallback": "自動レビューは一時的に利用できないため、デフォルト権限に切り替えました。必要な操作は確認します。",
       "modes": {
+        "agy": {
+          "isolated": "Antigravity はタスクフォルダーと自身の設定を変更し、必要なシステムファイルを読み、インターネットに接続できます。他のホームフォルダーは非表示です。ローカルにログインファイルがあれば Cindy が読み取り専用で共有します。Cindy のツールが他のファイルへのアクセスを求めることがあります。",
+          "host": "Antigravity はタスクフォルダー外を含むアカウントのファイルにアクセスできます。許可前にリクエストを確認してください。",
+          "full": "Antigravity はアカウントのファイルを変更し、ネットワークを使用できます。Cindy は確認せずにリクエストを許可します。",
+          "autoIsolated": "Cindy が承認リクエストを自動審査します。Antigravity はタスクフォルダーと自身の設定を変更し、必要なシステムファイルを読み、インターネットに接続できます。他のホームフォルダーは非表示です。ローカルにログインファイルがあれば Cindy が読み取り専用で共有します。Cindy のツールが他のファイルへのアクセスを求めることがあります。",
+          "autoHost": "Cindy が承認リクエストを自動審査します。Antigravity はタスクフォルダー外を含むアカウントのファイルにアクセスできます。許可前にリクエストを確認してください。"
+        },
         "claude-code": {
           "ask": {
             "label": "デフォルト権限",
@@ -14617,6 +14640,13 @@
     "verificationFailed": "ChatGPT ログインが復旧したか確認できませんでした。再確認してください。"
   },
   "chat": {
+    "agyBlocked": "Antigravity がタスクフォルダー外の「{{path}}」を{{action}}しようとしたため、Cindy がブロックしました。続けるにはファイルをタスクフォルダーにコピーしてください。",
+    "agyFileActions": {
+      "read": "読み込み",
+      "write": "変更",
+      "unknown": "使用"
+    },
+    "agyIdleExit": "タスクの待機中に Antigravity が終了しました。ここでメッセージを送ると再開できます。",
     "pluginModelRoute": {
       "routed": "がこのタスクに選んだモデル：",
       "kept": {

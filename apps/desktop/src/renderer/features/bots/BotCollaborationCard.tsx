@@ -95,7 +95,7 @@ export function BotSessionTaskMessageTrace({ data }: Pick<Props, 'data'>) {
 
 type CardState = 'running' | 'completed' | 'failed' | 'cancelled' | 'unknown';
 
-const HARNESS_LABEL: Record<string, string> = { cc: 'Claude Code', codex: 'Codex', pi: 'Pi' };
+const HARNESS_LABEL: Record<string, string> = { cc: 'Claude Code', codex: 'Codex', pi: 'Pi', agy: 'Antigravity' };
 
 function Chip({
   children,

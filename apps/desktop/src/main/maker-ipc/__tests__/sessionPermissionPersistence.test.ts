@@ -31,6 +31,7 @@ function createDatabase(): Database.Database {
   sqlite.exec(`
     CREATE TABLE sessions (
       id TEXT PRIMARY KEY,
+      agent_kind TEXT,
       permission_mode TEXT NOT NULL,
       updated_at INTEGER NOT NULL, source TEXT DEFAULT 'bot', status TEXT DEFAULT 'active'
     );

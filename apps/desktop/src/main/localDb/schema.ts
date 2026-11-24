@@ -481,7 +481,7 @@ export const botRuntimeSnapshots = sqliteTable(
       .notNull()
       .references(() => sessions.id, { onDelete: 'cascade' }),
     profileVersion: integer('profile_version').notNull(),
-    agentKind: text('agent_kind', { enum: ['claude-code', 'codex', 'pi'] }).notNull(),
+    agentKind: text('agent_kind', { enum: ['claude-code', 'codex', 'pi', 'agy'] }).notNull(),
     workingDir: text('working_dir').notNull(),
     memoryScopeKey: text('memory_scope_key'),
     configuredJson: text('configured_json').notNull().default('{}'),
@@ -1514,9 +1514,9 @@ export const schedules = sqliteTable(
      * 引擎 fireOne 优先用 intervalMs 算 nextFireAt；旧 cron 数据 0015 migration 自动回填。
      */
     intervalMs: integer('interval_ms'),
-    agentKind: text('agent_kind', { enum: ['claude-code', 'codex', 'pi'] }).notNull(),
+    agentKind: text('agent_kind', { enum: ['claude-code', 'codex', 'pi', 'agy'] }).notNull(),
     /** NULL preserves legacy bound-task Harness inheritance. */
-    modelAgentKind: text('model_agent_kind', { enum: ['claude-code', 'codex', 'pi'] }),
+    modelAgentKind: text('model_agent_kind', { enum: ['claude-code', 'codex', 'pi', 'agy'] }),
     /** NULL inherits a bound task; empty string explicitly selects the automation host. */
     modelAgentDeviceId: text('model_agent_device_id'),
     model: text('model'),
@@ -1649,7 +1649,7 @@ export const sessionGoals = sqliteTable(
     /** usageLimited 时记录的限额重置时刻(unix ms);到点自动续跑。其它状态为 null。 */
     usageResetAt: integer('usage_reset_at'),
     lastReason: text('last_reason'),
-    agentKind: text('agent_kind', { enum: ['claude-code', 'codex', 'pi'] }).notNull(),
+    agentKind: text('agent_kind', { enum: ['claude-code', 'codex', 'pi', 'agy'] }).notNull(),
     startedAt: integer('started_at').notNull(),
     updatedAt: integer('updated_at').notNull(),
   },

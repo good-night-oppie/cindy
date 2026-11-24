@@ -13,6 +13,7 @@ import { stat } from 'node:fs/promises';
 
 import { codexHomeDir } from '../../shared/codexHome.js';
 import { hasClaudeNativeLogin } from '../maker-host/claude-native-auth.js';
+import { hasAntigravityCliLogin } from '../maker-host/antigravity-cli-login.js';
 import { isCodexAuthInheritedFromSystemCli } from '../maker-host/auth-adapters.js';
 import { isNativeProviderAuthSelfAuthorized } from '../maker-host/nativeProviderAuthBinding.js';
 import {
@@ -37,6 +38,8 @@ export interface LocalCliScanDeps {
    * 生产 = hasClaudeNativeLogin();只返 boolean,不暴露凭证内容(规则 23)。
    */
   hasClaudeLogin(): boolean;
+  /** Antigravity CLI 是否持有自己的 Google 登录(只判断存在;文件或系统凭据管理器,按平台)。 */
+  hasAgyLogin(): boolean;
   /**
    * Cindy 用的凭证是否确实就是这份本机凭证(填 `LocalCliDetection.sharedWithCindy`)。
    * 只在该 CLI 已登录时被调用;判据按 CLI 分派,见 createLocalCliScanDeps。
@@ -71,8 +74,17 @@ export function createLocalCliScanDeps(): LocalCliScanDeps {
         return false;
       }
     },
+    hasAgyLogin: () => {
+      try {
+        return hasAntigravityCliLogin(home);
+      } catch {
+        return false;
+      }
+    },
     isCredentialSharedWithCindy: (cli) => {
       try {
+        // agy:Cindy 没有自己的 Google 登录,用的只能是 CLI 这一份。
+        if (cli === 'agy-cli') return true;
         const providerId = cli === 'claude-cli' ? 'anthropic' : 'openai';
         // 用户在 Cindy 里**亲自授权过**这家 → 不是继承,无论凭证此刻是否与本机共用。
         // 少了这道判据，「在 Cindy 里点过 Claude 授权」的用户下次进新建页会被告知
@@ -112,6 +124,8 @@ export async function scanLocalCliAuth(deps: LocalCliScanDeps): Promise<LocalCli
       loggedIn = deps.hasClaudeLogin();
       // Keychain 登录的 Mac 用户可能连 ~/.claude 目录都没有——登录了就算已安装。
       installed = dirExists || loggedIn;
+    } else if (entry.credentialProbe === 'agy-login') {
+      loggedIn = dirExists && deps.hasAgyLogin();
     } else if (dirExists && entry.credentialFileSegments) {
       loggedIn = await deps.isFile(join(base, ...entry.credentialFileSegments));
     }

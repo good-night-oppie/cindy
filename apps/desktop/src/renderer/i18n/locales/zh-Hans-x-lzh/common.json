@@ -4269,6 +4269,13 @@
         "emptyList": "万里长风，始于一缕：点左下角「增供方」，迎君之首个模型来源。",
         "emptyModelsConnected": "已连，吾正四下寻访可用模型；若久候仍空，请稍后再试。",
         "discoveryFailed": {
+          "sandboxBlocked": "Linux 禁 bubblewrap 运行。请允之而后重试。",
+          "networkIsolationUnavailable": "网络未能隔离。请查 pasta、iproute2 皆已安装且可运行，再试。",
+          "unsafeTaskDir": "任务或状态目录不可安全隔离。请核目录及其权限，再试。",
+          "sandboxUnsupported": "此机不支持载入模型所需之隔离。",
+          "agyProbeFailed": "未能载入 Antigravity 模型表，请重试。",
+          "agyCliUnavailable": "此机未能运行合用之 Antigravity CLI。请安装或更新 agy，再试。",
+          "bwrapMissing": "Antigravity 须借 bubblewrap 隔离载入模型。请于此 Linux 机安装或修复 bubblewrap，再试。",
           "network": "不能连此供方，故不得模型清单。请察网络或 Proxy 之设后再试。",
           "timeout": "连此供方逾时，故不得模型清单。请察网络后再试。",
           "upstream": "此供方暂不能返模型清单。请稍后再试。",
@@ -4279,6 +4286,13 @@
           "empty": "此供方未返任何可用模型。请确认名籍权柄后再试。"
         },
         "discoveryFailedStale": {
+          "sandboxBlocked": "Linux 禁 bubblewrap 运行。请允之而后重试。",
+          "networkIsolationUnavailable": "网络未能隔离。请查 pasta、iproute2 皆已安装且可运行，再试。",
+          "unsafeTaskDir": "任务或状态目录不可安全隔离。请核目录及其权限，再试。",
+          "sandboxUnsupported": "此机不支持载入模型所需之隔离。",
+          "agyProbeFailed": "未能载入 Antigravity 模型表，请重试。",
+          "agyCliUnavailable": "此机未能运行合用之 Antigravity CLI。请安装或更新 agy，再试。",
+          "bwrapMissing": "Antigravity 须借 bubblewrap 隔离载入模型。请于此 Linux 机安装或修复 bubblewrap，再试。",
           "network": "不能连此供方，下为前次所得之模型清单。请察网络或 Proxy 之设后再试。",
           "timeout": "连此供方逾时，下为前次所得之模型清单。请察网络后再试。",
           "upstream": "此供方暂不能返模型清单，下为前次所得。请稍后再试。",
@@ -4340,6 +4354,8 @@
         "metaApiKey": "API key",
         "metaNoAuth": "此机 / 自托管 · 无须鉴权",
         "customAction": "未得？增自订",
+        "antigravityDesc": "用本机已登 Antigravity CLI 之 Google 账号，无须 API key。",
+        "antigravityNotSignedIn": "本机 Antigravity CLI 尚未登门。请于终端运行 agy，以 Google 账号登门，再试之。",
         "oauthDesc": "于浏览器中登门，无须 API key。",
         "deviceOAuthDesc": "以一次性设备码，于供方验证页完成授权",
         "authorizeInBrowser": "于浏览器授权",
@@ -13993,6 +14009,13 @@
       "listAria": "权柄模式",
       "autoFallback": "自动审批暂不可用，已切换为预设权柄；需时将询问君。",
       "modes": {
+        "agy": {
+          "isolated": "Antigravity 可以修改任务文件夹和自己的设置，读取必要的系统文件，并访问互联网。主目录中的其他文件夹对它不可见。如果本机有登录文件，Cindy 会以只读方式共享。Cindy 工具可能会申请使用其他文件。",
+          "host": "Antigravity 可以访问你有权限使用的文件，包括任务文件夹外的文件。请在允许前查看它的请求。",
+          "full": "Antigravity 可以修改你有权限使用的文件并访问网络。它发来的审批请求会直接通过。",
+          "autoIsolated": "Cindy 会自动审核操作请求。Antigravity 可以修改任务文件夹和自己的设置，读取必要的系统文件，并访问互联网。主目录中的其他文件夹对它不可见。如果本机有登录文件，Cindy 会以只读方式共享。Cindy 工具可能会申请使用其他文件。",
+          "autoHost": "Cindy 会自动审核操作请求。Antigravity 可以访问你有权限使用的文件，包括任务文件夹外的文件。请在允许前查看它的请求。"
+        },
         "claude-code": {
           "ask": {
             "label": "预设权柄",
@@ -14617,6 +14640,13 @@
     "verificationFailed": "暂未能确知 ChatGPT 登录已复否，请再察。"
   },
   "chat": {
+    "agyBlocked": "Antigravity 想{{action}}任务文件夹外的「{{path}}」，Cindy 已拦下。如需使用该文件，请先把它复制到任务文件夹。",
+    "agyFileActions": {
+      "read": "读取",
+      "write": "修改",
+      "unknown": "使用"
+    },
+    "agyIdleExit": "任务闲时，Antigravity 已退。于此发讯即可续之。",
     "teammateProcess": {
       "empty": "此番无可示之处理记录",
       "unavailable": "未能读取处理记录",

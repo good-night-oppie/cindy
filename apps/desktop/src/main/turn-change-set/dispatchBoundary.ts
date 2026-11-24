@@ -15,7 +15,14 @@ export async function beginTurnChangeSetAtDispatch(
   session: TurnChangeSetDispatchSession,
   anchorClientId: string,
 ): Promise<void> {
-  if (session.agentKind === 'agy') throw new Error('Native Antigravity file capture is not integrated');
+  // Per-turn file capture is not integrated for Antigravity yet (the change-set store only knows
+  // the three older engines). The task still runs; its file edits are just not recorded as a
+  // reviewable change set (trial decision 2026-11-18, cindy#1). Close any open set and stop here.
+  if (session.agentKind === 'agy') {
+    await waitForTurnChangeSetSeal(session.id);
+    await finalizeTurnChangeSet(session.id, null, 'partial');
+    return;
+  }
   await waitForTurnChangeSetSeal(session.id);
   await finalizeTurnChangeSet(session.id, null, 'partial');
   await waitForTurnChangeSetSeal(session.id);

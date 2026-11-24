@@ -66,6 +66,7 @@ import { getSessionDeviceId } from '@/features/device-link/remoteProjectsStore';
 
 interface SystemCardProps {
   cardType:
+    | 'agy-file-access'
     | 'plugin-model-route'
     | 'voice-call'
     | 'voice-call-task'
@@ -1227,7 +1228,7 @@ function AgentSwitchCard({ data, sessionId }: { data?: Record<string, unknown>; 
   const { t } = useTranslation();
   const [expanded, setExpanded] = useState(false);
   const engineLabel = (kind: unknown): string =>
-    kind === 'codex' ? 'Codex' : kind === 'pi' ? 'Pi' : 'Claude Code';
+    kind === 'codex' ? 'Codex' : kind === 'pi' ? 'Pi' : kind === 'agy' ? 'Antigravity' : 'Claude Code';
   const fromLabel = engineLabel(data?.fromAgentKind);
   const toLabel = engineLabel(data?.toAgentKind);
   const toModel = typeof data?.toModel === 'string' ? data.toModel : '';
@@ -1533,6 +1534,16 @@ function ReviewCard({ data, workingDir }: { data?: Record<string, unknown>; work
   );
 }
 
+function AgyFileNotice({ text, denial }: { text: string; denial?: { kind: string; path: string } }) {
+  const { t } = useTranslation();
+  const message = denial ? t('chat.agyBlocked', { path: denial.path,
+    action: t(`chat.agyFileActions.${denial.kind}`), defaultValue: text }) : text;
+  return <div role="note" className="flex items-start gap-2 py-1 text-sm text-foreground">
+    <Info aria-hidden="true" className="mt-0.5 size-4 shrink-0 text-muted-foreground" />
+    <span className="min-w-0 whitespace-pre-wrap break-words">{message}</span>
+  </div>;
+}
+
 export function SystemCard({
   cardType,
   data,
@@ -1546,6 +1557,10 @@ export function SystemCard({
     cardType === 'cindy-make-complete'
   ) return null;
   switch (cardType) {
+    case 'agy-file-access':
+      return typeof data?.text === 'string' ? (
+        <AgyFileNotice text={data.text} denial={data.denial as { kind: string; path: string } | undefined} />
+      ) : null;
     case 'help':
       return <HelpCard data={data} />;
     case 'cost':

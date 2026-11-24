@@ -113,7 +113,8 @@ export function registerScheduleSetPreRunHookTool(
           const remoteAgent = schedule.targetSessionId && hookScript.isSessionAgentOnOtherDevice
             ? await hookScript.isSessionAgentOnOtherDevice(schedule.targetSessionId)
             : !!schedule.agentDeviceId;
-          if (!remoteAgent) {
+          // Antigravity cannot write the script (no one-shot API): use the local utility model.
+          if (!remoteAgent && schedule.agentKind !== 'agy') {
             providerId = schedule.providerId;
             agentKind = schedule.agentKind;
             model = schedule.model;

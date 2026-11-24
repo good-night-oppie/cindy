@@ -1,3 +1,7 @@
+import { AgyAgent, type AgyAgentDeps } from './agents/agy/index.js';
+import { setAgyTaskDirStoreFile } from './agents/agy/host-path-guard.js';
+import { spawnAcpTransport } from './agents/acp/transport.js';
+import { fileURLToPath } from 'node:url';
 import { describe, expect, it, vi } from 'vitest';
 import {
   mkdirSync,
@@ -4815,4 +4819,65 @@ it.each(['unpublished', 'published'] as const)(
     expect(maker.getSession(options.id!)).toBe(replacement);
     await maker.shutdown();
   },
+);
+
+it.runIf(process.platform === 'win32').each(['active', 'idle'] as const)(
+  'recovers the same agy task after its direct process exits while %s', async phase => {
+    const folder = mkdtempSync(path.join(tmpdir(), 'cindy-direct-acp-'));
+    const peer = fileURLToPath(new URL('./agents/acp/windows-acp-peer.fixture.mjs', import.meta.url));
+    const logger = createLogger();
+    let transportPid: number | null = null;
+    setAgyTaskDirStoreFile(path.join(folder, 'task-dirs.json'));
+    const agent = new AgyAgent({
+      binaryPath: process.execPath, runtimeConfig: {}, logger, skipAgyBinaryPreflight: true,
+      auth: { getState: async () => ({ authenticated: true }), getAuthEnv: async () => ({}),
+        triggerLogin: async () => ({ authenticated: true }), logout: async () => {} },
+      createAgyTransport: opts => {
+        const transport = spawnAcpTransport({ ...opts, args: [peer] });
+        transportPid = transport.getPid?.() ?? null;
+        return transport;
+      },
+    } as AgyAgentDeps);
+    const maker = new Maker({ agents: { agy: agent }, storage: createStorage(), logger });
+    const options = { id: 'windows-recovery', agentKind: 'agy' as const, workingDir: folder, model: 'fixture-model' };
+    try {
+      const first = await maker.createSession(options);
+      const events = vi.fn();
+      first.onEvent(events);
+      const hold = path.join(folder, 'hold-turn');
+      if (phase === 'active') writeFileSync(hold, '');
+      await first.send('first turn');
+      if (phase === 'idle') {
+        await vi.waitFor(() => expect(events).toHaveBeenCalledWith(expect.objectContaining({ type: 'done' })));
+      }
+      const pidFile = path.join(folder, 'peer-pid');
+      await vi.waitFor(() => fsPromises.access(pidFile), { timeout: 5000 });
+      const peerPid = Number(await fsPromises.readFile(pidFile, 'utf8'));
+      expect(peerPid).toBe(transportPid);
+      process.kill(peerPid);
+      await vi.waitFor(() => expect(events).toHaveBeenCalledWith(expect.objectContaining({
+        type: 'error', data: expect.objectContaining({
+          isTerminal: phase === 'active', reason: 'agy_acp_disconnected',
+          message: expect.stringContaining(phase === 'active' ? 'Retry' : 'Send another message'),
+        }),
+      })), { timeout: 10000 });
+      await vi.waitFor(() => expect(first.getStatus()).toBe('closed'));
+      expect(maker.getSession(options.id)).toBeUndefined();
+      if (phase === 'active') await fsPromises.unlink(hold);
+      const restored = await maker.createSession(options);
+      expect(restored.id).toBe(first.id);
+      expect(restored.instanceId).not.toBe(first.instanceId);
+      const observed = vi.fn();
+      restored.onEvent(observed);
+      await restored.send('second turn');
+      await vi.waitFor(() => expect(observed).toHaveBeenCalledWith(expect.objectContaining({
+        type: 'text', data: expect.objectContaining({ text: expect.stringContaining('received: second turn') }),
+      })), { timeout: 5000 });
+    } finally {
+      try { await maker.shutdown(); } finally {
+        setAgyTaskDirStoreFile(null);
+        await fsPromises.rm(folder, { recursive: true, force: true, maxRetries: 10, retryDelay: 100 });
+      }
+    }
+  }, 45000,
 );

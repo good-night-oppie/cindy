@@ -128,6 +128,9 @@ export interface PluginModelRouteNote {
  * 只接受 SDK 自己分配的 uuid，所以这是 fork 的唯一主键。
  */
 export interface CcMeta {
+  /** A host-projected Antigravity file-access notice in this task's timeline. */
+  agyFileAccessNotice?: true;
+  agySandboxDenial?: { kind: 'read' | 'write' | 'unknown'; path: string };
   /** 新任务「让插件选」的结果(宿主写入，非模型回复)。 */
   pluginModelRoute?: PluginModelRouteNote;
   /** Model boundary recorded by the host when the next input is dispatched. */

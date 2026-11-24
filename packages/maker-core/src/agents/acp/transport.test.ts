@@ -1,7 +1,7 @@
 // Ported from makecindy/cindy#5611 (Ken / kenlinjie), source ref 87cbe126f42dcc3dd436297f3abb5c55ddf36620.
 import { EventEmitter } from 'node:events';
 import { PassThrough } from 'node:stream';
-import { spawn, type ChildProcess } from 'node:child_process';
+import { spawn } from 'node:child_process';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { spawnAcpTransport } from './transport.js';
 vi.mock('node:child_process', () => ({ spawn: vi.fn() }));
@@ -58,23 +58,32 @@ describe('ACP stdio transport', () => {
     expect(f.transport.getPid?.()).toBe(f.child.pid);
     f.exit(); await f.transport.close(); expect(f.transport.getPid?.()).toBeNull();
   });
-  it('requires successful Windows tree termination, never upgrades failed cleanup to success', async () => {
-    vi.useFakeTimers();
-    const killer = Object.assign(new EventEmitter(), { kill: vi.fn() });
-    vi.mocked(spawn).mockReturnValue(killer as unknown as ChildProcess);
-    const f = fixture({ platformOverride: 'win32', killTimeoutMs: 20 });
-    f.child.kill.mockImplementation(() => { f.exit(); });
-    const closed = f.transport.close();
-    const rejected = expect(closed).rejects.toThrow('tree exit could not be confirmed');
-    killer.emit('exit', 1); await rejected;
-    await expect(f.transport.close()).rejects.toThrow('tree exit could not be confirmed');
-    expect(spawn).toHaveBeenCalledWith(expect.stringMatching(/taskkill\.exe$/), ['/PID', String(f.child.pid), '/T', '/F'], expect.objectContaining({ shell: false }));
-  });
-  it('accepts Windows shutdown only after successful tree kill and child exit', async () => {
-    const killer = Object.assign(new EventEmitter(), { kill: vi.fn() });
-    vi.mocked(spawn).mockReturnValue(killer as unknown as ChildProcess);
+  it('launches the Windows ACP binary directly and lets it exit on EOF', async () => {
     const f = fixture({ platformOverride: 'win32' });
-    const closed = f.transport.close(); f.exit(); killer.emit('exit', 0); await closed;
+    expect(f.spawnChild).toHaveBeenCalledWith('/fake/cursor/agent', ['acp'], expect.objectContaining({
+      shell: false, detached: false, windowsHide: true,
+    }));
+    const closed = f.transport.close();
+    expect(f.child.stdin.writableEnded).toBe(true);
+    expect(f.child.kill).not.toHaveBeenCalled();
+    f.exit();
+    await closed;
+    expect(f.child.kill).not.toHaveBeenCalled();
+  });
+  it('escalates only the direct Windows process and releases it after observed exit', async () => {
+    vi.useFakeTimers();
+    const f = fixture({ platformOverride: 'win32', shutdownGraceMs: 10, killTimeoutMs: 20 });
+    const closed = f.transport.close();
+    const failed = expect(closed).rejects.toThrow(/exit|SIGKILL/i);
+    expect(f.child.stdin.writableEnded).toBe(true);
+    expect(f.child.kill).not.toHaveBeenCalled();
+    await vi.runAllTimersAsync();
+    await failed;
+    expect(f.child.kill.mock.calls).toEqual([['SIGTERM'], ['SIGKILL']]);
+    expect(process.kill).not.toHaveBeenCalled();
+    expect(f.transport.getPid?.()).toBe(f.child.pid);
+    f.exit();
+    await f.transport.close();
     expect(f.transport.getPid?.()).toBeNull();
   });
   it('proves failed spawn has no child and propagates stdout EOF', async () => {

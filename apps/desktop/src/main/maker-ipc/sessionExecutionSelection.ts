@@ -28,6 +28,17 @@ export function resolveSessionExecutionSelection(params: {
   const recover = '请在任务中重新选择模型，或在「设置 → 模型供应商」修复连接后重试。';
   if (!agentKind || !model) throw new Error(`尚未选择任务模型。请先选择新任务模型，或${recover}`);
   if (!params.availableAgents.includes(agentKind)) throw new Error(`Agent ${agentKind} 当前不可用。${recover}`);
+  // agy 自己登录 Antigravity,没有供应商路由:只按 ACP catalog 核对模型,不挂任何 provider。
+  if (agentKind === 'agy') {
+    const agyModel = params.availableModels.find(m => m.id === model);
+    if (!agyModel) {
+      throw Object.assign(new Error(`model "${model}" not available for agy. ${recover}`), { code: 'INVALID_ARGS' });
+    }
+    const wanted = selection.effort ?? (source?.agentKind === 'agy' && source.model === model ? source.effort : undefined)
+      ?? agyModel.defaultEffort ?? undefined;
+    const effort = wanted && (agyModel.efforts ?? []).includes(wanted) ? wanted as Effort : undefined;
+    return { agentKind, model, providerId: null, effort, fastMode: false };
+  }
   // An old partial override may change engines/models. Never borrow the previous
   // model's provider or tuning; choose only a route for this exact requested model.
   const sameIdentity = source?.agentKind === agentKind && source.model === model;
@@ -70,7 +81,7 @@ export function createSessionExecutionResolver(deps: SessionExecutionResolverDep
     assertOwner();
     let source: SessionExecutionSelection | undefined;
     if (existing) {
-      if (!['cc', 'claude-code', 'codex', 'pi'].includes(existing.agentKind)) throw new Error('任务 Agent 不可用，请重新选择模型');
+      if (!['cc', 'claude-code', 'codex', 'pi', 'agy'].includes(existing.agentKind)) throw new Error('任务 Agent 不可用，请重新选择模型');
       source = { agentKind: (existing.agentKind === 'cc' ? 'claude-code' : existing.agentKind) as AgentKind,
         model: existing.model, providerId: existing.providerId,
         effort: (existing.effort || undefined) as Effort | undefined, fastMode: (existing.fastMode === 'ultrafast' ? 'ultrafast' : existing.fastMode === true) };

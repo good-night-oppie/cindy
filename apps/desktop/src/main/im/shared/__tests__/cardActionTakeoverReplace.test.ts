@@ -9,6 +9,7 @@ import { beforeEach, describe, expect, it, vi } from 'vitest';
 
 import type { ChannelIM, IMCardActionEvent } from '@cindy/im';
 import type { DesktopCcPrefs } from '../../index';
+import { changeSessionPermissionMode } from '../permissionModeControl';
 
 const mocks = vi.hoisted(() => ({
   logger: { info: vi.fn(), warn: vi.fn(), error: vi.fn(), debug: vi.fn() },
@@ -38,8 +39,8 @@ const mocks = vi.hoisted(() => ({
   readModelRouteSnapshot: vi.fn(
     async (): Promise<{ model: string; effort: string; providerId: string | null } | null> => null,
   ),
-  readPermissionMode: vi.fn(async () => 'auto'),
-  updatePermissionMode: vi.fn(async () => {}),
+  readPermissionMode: vi.fn(async (_id: string) => 'auto' as const),
+  updatePermissionMode: vi.fn(async (_id: string, _mode: string) => {}),
   updateModelEffort: vi.fn(async () => {}),
   markManualOverride: vi.fn(async () => {}),
   getSessionProvider: vi.fn<() => string | null>(() => null),
@@ -171,6 +172,13 @@ const cards = {
 } as unknown as ImCardBuilders;
 
 const turnRunner = {
+  changePermissionMode: (args: Parameters<ImTurnRunner['changePermissionMode']>[0]) =>
+    changeSessionPermissionMode({
+      ...args,
+      readPreviousMode: () => mocks.readPermissionMode(args.sessionId),
+      getLiveSession: () => turnRunner.getMakerSessionById(args.sessionId),
+      persist: mode => mocks.updatePermissionMode(args.sessionId, mode),
+    }),
   getMakerSessionById: vi.fn(() => null),
   prewireAttachedSession: vi.fn(async () => {}),
 } as unknown as ImTurnRunner & { prewireAttachedSession: ReturnType<typeof vi.fn> };

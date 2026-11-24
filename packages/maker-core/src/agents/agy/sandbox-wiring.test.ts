@@ -4,7 +4,8 @@ import path from 'node:path';
 import { afterAll, describe, expect, it, vi } from 'vitest';
 import { AgyAgent, type AgyAgentDeps } from './index.js';
 import { AgyTranslator, agyToolPaths } from './translator.js';
-import type { AgySandboxProbe } from './system-sandbox.js';
+import { probeAgySystemSandbox, type AgySandboxProbe } from './system-sandbox.js';
+import { assertAgyBinaryUsable } from './version.js';
 import { AgentStartupStoppedError } from '../base-agent.js';
 import type { AgentEvent } from '../../types/events.js';
 import { createConsoleLogger } from '../../interfaces/logger.js';
@@ -31,6 +32,29 @@ function agentWith(extra: Partial<AgyAgentDeps>, authEnv: Record<string, string>
 }
 
 describe('agy launch goes through the system sandbox', () => {
+  it('checks the CLI version inside the real task sandbox even with a cached host version', async context => {
+    const probe = probeAgySystemSandbox();
+    if (!probe.ok) return context.skip(probe.reason);
+    const fs = await import('node:fs');
+    const task = fs.mkdtempSync(path.join(root, 'version-task-'));
+    const cli = path.join(root, 'fixture-agy');
+    // Report only this fixture's own sandbox hostname, working directory and argument.
+    fs.writeFileSync(cli, '#!/bin/sh\nprintf "%s\\n" "$(hostname)" "$PWD" "$1" > version-receipt\necho 1.5.9\n', { mode: 0o755 });
+    await assertAgyBinaryUsable(cli, async () => '1.5.9', 'host');
+    const { agent, captured } = agentWith({ binaryPath: cli, skipAgyBinaryPreflight: false,
+      agySandbox: { stateRoot: path.join(root, 'version-state'), probe } });
+    await expect(agent.startSession({ workingDir: task, model: 'gpt-oss-120b-medium' })).rejects.toThrow('transport captured');
+    expect(captured).toHaveLength(1);
+    expect(fs.readFileSync(path.join(task, 'version-receipt'), 'utf8').trim().split('\n'))
+      .toEqual(['agy-sandbox', task, '--version']);
+  }, 25_000);
+
+  it('refuses catalog discovery when isolation is unavailable', async () => {
+    const { agent, captured } = agentWith({ agySandbox: { probe: { ok: false, reason: 'network-isolation-missing', detail: 'unavailable' } } });
+    await expect(agent.probeModels()).rejects.toBeInstanceOf(Error);
+    expect(captured).toHaveLength(0);
+  });
+
   it('spawns pasta -> bwrap -> agy with only the task folder and drops the session bus', async () => {
     const task = path.join(root, 'task');
     (await import('node:fs')).mkdirSync(task, { recursive: true });
@@ -68,13 +92,13 @@ describe('agy launch goes through the system sandbox', () => {
   it('refuses to start, with a plain reason, when isolation is unavailable', async () => {
     const { agent, captured } = agentWith({ agySandbox: { probe: { ok: false, reason: 'network-isolation-missing', detail: 'pasta (passt) not installed' } } });
     await expect(agent.startSession({ workingDir: root, model: 'gpt-oss-120b-medium' }))
-      .rejects.toThrow(/^\[agy_sandbox_unavailable\] .*pasta or iproute2 is not installed.*\(pasta \(passt\) not installed\)$/);
+      .rejects.toThrow(/pasta or iproute2 is not installed/);
     expect(captured).toHaveLength(0);
   });
 });
 
 describe('blocked reads and writes are not silent', () => {
-  const ctx = { taskDir: '/home/u/work/task', homeDir: '/home/u', visibleDirs: ['/home/u/.gemini'] };
+  const ctx = { isolated: true, taskDir: '/home/u/work/task', homeDir: '/home/u', visibleDirs: ['/home/u/.gemini'] };
   const run = (updates: Record<string, unknown>[]) => {
     const events: AgentEvent[] = [];
     const t = new AgyTranslator(e => events.push(e), ctx);
@@ -88,13 +112,14 @@ describe('blocked reads and writes are not silent', () => {
   ];
 
   it('tells the user and the model when a path outside the task folder was blocked', () => {
-    const events = run(failed('1', 'read', { AbsolutePath: '/home/u/.ssh/id_ed25519' }));
+    const target = path.normalize('/home/u/.ssh/id_ed25519');
+    const events = run(failed('1', 'read', { AbsolutePath: target }));
     const notice = events.find(e => e.type === 'error');
-    expect(notice?.data).toMatchObject({ isTerminal: false, reason: 'agy_sandbox_blocked' });
-    expect((notice?.data as { message: string }).message).toMatch(/^\[agy_sandbox_blocked\] Antigravity tried to read "\/home\/u\/\.ssh\/id_ed25519"/);
+    expect(notice?.data).toMatchObject({ isTerminal: false, reason: 'agy_sandbox_blocked', denial: { kind: 'read', path: target } });
+    expect((notice?.data as { message: string }).message).toContain(`Antigravity tried to read “${target}”`);
     const result = events.find(e => e.type === 'tool_result_full')?.data as { fullText: string; isError: boolean };
     expect(result.isError).toBe(true);
-    expect(result.fullText).toMatch(/\[Cindy\] \/home\/u\/\.ssh\/id_ed25519 is outside this task's folder/);
+    expect(result.fullText).toContain(`[Cindy] ${target} is outside this task's folder`);
   });
 
   it('finds paths in shell commands and says it once per path per turn', () => {

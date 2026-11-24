@@ -914,7 +914,7 @@ function botsCreateGroupLane(db: Database.Database, args: BotGroupsCreateLaneArg
       (id, bot_id, session_id, profile_version, role, route_key, created_at, archived_at)
       VALUES (?, ?, ?, ?, 'group', ?, ?, NULL)`)
       .run(`${botId}:${sessionId}`, botId, sessionId, profile.version, routeKey, createdAt);
-    const permission = botsReconcileLanePermission(db, { sessionId });
+    const permission = botsReconcileLanePermission(db, { sessionId, newLane: true });
     return { sessionId, created: true, ...(existing ? { replacedSessionId: existing.sessionId } : {}),
       ...(permission.canonicalSessionId ? { permissionRepairCanonicalSessionId: permission.canonicalSessionId } : {}) };
   })();
@@ -952,7 +952,7 @@ function botsCreateChannelLane(db: Database.Database, args: BotsCreateChannelLan
       (id, bot_id, session_id, profile_version, role, route_key, created_at, archived_at)
       VALUES (?, ?, ?, ?, ?, ?, ?, NULL)`)
       .run(`${botId}:${sessionId}`, botId, sessionId, profile.version, role, routeKey, createdAt);
-    const permission = botsReconcileLanePermission(db, { sessionId });
+    const permission = botsReconcileLanePermission(db, { sessionId, newLane: true });
     return { sessionId, created: true,
       ...(permission.canonicalSessionId ? { permissionRepairCanonicalSessionId: permission.canonicalSessionId } : {}) };
   })();
@@ -998,7 +998,7 @@ function botsCreateThreadLane(db: Database.Database, args: BotsCreateThreadLaneA
       (id, bot_id, session_id, profile_version, role, route_key, created_at, archived_at)
       VALUES (?, ?, ?, ?, 'thread', ?, ?, NULL)`)
       .run(`${botId}:${sessionId}`, botId, sessionId, profile.version, routeKey, createdAt);
-    const permission = botsReconcileLanePermission(db, { sessionId });
+    const permission = botsReconcileLanePermission(db, { sessionId, newLane: true });
     return { sessionId, created: true,
       ...(permission.canonicalSessionId ? { permissionRepairCanonicalSessionId: permission.canonicalSessionId } : {}) };
   })();
@@ -1171,7 +1171,13 @@ function botsPersistSessionPermission(
 
 /** Repair conflicting Bot snapshots from the active canonical Chat, not the widest lane. */
 function botsReconcileLanePermission(db: Database.Database, args: unknown): { mode: string | null; changed: boolean; canonicalSessionId?: string } {
-  const sessionId = expectString(asRecord(args, 'args').sessionId, 'sessionId');
+  const input = asRecord(args, 'args');
+  const sessionId = expectString(input.sessionId, 'sessionId');
+  const checkExpected = (mode: string) => {
+    if (input.expectedMode !== undefined && input.expectedMode !== mode) {
+      throw Object.assign(new Error('Bot permission changed before reconciliation'), { code: 'PRECONDITION_FAILED' });
+    }
+  };
   return db.transaction(() => {
     const row = db.prepare(`SELECT v.capabilities_json AS json, l.bot_id AS botId, l.role,
         s.permission_mode AS previousMode FROM bot_session_links l
@@ -1194,6 +1200,8 @@ function botsReconcileLanePermission(db: Database.Database, args: unknown): { mo
       WHERE l.bot_id = ? AND l.role = 'canonical' AND l.archived_at IS NULL
         AND s.source = 'bot' AND s.status = 'active'`).get(row.botId) as { id: string; mode: string } | undefined;
     if (canonical && ['ask', 'auto', 'bypassPermissions'].includes(canonical.mode)) {
+      checkExpected(canonical.mode);
+      if (input.preview === true) return { mode: canonical.mode, changed: false };
       const permission = canonical.mode === 'bypassPermissions' ? 'trusted' : canonical.mode;
       const staleLane = db.prepare(`SELECT 1 FROM bot_session_links l JOIN sessions s ON s.id = l.session_id
         WHERE l.bot_id = ? AND l.role IN ('channel', 'group', 'thread', 'routine') AND l.archived_at IS NULL
@@ -1202,7 +1210,13 @@ function botsReconcileLanePermission(db: Database.Database, args: unknown): { mo
       if (config.permissions !== permission || staleLane) {
         // The read and cascade share this transaction: a later explicit tightening
         // cannot be undone by an earlier snapshot. Preserve all other capabilities.
-        botsPersistSessionPermission(db, { sessionId: canonical.id, mode: canonical.mode });
+        if (input.newLane === true) {
+          // This transaction may initialise the new lane, but sibling processes
+          // must be retired by the host before their saved permissions change.
+          db.prepare('UPDATE sessions SET permission_mode = ? WHERE id = ?').run(canonical.mode, sessionId);
+        } else {
+          botsPersistSessionPermission(db, { sessionId: canonical.id, mode: canonical.mode });
+        }
         return { mode: canonical.mode, changed: row.previousMode !== canonical.mode, canonicalSessionId: canonical.id };
       }
       return { mode: canonical.mode, changed: false };
@@ -1211,6 +1225,8 @@ function botsReconcileLanePermission(db: Database.Database, args: unknown): { mo
     // implicitly; lanes retain the configured Profile when no three-way mode exists.
     if (row.role === 'canonical') return { mode: null, changed: false };
     const mode = config.permissions === 'trusted' ? 'bypassPermissions' : config.permissions === 'auto' ? 'auto' : 'ask';
+    checkExpected(mode);
+    if (input.preview === true) return { mode, changed: false };
     const changed = db.prepare('UPDATE sessions SET permission_mode = ?, updated_at = ? WHERE id = ? AND permission_mode != ?')
       .run(mode, Date.now(), sessionId, mode).changes > 0;
     return { mode, changed };

@@ -62,7 +62,7 @@ export async function createUserSession(body: unknown, ports: UserSessionCreateP
     }
     const createBody = bodyWithoutProvisional as Parameters<typeof sessionCreateToRow>[1];
     // M16: agentKind 白名单校验（防止 renderer 传非法值）
-    const ALLOWED_AGENT_KINDS = new Set<string>(['cc', 'codex', 'pi']);
+    const ALLOWED_AGENT_KINDS = new Set<string>(['cc', 'codex', 'pi', 'agy']);
     if (bodyObj.agentKind !== undefined && !ALLOWED_AGENT_KINDS.has(bodyObj.agentKind as string)) {
       throwIpcError('INVALID_PARAMS', `invalid agentKind: ${String(bodyObj.agentKind)}`);
     }

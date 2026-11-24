@@ -1,3 +1,4 @@
+import { probeAntigravityModelsIfNeeded, retryAntigravityModels } from '../maker-host/antigravity-models.js';
 import { readContextRecoverySessionWithPorts, classifyCodexHistoryWithPorts, commitContextRecoveryWithPorts, replayContextRecoveryWithPorts, contextRecoveryRebuilt, contextRecoveryAbortSignal } from './contextRecoveryAssembly.js';
 import { needsSubscriptionAccountHandoff, hasRestoredPooledCodexQuota } from '../subscription-accounts/runtime.js';
 import { prepareSubscriptionAccountForSend } from '../subscription-accounts/prepareSend.js';
@@ -260,6 +261,7 @@ import {
   isOrganizationManagedProvider,
   supportsSubscriptionFastPolicy,
   type ProviderView,
+  ANTIGRAVITY_PROVIDER_ID,
 } from '@cindy/model-providers';
 import { createId } from '@paralleldrive/cuid2';
 import { normalizeOrcaWorkerLabel } from '@cindy/maker-shared/orca-team';
@@ -739,7 +741,8 @@ import { markGroupCindyTask } from './groupCollaborationSkill.js';
 import { listPrRefs } from '../git-context/prRefsStore.js';
 import { gitExec } from '../worktree/gitExec.js';
 import { BOT_GROUP_CLIENT_ID_PREFIX, botGroupLiveTaskStateOfPhase } from '../../shared/botGroupChat.js';
-import { syncBotLanePermission, syncBotLinkedLanePermissions } from './botPermissionSync.js';
+import { withAgyPermissionTransition } from './agyPermissionLifecycle.js';
+import { botPermissionTargets, syncBotLanePermission, syncBotLinkedLanePermissions } from './botPermissionSync.js';
 import { ensureBotGroupLaneSession } from '../localDb/ipc/bots.js';
 import { restartBotRuntime } from './botRuntimeRestart.js';
 import { registerBotLifecycleHandlers } from './botLifecycleService.js';
@@ -7294,6 +7297,14 @@ export function registerMakerIpc(maker: Maker, options: RegisterMakerIpcOptions)
     },
   );
 
+  // Opening a picker uses the same retry policy as provider-list reads. Only the
+  // explicit rediscover action retries a persistent launch failure.
+  ipcMain.handle(MAKER_INVOKE.PROBE_AGENT_MODELS, async (_e, agentKind: unknown) => {
+    if (requireAgentKind(agentKind) !== 'agy') return;
+    const failure = await probeAntigravityModelsIfNeeded();
+    if (failure) throw new Error(failure.kind);
+  });
+
   ipcMain.handle(MAKER_INVOKE.GET_CAPABILITIES, (_e, agentKind: unknown) => {
     return {
       ...maker.getCapabilities(requireAgentKind(agentKind)),
@@ -7657,9 +7668,7 @@ export function registerMakerIpc(maker: Maker, options: RegisterMakerIpcOptions)
     // 改用不抛的判定决定「这次读取要不要放行本机绑定自愈 + 清单拉取」。
     isTrustedSender: (event) =>
       isTrustedAppRendererEvent(event as Parameters<typeof isTrustedAppRendererEvent>[0]),
-    // 动态清单重新发现:目前没有需要主动重拉的供应商(anthropic 清单来自 Claude Code
-    // 会话 init 的 SDK 捕获,没有 HTTP 发现通道,也就没有失败态)。
-    rediscoverModels: async () => null,
+    rediscoverModels: async id => id === ANTIGRAVITY_PROVIDER_ID ? retryAntigravityModels() : null,
     refreshBuiltinModels: refreshProviderModelsManually,
     requestModelsAutoRefresh: requestProviderModelAutoRefresh,
     scanLocalCli: () => scanLocalCliAuth(createLocalCliScanDeps()),
@@ -10538,7 +10547,7 @@ export function registerMakerIpc(maker: Maker, options: RegisterMakerIpcOptions)
         await getDbClient().drizzle.insert(sessions).values(row).run();
       },
       bootstrapSession: async (opened, assertCurrent) => {
-        const agentKind = opened.agentKind === 'codex' || opened.agentKind === 'pi'
+        const agentKind = opened.agentKind === 'codex' || opened.agentKind === 'pi' || opened.agentKind === 'agy'
           ? opened.agentKind
           : 'claude-code';
         await bootstrapSession(buildCreateOptsWithStderr({
@@ -12556,7 +12565,10 @@ export function registerMakerIpc(maker: Maker, options: RegisterMakerIpcOptions)
           fastMode: (inherited.fastMode ?? false),
           providerId: inherited.providerId,
           title: newTitle,
-          permissionMode: inherited.permissionMode ?? 'bypassPermissions',
+          // Antigravity's Full access removes file and network isolation, so a task created
+          // for the user never starts there (same rule as the new-task draft).
+          permissionMode: inherited.agentKind === 'agy' && (inherited.permissionMode ?? 'bypassPermissions') === 'bypassPermissions'
+            ? 'auto' : inherited.permissionMode ?? 'bypassPermissions',
           ...(inheritedAgentDeviceId ? { agentDeviceId: inheritedAgentDeviceId } : {}),
         });
         await assertTaskActionCurrent();
@@ -13603,7 +13615,7 @@ export function registerMakerIpc(maker: Maker, options: RegisterMakerIpcOptions)
           title, projectDir, workspaceKind: projectDir ? 'project' : 'dialogue', workingDir: projectDir ?? undefined,
           ...(route && agentKind ? { agentKind: agentKind === 'claude-code' ? 'cc' as const : agentKind, model: route.model,
             providerId: route.providerId, effort: route.effort || '', fastMode: route.fastMode } : {}),
-          permissionMode: permissionModeOrAsk(agentKind ? getRemoteNewMakerDefaults(agentKind).permissionMode : undefined),
+          permissionMode: permissionModeOrAsk(agentKind && agentKind !== 'agy' ? getRemoteNewMakerDefaults(agentKind).permissionMode : undefined),
         } });
         // Before its first turn starts, so the task starts with the 群协作 Skill.
         markGroupCindyTask(row.id);
@@ -14718,11 +14730,12 @@ export function registerMakerIpc(maker: Maker, options: RegisterMakerIpcOptions)
         const snapshot = getCurrentDbClientSnapshot();
         const { available } = await inspectAppDefaultModel();
         if (snapshot !== getCurrentDbClientSnapshot() || !isPluginTaskAuthorized(pluginId)) throw new PluginTaskError('PERMISSION_DENIED', '账号或插件授权已变化');
-        return { models: available.map(option => ({ id: option.id,
-          route: { agentKind: option.route.harness === 'claude' ? 'cc' : option.route.harness,
+        // Plugin tasks cannot run on Antigravity (see resolveRoute above); do not offer it.
+        return { models: available.flatMap(option => option.route.harness === 'agy' ? [] : [{ id: option.id,
+          route: { agentKind: option.route.harness === 'claude' ? 'cc' as const : option.route.harness,
             model: option.route.model, providerId: option.route.providerId,
             effort: option.route.effort, fastMode: option.route.fastMode },
-          efforts: option.efforts, supportsFastMode: option.supportsFastMode })) };
+          efforts: option.efforts, supportsFastMode: option.supportsFastMode }]) };
       }
       case 'setModel': return service.setModel(pluginId, request);
       case 'create': return service.create(pluginId, request);
@@ -15233,7 +15246,6 @@ export function registerMakerIpc(maker: Maker, options: RegisterMakerIpcOptions)
       const writableDirs = await readSessionWritableDirsFromDb(sessionId).catch(() => []);
       if (writableDirs.length > 0) createOpts.writableDirs = writableDirs;
     }
-    if (createOpts.agentKind === 'agy') throw new Error('Native Antigravity input queue is not integrated');
     return {
       agentKind: createOpts.agentKind,
       workingDir: createOpts.workingDir,
@@ -15571,7 +15583,7 @@ export function registerMakerIpc(maker: Maker, options: RegisterMakerIpcOptions)
         agentDeviceId?: unknown;
       };
       const workerAgent: AgentKind =
-        body.workerAgent === 'codex' ? 'codex' : body.workerAgent === 'pi' ? 'pi' : 'claude-code';
+        body.workerAgent === 'codex' ? 'codex' : body.workerAgent === 'pi' ? 'pi' : body.workerAgent === 'agy' ? 'agy' : 'claude-code';
       const delegateTask = typeof body.delegateTask === 'string' ? body.delegateTask : undefined;
       if (
         body.workerPermissionMode !== undefined &&
@@ -17267,12 +17279,14 @@ export function registerMakerIpc(maker: Maker, options: RegisterMakerIpcOptions)
     }
     const chain = await readEffectiveBotModelChain(config);
     const toAgentKind = (harness: string): AgentKind =>
-      harness === 'codex' ? 'codex' : harness === 'pi' ? 'pi' : 'claude-code';
+      harness === 'codex' ? 'codex' : harness === 'pi' ? 'pi' : harness === 'agy' ? 'agy' : 'claude-code';
     const currentHarness = current.agentKind === 'codex'
       ? 'codex'
       : current.agentKind === 'pi'
         ? 'pi'
-        : 'claude';
+        : current.agentKind === 'agy'
+          ? 'agy'
+          : 'claude';
     const control = getSessionRuntimeControlSnapshot(controlSessionId);
     const [controlSession] = controlSessionId === sessionId ? [{ remoteHostId: row.remoteHostId }]
       : await getDbClient().drizzle.select({ remoteHostId: sessions.remoteHostId })
@@ -17879,10 +17893,22 @@ export function registerMakerIpc(maker: Maker, options: RegisterMakerIpcOptions)
     },
     listAvailableModels: async ({ agent, callerSessionId, executionDeviceId, agentDeviceId: requestedAgentDeviceId }) => {
       try {
-        if (agent === 'agy') throw new Error('Native Antigravity workers are not supported');
         if (executionDeviceId === 'local' || executionDeviceId === getSelfDeviceId()) {
           executionDeviceId = undefined;
           requestedAgentDeviceId ??= null;
+        }
+        if (agent === 'agy') {
+          // Antigravity runs only on this computer and has one source, the Google Gemini
+          // subscription. Listed only when asked for by name (schedules); Workers on it are
+          // still refused at creation, and it is never listed for another computer.
+          if (executionDeviceId || (requestedAgentDeviceId && requestedAgentDeviceId !== getSelfDeviceId())) {
+            throw new Error('Antigravity runs only on this computer');
+          }
+          const source = (await getDesktopProviderService().listProviders({ allowSideEffects: false }))
+            .find((provider) => provider.id === ANTIGRAVITY_PROVIDER_ID && provider.connected && !provider.suspended);
+          return { ok: true, agentDeviceId: null, agy: source ? (source.models.agy ?? []).map((model) => ({
+            id: model.id, label: model.name, providers: [{ id: source.id, name: source.name }], defaultProviderId: source.id,
+          })) : [] };
         }
         if (executionDeviceId) {
           if (!orcaRemoteWorkersForHost) throw new Error('[HOST_NOT_READY] Worker service is not ready');
@@ -19628,7 +19654,6 @@ export function registerMakerIpc(maker: Maker, options: RegisterMakerIpcOptions)
     hasPendingInteraction: hasPendingAgentInteractionForSession,
     getAgentKind: (sessionId) => {
       const kind = getStableSessionForTurnBoundary(sessionId)?.agentKind;
-      if (kind === 'agy') throw new Error('Native Antigravity input queue is not integrated');
       return kind ?? null;
     },
     getSdkSessionId: async (sessionId) => {
@@ -20480,7 +20505,8 @@ export function registerMakerIpc(maker: Maker, options: RegisterMakerIpcOptions)
     if (
       msg.createOpts.agentKind !== 'claude-code' &&
       msg.createOpts.agentKind !== 'codex' &&
-      msg.createOpts.agentKind !== 'pi'
+      msg.createOpts.agentKind !== 'pi' &&
+      msg.createOpts.agentKind !== 'agy'
     ) {
       throwIpcError('INVALID_PARAMS', 'queued.createOpts.agentKind invalid');
     }
@@ -22764,33 +22790,39 @@ export function registerMakerIpc(maker: Maker, options: RegisterMakerIpcOptions)
       await assertReviewSettingsUnlocked(sessionId);
       await beforeMutation?.();
       assertOwnerCurrent();
-      const [row] = await snapshot!.client.drizzle.select({permissionMode: sessions.permissionMode})
+      const [row] = await snapshot!.client.drizzle.select({permissionMode: sessions.permissionMode, agentKind: sessions.agentKind})
         .from(sessions).where(eq(sessions.id, sessionId)).limit(1);
       assertOwnerCurrent();
       if (!row) throwIpcError('NOT_FOUND', 'session not found');
       await beforeMutation?.();
-      const sess = maker.getSession(sessionId);
-      let runtimeChanged = false;
-      try {
-        if (sess) {
-          await sess.setPermissionMode(mode as PermissionMode);
-          runtimeChanged = true;
-        }
+      const target = { sessionId, agentKind: row.agentKind, previousMode: row.permissionMode };
+      const linked = mode === 'ask' || mode === 'auto' || mode === 'bypassPermissions'
+        ? await botPermissionTargets(snapshot!.client, { sessionId }) : [];
+      assertOwnerCurrent();
+      await withAgyPermissionTransition([...linked, target], mode, maker, async closed => {
         await beforeMutation?.();
         assertOwnerCurrent();
-        const saved = await snapshot!.client.tx('bots.persistSessionPermission', {sessionId, mode});
-        if (!saved.updated) throwIpcError('NOT_FOUND', 'session not found');
-        assertOwnerCurrent();
-      } catch (error) {
-        // Keep recovery inside the same permission operation so it cannot
-        // overwrite a later user choice. Never recover into a new account.
-        if (runtimeChanged && sess && snapshot === getCurrentDbClientSnapshot()) {
-          await sess.setPermissionMode(row.permissionMode as PermissionMode).catch((rollbackError) => {
-            log.warn('permission runtime rollback failed', {sessionId, error: String(rollbackError)});
-          });
+        const sess = closed.has(sessionId) ? undefined : maker.getSession(sessionId);
+        let runtimeChanged = false;
+        try {
+          if (sess) {
+            await sess.setPermissionMode(mode as PermissionMode);
+            runtimeChanged = true;
+          }
+          await beforeMutation?.();
+          assertOwnerCurrent();
+          const saved = await snapshot!.client.tx('bots.persistSessionPermission', {sessionId, mode});
+          if (!saved.updated) throwIpcError('NOT_FOUND', 'session not found');
+          assertOwnerCurrent();
+        } catch (error) {
+          if (runtimeChanged && sess && snapshot === getCurrentDbClientSnapshot()) {
+            await sess.setPermissionMode(row.permissionMode as PermissionMode).catch((rollbackError) => {
+              log.warn('permission runtime rollback failed', {sessionId, error: String(rollbackError)});
+            });
+          }
+          throw error;
         }
-        throw error;
-      }
+      });
       // 分享供应商的「本任务总是允许」随权限档变化失效；Agent 实例被回收时执行器收不到这次切换。
       if (row.permissionMode !== mode) forgetCredentialGrants(sessionId);
       broadcastSessionPatched(sessionId, { permissionMode: mode });

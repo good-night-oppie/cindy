@@ -48,6 +48,12 @@ import { isImSubagentEvent } from './agentEventScope';
 import { isExpiredPermissionDecision, type SharedPermission } from '../../maker-ipc/sharedPermission';
 import { permissionExpiredText, presentSharedPermissionCard } from './permissionPresentation';
 import { describeInteractionSource } from './interactionSource';
+import { withAgyPermissionTransition } from '../../maker-ipc/agyPermissionLifecycle.js';
+import { withBotPermissionChange } from '../../maker-ipc/botPermissionDispatch.js';
+import { botPermissionTargets, syncBotLinkedLanePermissions } from '../../maker-ipc/botPermissionSync.js';
+import { forgetCredentialGrants } from '../../remote-agent/executor/credentialGrants.js';
+import { broadcastSessionPatched } from './sessionBroadcast';
+import { assertSessionNotRestarting, withSendToSessionLock } from '../../maker-ipc/sendToSessionLock.js';
 import { hasSessionPermissionUpdates } from '@cindy/maker-core';
 
 /**
@@ -188,7 +194,6 @@ import {
   toCoreAgentKind,
   readPermissionMode,
   touchUserSent as repoTouchUserSent,
-  updatePermissionMode,
   type ImSessionRepo,
   type ImSessionRow,
 } from './sessionRepo';
@@ -1360,7 +1365,7 @@ export function createTurnRunner(
     }
     let state: SessionState;
     try {
-      state = await ensureSessionWired(wireTarget, userId);
+      state = await ensureSessionWired(wireTarget, userId, Boolean(cold));
     } catch (err) {
       if (isCredentialModeSwitchBusyError(err)) {
         if (args.queueMode === 'internal') {
@@ -1828,6 +1833,7 @@ export function createTurnRunner(
         return { kind: 'rejected', reason: 'aborted' };
       }
 
+      assertSessionNotRestarting(rowId);
       const sendResult = await state.makerSession.send(outgoingMessage as typeof item.userMessage, {
         planMode: false,
         // IM owns successful replies, including turns in an attached desktop task.
@@ -2324,7 +2330,14 @@ export function createTurnRunner(
 
   // ── per-session wiring (idempotent) ─────────────────────────────────────────
 
-  async function ensureSessionWired(target: RouteTarget, userId: string): Promise<SessionState> {
+  async function ensureSessionWired(target: RouteTarget, userId: string, sendLeaseHeld = false): Promise<SessionState> {
+    if (!sendLeaseHeld && process.platform === 'linux' && target.row.agentKind === 'agy') {
+      return withSendToSessionLock(target.row.id, async () => {
+        const row = await repo.peekSessionById(target.row.id);
+        if (!row) throw new Error('Session not found');
+        return ensureSessionWired({ ...target, row }, userId, true);
+      });
+    }
     const existing = sessionStates.get(target.row.id);
     if (existing) {
       if (existing.detachDrainPromise) {
@@ -2332,7 +2345,7 @@ export function createTurnRunner(
         if (outcome === 'cancelled') {
           throw new Error(`session wiring cancelled during cleanup: ${target.row.id}`);
         }
-        return ensureSessionWired(target, userId);
+        return ensureSessionWired(target, userId, sendLeaseHeld);
       }
       if (target.attached && !existing.attached) {
         existing.attached = true;
@@ -2383,7 +2396,17 @@ export function createTurnRunner(
     const target = await resolveExistingRouteTarget(botContextId, userId, scopeKey);
     if (!target) return;
     if (!target.attached) return;
-    await ensureSessionWired(target, userId);
+    if (target.row.agentKind !== 'agy' || !deps.acquirePendingAgentSwitch) {
+      await ensureSessionWired(target, userId);
+      return;
+    }
+    const release = await deps.acquirePendingAgentSwitch(target.row.id, { channelOwned: false });
+    try {
+      const current = await resolveExistingRouteTarget(botContextId, userId, scopeKey);
+      if (current?.attached && current.row.id === target.row.id) await ensureSessionWired(current, userId, true);
+    } finally {
+      release();
+    }
   }
 
   async function replyMissingAuth(
@@ -4842,13 +4865,35 @@ export function createTurnRunner(
     rotateCompanionLane,
     peekCompanionRouteTarget,
     getPermissionModes: (agentKind) => getMaker().getCapabilities(agentKind).permissionModes,
-    changePermissionMode: (args) =>
-      changeSessionPermissionMode({
+    changePermissionMode: (args) => withBotPermissionChange(args.sessionId, async () => {
+      const db = getDbClient();
+      const target = await repo.peekSessionById(args.sessionId);
+      if (!target) return { kind: 'invalid' as const, reason: 'Session not found' };
+      const result = await changeSessionPermissionMode({
         ...args,
+        modes: getMaker().getCapabilities(target.agentKind).permissionModes,
         readPreviousMode: () => readPermissionMode(args.sessionId),
-        getLiveSession: () => getMakerSessionById(args.sessionId),
-        persist: (mode) => updatePermissionMode(args.sessionId, mode),
-      }),
+        getLiveSession: () => getMaker().getSession(args.sessionId) ?? null,
+        withRuntimeTransition: async (previousMode, commit) => {
+          const row = await repo.peekSessionById(args.sessionId);
+          if (!row) throw new Error('Session not found');
+          const linked = await botPermissionTargets(db, { sessionId: row.id });
+          if (getDbClient() !== db) throw new Error('Account changed during permission update');
+          await withAgyPermissionTransition([...linked, { sessionId: row.id, agentKind: row.agentKind, previousMode }],
+            args.mode, getMaker(), commit);
+          if (previousMode !== args.mode) forgetCredentialGrants(row.id);
+        },
+        persist: async mode => {
+          const saved = await db.tx('bots.persistSessionPermission', { sessionId: args.sessionId, mode });
+          if (!saved.updated) throw new Error('Session not found');
+        },
+      });
+      if (result.kind === 'changed') {
+        broadcastSessionPatched(args.sessionId, { permissionMode: args.mode });
+        await syncBotLinkedLanePermissions(args.sessionId);
+      }
+      return result;
+    }),
     stopActiveTurn,
   };
 }

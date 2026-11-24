@@ -863,7 +863,7 @@ async function integrateHistoryItem(
       plan,
       row
         ? {
-            agentKind: row.agentKind === 'codex' || row.agentKind === 'pi' ? row.agentKind : 'cc',
+            agentKind: row.agentKind === 'codex' || row.agentKind === 'pi' || row.agentKind === 'agy' ? row.agentKind : 'cc',
             model: row.model ?? undefined,
             providerId: row.providerId,
             effort: row.effort ?? undefined,
@@ -929,7 +929,7 @@ export async function integrateCompletionForBuild(
     return integrateMakeHistory(
       plan,
       {
-        agentKind: row.agentKind === 'codex' || row.agentKind === 'pi' ? row.agentKind : 'cc',
+        agentKind: row.agentKind === 'codex' || row.agentKind === 'pi' || row.agentKind === 'agy' ? row.agentKind : 'cc',
         model: row.model ?? undefined,
         providerId: row.providerId,
         effort: row.effort ?? undefined,

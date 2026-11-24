@@ -4368,6 +4368,13 @@
         "emptyList": "Clique em \"Adicionar provedor\" abaixo para conectar sua primeira fonte de modelos",
         "emptyModelsConnected": "Conectado — buscando modelos disponíveis. Se a lista continuar vazia, tente novamente em instantes.",
         "discoveryFailed": {
+          "sandboxBlocked": "O Linux bloqueou o bubblewrap. Permita sua execução e tente novamente.",
+          "networkIsolationUnavailable": "Não foi possível iniciar o isolamento de rede. Verifique se pasta e iproute2 estão instalados e podem ser executados.",
+          "unsafeTaskDir": "Não foi possível isolar com segurança a pasta da tarefa ou de estado. Verifique a pasta e as permissões.",
+          "sandboxUnsupported": "Este computador não oferece o isolamento necessário para carregar os modelos.",
+          "agyProbeFailed": "O Cindy não conseguiu carregar a lista de modelos do Antigravity. Tente novamente.",
+          "agyCliUnavailable": "O Cindy não consegue executar uma versão compatível da CLI do Antigravity. Instale ou atualize o agy.",
+          "bwrapMissing": "O Antigravity precisa do bubblewrap para carregar modelos em isolamento. Instale ou repare o bubblewrap neste computador Linux e tente novamente.",
           "network": "Não foi possível acessar este provedor, então sua lista de modelos está indisponível. Verifique as configurações de rede ou proxy e tente novamente.",
           "timeout": "A conexão com este provedor expirou, então sua lista de modelos está indisponível. Verifique sua rede e tente novamente.",
           "upstream": "Este provedor não pode retornar sua lista de modelos agora. Tente novamente mais tarde.",
@@ -4378,6 +4385,13 @@
           "empty": "Este provedor não retornou modelos utilizáveis. Verifique as permissões de acesso da sua conta e tente novamente."
         },
         "discoveryFailedStale": {
+          "sandboxBlocked": "O Linux bloqueou o bubblewrap. Permita sua execução e tente novamente.",
+          "networkIsolationUnavailable": "Não foi possível iniciar o isolamento de rede. Verifique se pasta e iproute2 estão instalados e podem ser executados.",
+          "unsafeTaskDir": "Não foi possível isolar com segurança a pasta da tarefa ou de estado. Verifique a pasta e as permissões.",
+          "sandboxUnsupported": "Este computador não oferece o isolamento necessário para carregar os modelos.",
+          "agyProbeFailed": "O Cindy não conseguiu carregar a lista de modelos do Antigravity. Tente novamente.",
+          "agyCliUnavailable": "O Cindy não consegue executar uma versão compatível da CLI do Antigravity. Instale ou atualize o agy.",
+          "bwrapMissing": "O Antigravity precisa do bubblewrap para carregar modelos em isolamento. Instale ou repare o bubblewrap neste computador Linux e tente novamente.",
           "network": "Não foi possível acessar este provedor. A lista abaixo é da última atualização bem-sucedida. Verifique as configurações de rede ou proxy e tente novamente.",
           "timeout": "A conexão com este provedor expirou. A lista abaixo é da última atualização bem-sucedida. Verifique sua rede e tente novamente.",
           "upstream": "Este provedor não pode retornar sua lista de modelos agora. A lista abaixo é da última atualização bem-sucedida. Tente novamente mais tarde.",
@@ -4439,6 +4453,8 @@
         "metaApiKey": "Chave de API",
         "metaNoAuth": "Local / hospedagem própria · sem autenticação",
         "customAction": "Não está na lista? Adicionar personalizado",
+        "antigravityDesc": "Usa a conta do Google conectada à Antigravity CLI neste computador. Não é necessário ter uma chave de API.",
+        "antigravityNotSignedIn": "Nenhuma conta está conectada à Antigravity CLI neste computador. Execute agy no terminal, entre com sua conta do Google e tente novamente.",
         "oauthDesc": "Entre pelo navegador. Não é necessário ter uma chave de API.",
         "deviceOAuthDesc": "Autorize na página de verificação do provedor com um código de dispositivo de uso único",
         "authorizeInBrowser": "Autorizar no navegador",
@@ -14162,6 +14178,13 @@
       "listAria": "Modos de permissão",
       "autoFallback": "A revisão automática está temporariamente indisponível. As permissões foram alteradas para Padrão e será solicitada confirmação quando necessário.",
       "modes": {
+        "agy": {
+          "isolated": "O Antigravity pode alterar a pasta da tarefa e suas configurações, ler arquivos necessários do sistema e usar a internet. Outras pastas pessoais ficam ocultas. A Cindy compartilha o arquivo de login local apenas para leitura se ele existir. Suas ferramentas podem pedir acesso a outros arquivos.",
+          "host": "O Antigravity pode acessar arquivos da sua conta, inclusive fora da pasta da tarefa. Confira os pedidos antes de autorizar.",
+          "full": "O Antigravity pode alterar os arquivos da sua conta e usar a rede. A Cindy autoriza os pedidos sem perguntar.",
+          "autoIsolated": "A Cindy analisa automaticamente os pedidos. O Antigravity pode alterar a pasta da tarefa e suas configurações, ler arquivos necessários do sistema e usar a internet. Outras pastas pessoais ficam ocultas. A Cindy compartilha o arquivo de login local apenas para leitura se ele existir. Suas ferramentas podem pedir acesso a outros arquivos.",
+          "autoHost": "A Cindy analisa automaticamente os pedidos. O Antigravity pode acessar arquivos da sua conta, inclusive fora da pasta da tarefa. Confira os pedidos antes de autorizar."
+        },
         "claude-code": {
           "ask": {
             "label": "Permissões padrão",
@@ -14799,6 +14822,13 @@
     "verificationFailed": "O Cindy não conseguiu confirmar se o login do ChatGPT foi restaurado. Verifique novamente."
   },
   "chat": {
+    "agyBlocked": "A Cindy impediu o Antigravity de {{action}} “{{path}}” fora da pasta da tarefa. Copie o arquivo para essa pasta para continuar.",
+    "agyFileActions": {
+      "read": "ler",
+      "write": "alterar",
+      "unknown": "usar"
+    },
+    "agyIdleExit": "O Antigravity foi encerrado enquanto a tarefa estava inativa. Envie uma mensagem aqui para continuar.",
     "pluginModelRoute": {
       "routed": "escolheu para esta tarefa",
       "kept": {

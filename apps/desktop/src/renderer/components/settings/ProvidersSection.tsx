@@ -1,4 +1,7 @@
 import { useRemoteProviderDisable } from '@/lib/remoteProviderDisable';
+import { probeAgyModelsIfNeeded, useAgentCapabilities } from '@/hooks/useAgentCapabilities';
+import { withAntigravityModels } from '../new-chat/unifiedModelSelection';
+import { ANTIGRAVITY_PROVIDER_ID } from '@cindy/model-providers';
 import { Select } from '@/components/ui/select';
 import { sameRunLocationProvider, duplicateSubscriptionProviders, subscriptionModelsCoveredBy } from '@cindy/model-providers';
 import { isProviderLogoKind } from '@cindy/model-providers/branding';
@@ -451,7 +454,7 @@ function supportsBuiltinConnectionManagement(provider: ProviderView): boolean {
     provider.id !== 'xd' &&
     // A provider created for subscription accounts is managed through its accounts (2026-11-13).
     !provider.subscriptionPool &&
-    (['openai', 'anthropic', 'xai'].includes(provider.id) ||
+    (['openai', 'anthropic', 'xai', ANTIGRAVITY_PROVIDER_ID].includes(provider.id) ||
       (provider.auth.method === 'oauth' && !!provider.auth.oauth) ||
       (provider.auth.method === 'apiKey' && isBuiltinApiKeyProviderId(provider.id)))
   );
@@ -746,7 +749,9 @@ function DetailHeader({
               ? 'Claude Code'
               : provider.agents[0] === 'pi'
                 ? 'Pi'
-                : 'Codex',
+                : provider.agents[0] === 'agy'
+                  ? 'Antigravity CLI'
+                  : 'Codex',
         })
       : null;
 
@@ -2628,7 +2633,18 @@ export function ProvidersSection() {
   const { dataOwnerId } = useAuth();
   const { confirm } = useConfirmDialog();
   const confirmProviderChange = useProviderChangeConfirmation();
-  const { providers, providerOrder, ownerGeneration, loading, error: catalogError, refetch } = useProviders();
+  const { providers: catalogProviders, providerOrder, ownerGeneration, loading, error: catalogError, refetch } = useProviders();
+  // Google Gemini(只经 Antigravity CLI)的模型清单只存在于 CLI 的 ACP 会话里:已连接时探活一次,
+  // 把清单挂到该来源上,详情页与新建任务的模型面板同口径。
+  const agyCaps = useAgentCapabilities('agy');
+  const antigravityConnected = catalogProviders.some((p) => p.id === ANTIGRAVITY_PROVIDER_ID && p.connected);
+  useEffect(() => {
+    if (antigravityConnected) probeAgyModelsIfNeeded();
+  }, [antigravityConnected]);
+  const providers = useMemo(
+    () => withAntigravityModels(catalogProviders, agyCaps.capabilities?.availableModels ?? []),
+    [catalogProviders, agyCaps.capabilities],
+  );
   // OpenAI 的 reconnect-required 是 useCodexAuth 独有状态(目录 connected 此时为 false):
   // 该状态下 OpenAI 行必须留在左栏,否则「重新连接」入口不可达,用户被迫从向导重发现。
   const codexAuth = useCodexAuth();
@@ -3675,6 +3691,9 @@ export function ProvidersSection() {
                     ((!effectiveSelected.suspended &&
                     effectiveSelected.connected &&
                     effectiveSelected.agents.length > 0 &&
+                    // Antigravity runs only on this computer; offering to share it would hand the
+                    // other side an empty model list.
+                    effectiveSelected.id !== ANTIGRAVITY_PROVIDER_ID &&
                     effectiveSelected.remoteInvocationEnabled !== undefined) ||
                     (effectiveSelected.subscriptionPoolAlias && ownedShares.get(null)?.has(effectiveSelected.id))) && (
                       <RemoteProviderAccessRow

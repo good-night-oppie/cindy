@@ -2442,7 +2442,7 @@ export function createMessagePersistence(deps: MessagePersistencePorts) {
   function onStandaloneTextEvent(
     sessionId: string,
     text: string,
-    agentMeta: Pick<AgentMeta, 'botPrivateReply'> | null = null,
+    agentMeta: Pick<AgentMeta, 'botPrivateReply' | 'agyFileAccessNotice' | 'agySandboxDenial'> | null = null,
   ): string | undefined {
     if (!text.trim()) return undefined;
     const persistId = createId();

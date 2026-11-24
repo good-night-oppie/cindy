@@ -4368,6 +4368,13 @@
         "emptyList": "Cliquez sur « Ajouter un fournisseur » ci-dessous pour connecter votre première source de modèles",
         "emptyModelsConnected": "Connecté : détection des modèles disponibles. Si la liste reste vide, réessayez dans un instant.",
         "discoveryFailed": {
+          "sandboxBlocked": "Linux bloque le lancement de bubblewrap. Autorisez son exécution, puis réessayez.",
+          "networkIsolationUnavailable": "L’isolation réseau ne démarre pas. Vérifiez que pasta et iproute2 sont installés et autorisés à s’exécuter.",
+          "unsafeTaskDir": "Impossible d’isoler le dossier de la tâche ou des données locales. Vérifiez le dossier et ses permissions.",
+          "sandboxUnsupported": "Cet ordinateur ne prend pas en charge l’isolation nécessaire pour charger les modèles.",
+          "agyProbeFailed": "Cindy n’a pas pu charger la liste des modèles Antigravity. Réessayez.",
+          "agyCliUnavailable": "Cindy ne peut pas exécuter une version compatible d’Antigravity CLI. Installez ou mettez à jour agy.",
+          "bwrapMissing": "Antigravity a besoin de bubblewrap pour charger les modèles de façon isolée. Installez ou réparez bubblewrap sur cet ordinateur Linux, puis réessayez.",
           "network": "Impossible de joindre ce fournisseur : sa liste de modèles est indisponible. Vérifiez votre réseau ou vos paramètres de proxy, puis réessayez.",
           "timeout": "La connexion à ce fournisseur a expiré : sa liste de modèles est indisponible. Vérifiez votre réseau, puis réessayez.",
           "upstream": "Ce fournisseur ne peut pas renvoyer sa liste de modèles pour le moment. Réessayez plus tard.",
@@ -4378,6 +4385,13 @@
           "empty": "Ce fournisseur n'a renvoyé aucun modèle utilisable. Vérifiez les accès de votre compte, puis réessayez."
         },
         "discoveryFailedStale": {
+          "sandboxBlocked": "Linux bloque le lancement de bubblewrap. Autorisez son exécution, puis réessayez.",
+          "networkIsolationUnavailable": "L’isolation réseau ne démarre pas. Vérifiez que pasta et iproute2 sont installés et autorisés à s’exécuter.",
+          "unsafeTaskDir": "Impossible d’isoler le dossier de la tâche ou des données locales. Vérifiez le dossier et ses permissions.",
+          "sandboxUnsupported": "Cet ordinateur ne prend pas en charge l’isolation nécessaire pour charger les modèles.",
+          "agyProbeFailed": "Cindy n’a pas pu charger la liste des modèles Antigravity. Réessayez.",
+          "agyCliUnavailable": "Cindy ne peut pas exécuter une version compatible d’Antigravity CLI. Installez ou mettez à jour agy.",
+          "bwrapMissing": "Antigravity a besoin de bubblewrap pour charger les modèles de façon isolée. Installez ou réparez bubblewrap sur cet ordinateur Linux, puis réessayez.",
           "network": "Impossible de joindre ce fournisseur. La liste ci-dessous provient de la dernière actualisation réussie. Vérifiez votre réseau ou vos paramètres de proxy, puis réessayez.",
           "timeout": "La connexion à ce fournisseur a expiré. La liste ci-dessous provient de la dernière actualisation réussie. Vérifiez votre réseau, puis réessayez.",
           "upstream": "Ce fournisseur ne peut pas renvoyer sa liste de modèles pour le moment. La liste ci-dessous provient de la dernière actualisation réussie. Réessayez plus tard.",
@@ -4439,6 +4453,8 @@
         "metaApiKey": "Clé API",
         "metaNoAuth": "Local / auto-hébergé · sans authentification",
         "customAction": "Pas dans la liste ? Ajouter le vôtre",
+        "antigravityDesc": "Utilise le compte Google connecté à Antigravity CLI sur cet ordinateur. Aucune clé API n’est nécessaire.",
+        "antigravityNotSignedIn": "Aucun compte n’est connecté à Antigravity CLI sur cet ordinateur. Lancez agy dans un terminal, connectez-vous avec Google, puis réessayez.",
         "oauthDesc": "Connectez-vous via votre navigateur. Aucune clé API requise.",
         "deviceOAuthDesc": "Autorisez l'accès sur la page de vérification du fournisseur avec un code d'appareil à usage unique",
         "authorizeInBrowser": "Autoriser dans le navigateur",
@@ -14162,6 +14178,13 @@
       "listAria": "Modes d'autorisation",
       "autoFallback": "La revue automatique est temporairement indisponible. Passage aux autorisations par défaut ; une confirmation sera demandée si nécessaire.",
       "modes": {
+        "agy": {
+          "isolated": "Antigravity peut modifier le dossier de la tâche et ses paramètres, lire les fichiers système nécessaires et accéder à Internet. Les autres dossiers personnels sont masqués. Cindy partage le fichier de connexion local en lecture seule s’il existe. Ses outils peuvent demander accès à d’autres fichiers.",
+          "host": "Antigravity peut accéder aux fichiers de votre compte, même hors du dossier de la tâche. Vérifiez ses demandes avant de les accepter.",
+          "full": "Antigravity peut modifier les fichiers de votre compte et utiliser le réseau. Cindy autorise ses demandes sans confirmation.",
+          "autoIsolated": "Cindy examine automatiquement les demandes. Antigravity peut modifier le dossier de la tâche et ses paramètres, lire les fichiers système nécessaires et accéder à Internet. Les autres dossiers personnels sont masqués. Cindy partage le fichier de connexion local en lecture seule s’il existe. Ses outils peuvent demander accès à d’autres fichiers.",
+          "autoHost": "Cindy examine automatiquement les demandes. Antigravity peut accéder aux fichiers de votre compte, même hors du dossier de la tâche. Vérifiez ses demandes avant de les accepter."
+        },
         "claude-code": {
           "ask": {
             "label": "Autorisations par défaut",
@@ -14799,6 +14822,13 @@
     "verificationFailed": "Cindy n'a pas pu confirmer le rétablissement de la connexion ChatGPT. Vérifiez à nouveau."
   },
   "chat": {
+    "agyBlocked": "Cindy a empêché Antigravity de {{action}} « {{path}} » hors du dossier de la tâche. Copiez le fichier dans ce dossier pour continuer.",
+    "agyFileActions": {
+      "read": "lire",
+      "write": "modifier",
+      "unknown": "utiliser"
+    },
+    "agyIdleExit": "Antigravity s’est arrêté pendant que cette tâche était inactive. Envoyez un message ici pour reprendre.",
     "pluginModelRoute": {
       "routed": "a choisi pour cette tâche",
       "kept": {

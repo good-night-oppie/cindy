@@ -10,13 +10,16 @@
  * §14.4 的实测要求与人工走查兜底。
  */
 import { cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react';
+import { i18n } from '@/i18n';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 
-vi.mock('react-i18next', () => ({
+let useRealPermissionTranslation = false;
+vi.mock('react-i18next', async (importOriginal) => ({
+  ...await importOriginal<typeof import('react-i18next')>(),
   useTranslation: () => ({
     // triggerAria 这类 key 用 {label} 插值,mock 直接回吐 label,让按钮可及名可断言
     t: (_key: string, opts?: { defaultValue?: string; label?: string }) =>
-      opts?.defaultValue ?? (opts?.label ? String(opts.label) : _key),
+      useRealPermissionTranslation ? i18n.t(_key, opts) : opts?.defaultValue ?? (opts?.label ? String(opts.label) : _key),
   }),
 }));
 
@@ -26,7 +29,7 @@ const PERMISSION_MODES = [
   { id: 'auto', displayName: '自动审批', description: 'auto desc' },
   { id: 'bypassPermissions', displayName: '完全访问', description: 'bypass desc' },
 ];
-let mockPermissionModes = PERMISSION_MODES;
+let mockPermissionModes: (typeof PERMISSION_MODES[number] & { agyFileIsolation?: boolean })[] = PERMISSION_MODES;
 
 vi.mock('@/hooks/useAgentCapabilities', () => ({
   useAgentCapabilities: () => ({ capabilities: { permissionModes: mockPermissionModes } }),
@@ -35,6 +38,7 @@ vi.mock('@/hooks/useAgentCapabilities', () => ({
 import { PermissionSelector } from '../components/new-chat/PermissionSelector';
 
 afterEach(() => {
+  useRealPermissionTranslation = false;
   mockPermissionModes = PERMISSION_MODES;
   cleanup();
   vi.restoreAllMocks();
@@ -53,6 +57,23 @@ function getTrigger(): HTMLElement {
 }
 
 describe('PermissionSelector (MorphPopover pilot)', () => {
+  it.each([['zh-CN', true], ['zh-CN', false], ['en', true]] as const)(
+    'uses %s and the task host isolation setting (%s) for Antigravity permissions', async (locale, isolated) => {
+      useRealPermissionTranslation = true;
+      await i18n.changeLanguage(locale);
+      mockPermissionModes = ['default', 'auto', 'bypassPermissions'].map(id => ({
+        id, displayName: id, description: 'English capability fallback', agyFileIsolation: isolated,
+      }));
+      renderSelector({ vendorKey: 'agy', permissionMode: 'default' });
+      fireEvent.click(screen.getByRole('button'));
+      const menu = await screen.findByRole('listbox');
+      expect(menu.textContent).not.toContain('English capability fallback');
+      expect(menu.textContent).toContain(i18n.t('newChat.permissionSelector.modes.codex.ask.label'));
+      expect(menu.textContent).toContain(i18n.t('newChat.permissionSelector.modes.agy.' + (isolated ? 'isolated' : 'host')));
+      expect(menu.textContent).toContain(i18n.t('newChat.permissionSelector.modes.agy.full'));
+      await i18n.changeLanguage('en');
+    },
+  );
   // 2026-07-22:PermissionSelector 只在 composer 使用,已统一为「恒走脱身上浮 morph」——
   // 移除 origin/main 的 useMorphPopover opt-in/Radix 回退开关,故删去原「默认用 Radix」用例。
   it('点击 trigger 打开 listbox,四档选项齐全,aria-expanded 同步', async () => {

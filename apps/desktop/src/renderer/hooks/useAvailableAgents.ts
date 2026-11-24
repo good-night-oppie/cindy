@@ -330,11 +330,18 @@ export function __resetAvailableAgentsCacheForTest(): void {
 }
 
 /** Model pickers keep the current Harness visible while excluding unregistered runtimes. */
-export function useModelPickerAgents(current: RuntimeAgentKind, deviceId?: string | null): readonly RuntimeAgentKind[] | undefined {
+export function useModelPickerAgents(
+  current: RuntimeAgentKind,
+  deviceId?: string | null,
+  /** `agy`: also offer Antigravity. Only for pickers whose selection can run on it, and only on this computer. */
+  options?: { agy?: boolean },
+): readonly RuntimeAgentKind[] | undefined {
   const { availableVendors, loaded } = useAvailableAgents(deviceId);
   if (!loaded) return undefined;
-  // 模型选择器里的会话内跨引擎切换仍只覆盖三种引擎;agy 只用于新建任务。
-  return (['claude-code', 'codex', 'pi'] as const).filter(
+  // In-task engine switching still covers three engines; a picker opts in to Antigravity.
+  const engines: readonly RuntimeAgentKind[] = options?.agy && !deviceId
+    ? ['claude-code', 'codex', 'pi', 'agy'] : ['claude-code', 'codex', 'pi'];
+  return engines.filter(
     (agent) => agent === current || availableVendors.has(toVendor(agent)),
   );
 }

@@ -16,7 +16,7 @@ import { cn } from '@/lib/utils';
 import { formatCompactTokens, formatModelShort } from '@/lib/usageFormat';
 import { usageRankOf } from '@/components/new-chat/usagePalette';
 import { type AgentTokenRow, type ModelTokenRow } from './usageHistoryStats';
-import { usageHistoryAgentColor, usageHistoryModelColor } from './usageHistoryColors';
+import { usageHistoryAgentColor, usageHistoryAgentLabel, usageHistoryModelColor } from './usageHistoryColors';
 import { formatUsagePercent } from './formatUsagePercent';
 
 const UNKNOWN_VALUE = '—';
@@ -75,7 +75,7 @@ export function UsageAgentTable({
         {rows.map((row) => (
           <div
             key={row.agentKind}
-            title={`${row.agentKind} · ${t('usageDashboard.tokensOnly', {
+            title={`${usageHistoryAgentLabel(row.agentKind)} · ${t('usageDashboard.tokensOnly', {
               tokens: formatCompactTokens(row.tokens),
             })}`}
             style={{
@@ -112,8 +112,8 @@ export function UsageAgentTable({
                 <td className={cn(TD_CLASS, FIRST_COL_CLASS, 'text-left')}>
                   <span className="flex min-w-0 items-center gap-2">
                     <Swatch color={color} />
-                    <span className="truncate font-medium" title={row.agentKind}>
-                      {row.agentKind}
+                    <span className="truncate font-medium" title={usageHistoryAgentLabel(row.agentKind)}>
+                      {usageHistoryAgentLabel(row.agentKind)}
                     </span>
                   </span>
                 </td>
@@ -180,7 +180,7 @@ export function UsageModelTable({
                   </span>
                   {/* 同一模型 id 可能跨 agent 撞名, 标签让两行区分得开 */}
                   <span className="shrink-0 rounded border border-[var(--border-default)] px-1 py-px text-11 leading-[1.4] text-[var(--text-tertiary)]">
-                    {row.agentKind}
+                    {usageHistoryAgentLabel(row.agentKind)}
                   </span>
                 </span>
               </td>

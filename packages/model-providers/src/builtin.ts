@@ -258,13 +258,36 @@ const GEMINI_PROVIDER: Provider = {
   models: {},
 };
 
-/** 内置供应商(顺序契约见文件头;gemini 追加在 xd 之后,聊天分段与 first-wins 契约零影响)。 */
+/** Google 订阅(经 Antigravity CLI)的内置供应商 id。 */
+export const ANTIGRAVITY_PROVIDER_ID = 'antigravity';
+
+/**
+ * Google Gemini(Google AI 订阅,只经 Antigravity CLI)。
+ *
+ * 与 anthropic 同构:订阅由官方 CLI 用它自己的 Google 登录直连,Cindy 不跑 Google OAuth、
+ * 不读取也不转发这份凭证,所以只声明 agy 一个 agent —— 不给 Claude Code / Codex / Pi 路由。
+ * 模型清单只存在于 agy 的 ACP 会话里,由 host 探活后注入;此处恒为空。
+ * 与上面的 `gemini`(API key,媒体-only)是两条独立来源,互不影响。
+ */
+const ANTIGRAVITY_PROVIDER: Provider = {
+  id: ANTIGRAVITY_PROVIDER_ID,
+  name: 'Google Gemini',
+  source: 'builtin',
+  agents: ['agy'],
+  auth: { method: 'oauth' },
+  access: { kind: 'subscription', product: 'Google AI' },
+  routing: { agy: { upstream: 'agy://acp', authStrategy: 'none' } },
+  models: { agy: [] },
+};
+
+/** 内置供应商(顺序契约见文件头;gemini / antigravity 追加在 xd 之后,聊天分段与 first-wins 契约零影响)。 */
 export const BUILTIN_PROVIDERS: Provider[] = [
   ANTHROPIC_PROVIDER,
   OPENAI_PROVIDER,
   XAI_PROVIDER,
   XD_PROVIDER,
   GEMINI_PROVIDER,
+  ANTIGRAVITY_PROVIDER,
 ].map((provider) => projectProviderMediaModels(provider, bundledModelRegistry, { addDeclared: true }));
 
 /** 打包进 App 的内置目录(离线兜底 / 远端拉取失败时使用)。 */

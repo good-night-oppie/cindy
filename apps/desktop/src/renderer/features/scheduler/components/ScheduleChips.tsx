@@ -60,7 +60,7 @@ import type { SessionReference } from '../../../../shared/sessionReference';
 import { isReviewSessionSource } from '../../../../shared/sessionSource';
 
 export type Destination = 'local' | 'worktree' | 'thread';
-export type AgentKind = 'claude-code' | 'codex' | 'pi';
+export type AgentKind = 'claude-code' | 'codex' | 'pi' | 'agy';
 
 interface ChipButtonProps {
   icon?: React.ReactNode;
@@ -1104,7 +1104,7 @@ export function ModelEffortChip({
     },
     [disabled, discovery],
   );
-  const pickerAgents = useModelPickerAgents(agentKind, agentDeviceId || undefined);
+  const pickerAgents = useModelPickerAgents(agentKind, agentDeviceId || undefined, { agy: true });
   const caps = useAgentCapabilities(agentKind, agentDeviceId || undefined);
   // 触发器(trigger)展示用:仍按 openai-codex/ 与 codex/ 折扣模型的 XD 网关来源可见性过滤,算出当前
   // 选中模型名。下拉内容本体改用聊天的 ModelSelectorContent(它内部按来源/api-key 自行
@@ -1147,7 +1147,8 @@ export function ModelEffortChip({
   const catalogModel = source ? getModel(source, effectiveId, agentKind) : undefined;
   const effectiveEffort = effectiveId ? effortValue || catalogModel?.defaultEffort || current?.defaultEffort || '' : '';
   const modelLabel = catalogModel?.name || current?.displayName || effectiveId || t('scheduler.chips.model.default');
-  const agentLabel = t(`newChat.modelSelector.trigger.agent.${agentKind === 'claude-code' ? 'claudeCode' : agentKind}`);
+  const agentLabel = agentKind === 'agy' ? 'Antigravity'
+    : t(`newChat.modelSelector.trigger.agent.${agentKind === 'claude-code' ? 'claudeCode' : agentKind}`);
   const effortLabel = (e: EffortValue) => t(`effortLevels.${e}`);
   const display = followsSessionModel
     ? [
@@ -1323,7 +1324,7 @@ export function ThreadPickerInline({ value, onSelect, onOpen, reference }: {
             )}
             {sessions.map((s) => (
               <option key={s.id} value={s.id}>
-                {s.title} · {s.agentKind === 'cc' ? 'Claude Code' : s.agentKind === 'pi' ? 'Pi' : 'Codex'}
+                {s.title} · {s.agentKind === 'cc' ? 'Claude Code' : s.agentKind === 'pi' ? 'Pi' : s.agentKind === 'agy' ? 'Antigravity' : 'Codex'}
               </option>
             ))}
           </select>

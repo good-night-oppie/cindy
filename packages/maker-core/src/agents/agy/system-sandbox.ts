@@ -20,7 +20,8 @@
  * 供 translator 在工具结果后追加宿主标注、并给用户白话提示（文案待 JJ 定稿）。
  */
 
-import { spawnSync } from 'node:child_process';
+import { AgyBinaryUnavailableError } from './version.js';
+import { execFile, spawnSync } from 'node:child_process';
 import { existsSync, lstatSync, readFileSync, readlinkSync, realpathSync } from 'node:fs';
 import { chmod, mkdir, mkdtemp, opendir, lstat, writeFile } from 'node:fs/promises';
 import os from 'node:os';
@@ -62,6 +63,10 @@ export interface AgySandboxProbeOk {
   pastaPath: string;
   /** iproute2 `ip`, run inside pasta's namespace to install the private-range rules. */
   ipPath: string;
+  /** This pasta build accepts --dns-host (absent on older builds; see pastaNetArgs). */
+  pastaSupportsDnsHost?: boolean;
+  /** util-linux `setpriv`, used to tie pasta's life to Cindy's (see buildAgySandboxLaunch). */
+  setprivPath?: string;
 }
 export interface AgySandboxProbeFailed {
   ok: false;
@@ -91,9 +96,19 @@ const DEFAULT_IP_CANDIDATES = ['/usr/sbin/ip', '/sbin/ip', '/usr/bin/ip', '/bin/
  * MCP ports. DNS goes to a fixed in-sandbox address forwarded to one upstream.
  */
 export const AGY_SANDBOX_DNS_ADDR = '169.254.1.53';
-export function pastaNetArgs(dnsHost: string | null): string[] {
-  const a = ['--config-net', '--quiet', '--no-map-gw', '-t', 'none', '-u', 'none', '-T', 'none', '-U', 'none'];
-  if (dnsHost) a.push('--dns-forward', AGY_SANDBOX_DNS_ADDR, '--dns-host', dnsHost);
+export function pastaNetArgs(dnsHost: string | null, supportsDnsHost = true, hostLoopbackPorts: readonly number[] = []): string[] {
+  // -T forwards a loopback TCP port inside the sandbox to the same port on the host's loopback.
+  // The only ports ever listed are Cindy's own tool bridge (see AgySandboxLaunchInput).
+  const ports = [...new Set(hostLoopbackPorts)].filter(port => Number.isInteger(port) && port > 0 && port < 65536);
+  const a = ['--config-net', '--quiet', '--no-map-gw', '-t', 'none', '-u', 'none', '-T', ports.length ? ports.join(',') : 'none', '-U', 'none'];
+  if (dnsHost) {
+    a.push('--dns-forward', AGY_SANDBOX_DNS_ADDR);
+    // Older pasta (e.g. the 2024-02 build Ubuntu 24.04 ships) has no --dns-host and exits with
+    // its usage text. It then forwards to the host's own first resolver instead of the one
+    // picked here: the choice of upstream differs, the isolation (no port forwards, no gateway
+    // mapping) is unchanged.
+    if (supportsDnsHost) a.push('--dns-host', dnsHost);
+  }
   return a;
 }
 
@@ -158,36 +173,77 @@ export function parseBwrapVersion(text: string): [number, number, number] | null
  * Checks that bubblewrap exists and can actually create an unprivileged
  * sandbox on this host (Ubuntu 24.04+ AppArmor or container hosts may block it).
  */
-export function probeAgySystemSandbox(deps: AgySandboxProbeDeps = {}): AgySandboxProbe {
+type ProbeResult = ReturnType<NonNullable<AgySandboxProbeDeps['run']>>;
+
+export function probeAgySystemSandbox(deps?: AgySandboxProbeDeps, mode?: 'sandbox'): AgySandboxProbe;
+export function probeAgySystemSandbox(deps: AgySandboxProbeDeps, mode: 'full'): BwrapProbe;
+export function probeAgySystemSandbox(deps: AgySandboxProbeDeps = {}, mode: 'sandbox' | 'full' = 'sandbox'): AgySandboxProbe | BwrapProbe {
+  const steps = mode === 'full' ? fullAccessProbeSteps(deps) : sandboxProbeSteps(deps);
+  let step = steps.next();
+  while (!step.done) step = steps.next((deps.run ?? defaultRun)(...step.value));
+  return step.value;
+}
+
+async function probeForLaunch<T>(steps: Generator<[string, readonly string[]], T, ProbeResult>): Promise<T> {
+  let step = steps.next();
+  while (!step.done) {
+    const [command, args] = step.value;
+    const result = await new Promise<ProbeResult>(resolve => {
+      execFile(command, args, { encoding: 'utf8', timeout: 5000 }, (error, stdout, stderr) =>
+        resolve({ status: error ? (typeof error.code === 'number' ? error.code : null) : 0, stdout, stderr }));
+    });
+    step = steps.next(result);
+  }
+  return step.value;
+}
+
+type BwrapProbe = Pick<AgySandboxProbeOk, 'ok' | 'bwrapPath' | 'version' | 'supportsDisableUserns'> | AgySandboxProbeFailed;
+
+function* bwrapProbeSteps(deps: AgySandboxProbeDeps, trialArgs: string[]): Generator<[string, readonly string[]], BwrapProbe, ProbeResult> {
   const platform = deps.platform ?? process.platform;
   if (platform !== 'linux') {
     return { ok: false, reason: 'unsupported-platform', detail: `platform ${platform}` };
   }
   const exists = deps.exists ?? existsSync;
-  const run = deps.run ?? defaultRun;
   const bwrapPath = (deps.bwrapCandidates ?? DEFAULT_BWRAP_CANDIDATES).find(p => exists(p));
   if (!bwrapPath) return { ok: false, reason: 'bwrap-missing', detail: 'bubblewrap not installed' };
 
-  const v = run(bwrapPath, ['--version']);
+  const v = yield [bwrapPath, ['--version']];
   const parsed = parseBwrapVersion(v.stdout + v.stderr);
   if (v.status !== 0 || !parsed) {
     return { ok: false, reason: 'bwrap-missing', detail: (v.stderr || v.stdout).trim() || 'bwrap --version failed' };
   }
-  const trial = run(bwrapPath, ['--unshare-all', '--share-net', '--die-with-parent',
-    '--ro-bind', '/', '/', '--proc', '/proc', '--dev', '/dev', '--', '/bin/true']);
+  const trial = yield [bwrapPath, [...trialArgs, '--', '/bin/true']];
   if (trial.status !== 0) {
     return { ok: false, reason: 'bwrap-blocked', detail: trial.stderr.trim() || `exit ${trial.status}` };
   }
+  const [maj, min] = parsed;
+  return { ok: true, bwrapPath, version: parsed.join('.'), supportsDisableUserns: maj > 0 || min >= 8 };
+}
+
+function fullAccessProbeSteps(deps: AgySandboxProbeDeps) {
+  return bwrapProbeSteps(deps, ['--die-with-parent', '--bind', '/', '/', '--dev-bind', '/dev', '/dev']);
+}
+
+function* sandboxProbeSteps(deps: AgySandboxProbeDeps): Generator<[string, readonly string[]], AgySandboxProbe, ProbeResult> {
+  const base = yield* bwrapProbeSteps(deps, ['--unshare-all', '--share-net', '--die-with-parent',
+    '--ro-bind', '/', '/', '--proc', '/proc', '--dev', '/dev']);
+  if (!base.ok) return base;
+  const exists = deps.exists ?? existsSync;
   const pastaPath = (deps.pastaCandidates ?? DEFAULT_PASTA_CANDIDATES).find(p => exists(p));
   if (!pastaPath) return { ok: false, reason: 'network-isolation-missing', detail: 'pasta (passt) not installed' };
   const ipPath = (deps.ipCandidates ?? DEFAULT_IP_CANDIDATES).find(p => exists(p));
   if (!ipPath) return { ok: false, reason: 'network-isolation-missing', detail: 'iproute2 (ip) not installed' };
-  const netTrial = run(pastaPath, [...pastaNetArgs(null), '--', ...agyNetGuardCommand(ipPath), '/bin/true']);
+  const netTrial = yield [pastaPath, [...pastaNetArgs(null), '--', ...agyNetGuardCommand(ipPath), '/bin/true']];
   if (netTrial.status !== 0) {
     return { ok: false, reason: 'network-isolation-missing', detail: netTrial.stderr.trim() || `pasta exit ${netTrial.status}` };
   }
-  const [maj, min] = parsed;
-  return { ok: true, bwrapPath, pastaPath, ipPath, version: parsed.join('.'), supportsDisableUserns: maj > 0 || min >= 8 };
+  const pastaHelp = yield [pastaPath, ['--help']];
+  const pastaSupportsDnsHost = `${pastaHelp.stdout}
+${pastaHelp.stderr}`.includes('--dns-host');
+  const setprivPath = ['/usr/bin/setpriv', '/bin/setpriv'].find(p => exists(p));
+  return { ...base, pastaPath, ipPath,
+    pastaSupportsDnsHost, ...(setprivPath ? { setprivPath } : {}) };
 }
 
 // ---------------------------------------------------------------------------
@@ -277,6 +333,7 @@ export async function scanTaskDirForHardlinks(taskDir: string, limit = 200_000):
 
 export interface AgySandboxFsView {
   exists(p: string): boolean;
+  isRegularFile(p: string): boolean;
   /** Returns the link target if p is a symlink, else null. */
   readSymlink(p: string): string | null;
   realpath(p: string): string;
@@ -284,6 +341,7 @@ export interface AgySandboxFsView {
 
 const realFs: AgySandboxFsView = {
   exists: existsSync,
+  isRegularFile: p => { try { return lstatSync(p).isFile(); } catch { return false; } },
   readSymlink: p => { try { return lstatSync(p).isSymbolicLink() ? readlinkSync(p) : null; } catch { return null; } },
   realpath: p => realpathSync(p),
 };
@@ -296,8 +354,25 @@ export interface AgySandboxLaunchInput {
   ipPath: string;
   /** Upstream DNS server pasta forwards to (see pickUpstreamDns); null = no DNS. */
   dnsHost: string | null;
+  /** False on pasta builds without --dns-host; undefined keeps the option (see pastaNetArgs). */
+  pastaSupportsDnsHost?: boolean;
+  /** When set, pasta is started through `setpriv --pdeathsig KILL`. */
+  setprivPath?: string;
+  /**
+   * Owner decision 2026-11-18 (cindy#1): let the sandboxed CLI use the Google sign-in the user
+   * already has in the real home. Exactly one file is exposed, read-only: the CLI's OAuth token.
+   * Nothing else from the real ~/.gemini becomes visible, and the sandbox cannot change the file.
+   */
+  shareCliLogin?: boolean;
   /** File mounted as the sandbox's /etc/resolv.conf (points at AGY_SANDBOX_DNS_ADDR). */
   resolvConfPath?: string;
+  /**
+   * Owner request 2026-11-19 (cindy#1): the sandboxed CLI may reach Cindy's tool bridge, as Codex
+   * can. Exactly these host loopback TCP ports are forwarded; every other host loopback port stays
+   * unreachable. The bridge checks a per-task token on every request, so the port alone grants
+   * nothing. Callers pass only the bridge's own port.
+   */
+  hostLoopbackPorts?: readonly number[];
   /** Ids agy runs as inside the sandbox; default: the caller's. */
   uid?: number;
   gid?: number;
@@ -390,11 +465,22 @@ export function filterAgyUnsandboxedEnv(env: NodeJS.ProcessEnv, homeDir: string,
   return out;
 }
 
+function resolveAgyBinaryPath(binaryPath: string, fs: AgySandboxFsView): string {
+  try {
+    return fs.realpath(binaryPath);
+  } catch (error) {
+    if ((error as NodeJS.ErrnoException).code === 'ENOENT') {
+      throw new AgyBinaryUnavailableError('Antigravity CLI was not found on this computer.', 'agy_binary_missing');
+    }
+    throw error;
+  }
+}
+
 export function buildAgySandboxLaunch(input: AgySandboxLaunchInput): AgySandboxLaunch {
   const fs = input.fs ?? realFs;
   const taskDir = fs.realpath(input.taskDir);
   const homeDir = fs.realpath(input.homeDir);
-  const binary = fs.realpath(input.binaryPath);
+  const binary = resolveAgyBinaryPath(input.binaryPath, fs);
   const writable = (input.writableDirs ?? []).map(w => ({ source: fs.realpath(w.source), target: w.target ?? fs.realpath(w.source) }));
   assertAgyTaskDirPaths(taskDir, homeDir, writable.flatMap(w => [w.source, w.target]));
   const readOnly = (input.readOnlyPaths ?? []).filter(p => fs.exists(p)).map(p => fs.realpath(p));
@@ -402,7 +488,10 @@ export function buildAgySandboxLaunch(input: AgySandboxLaunchInput): AgySandboxL
     input.stateRoot ? fs.realpath(input.stateRoot) : null);
 
   // --share-net shares pasta's isolated namespace (the outer process), never the host's.
-  const a: string[] = ['--unshare-all', '--share-net', '--die-with-parent', '--new-session',
+  // --unshare-user is explicit: pasta makes the caller root in its user namespace, and as root
+  // --unshare-all only *tries* a new user namespace, which bubblewrap then rejects together with
+  // --disable-userns ("requires --unshare-user").
+  const a: string[] = ['--unshare-all', '--unshare-user', '--share-net', '--die-with-parent', '--new-session',
     '--cap-drop', 'ALL', '--hostname', 'agy-sandbox'];
   // pasta maps the caller to root in its user namespace; map back to the real ids.
   a.push('--uid', String(input.uid ?? process.getuid?.() ?? 1000), '--gid', String(input.gid ?? process.getgid?.() ?? 1000));
@@ -426,6 +515,13 @@ export function buildAgySandboxLaunch(input: AgySandboxLaunchInput): AgySandboxL
   if (!isInside(homeDir, '/home')) a.push('--tmpfs', path.dirname(homeDir));
   a.push('--dir', homeDir);
   for (const w of writable) a.push('--bind', w.source, w.target);
+  if (input.shareCliLogin) {
+    const token = path.join(homeDir, ...AGY_CLI_LOGIN_FILE);
+    // The exact regular file only: a symlink (or a symlinked parent) could point anywhere.
+    if (fs.isRegularFile(token) && fs.realpath(token) === token) {
+      a.push('--ro-bind', token, token);
+    }
+  }
   if (!isInside(binary, '/usr')) a.push('--ro-bind', binary, binary);
   for (const r of readOnly) {
     if (isInside(taskDir, r)) continue; // never re-cover the writable task dir
@@ -436,9 +532,13 @@ export function buildAgySandboxLaunch(input: AgySandboxLaunchInput): AgySandboxL
 
   const login = input.login ?? { kind: 'private-state' };
   const loginEnv = login.kind === 'api-key' ? login.env : {};
+  const pastaArgs = [...pastaNetArgs(input.dnsHost, input.pastaSupportsDnsHost !== false, input.hostLoopbackPorts), '--', ...agyNetGuardCommand(input.ipPath), input.bwrapPath, ...a];
+  // bwrap dies with its parent, but its parent is pasta, and pasta outlives a Cindy that is
+  // killed or crashes: the sandboxed agy then keeps running with nobody attached. The parent
+  // death signal ends pasta with Cindy, and bwrap follows.
   return {
-    command: input.pastaPath,
-    args: [...pastaNetArgs(input.dnsHost), '--', ...agyNetGuardCommand(input.ipPath), input.bwrapPath, ...a],
+    command: input.setprivPath ?? input.pastaPath,
+    args: input.setprivPath ? ['--pdeathsig', 'KILL', input.pastaPath, ...pastaArgs] : pastaArgs,
     env: filterAgySandboxEnv({ ...input.env, ...loginEnv }, homeDir, taskDir,
       [...(input.passEnvKeys ?? []), ...Object.keys(loginEnv)]),
   };
@@ -470,6 +570,9 @@ export const AGY_PRIVATE_STATE_DIRS = [
   { name: 'gemini', homeRelative: '.gemini' },
   { name: 'config-antigravity', homeRelative: path.join('.config', 'antigravity') },
 ] as const;
+
+/** The Antigravity CLI's own Google sign-in, relative to the home dir (see shareCliLogin). */
+export const AGY_CLI_LOGIN_FILE = ['.gemini', 'antigravity-cli', 'antigravity-oauth-token'] as const;
 
 export function agyPrivateStateMounts(stateRoot: string, homeDir: string): { source: string; target: string }[] {
   return AGY_PRIVATE_STATE_DIRS.map(d => ({ source: path.join(stateRoot, d.name), target: path.join(homeDir, d.homeRelative) }));
@@ -520,7 +623,7 @@ export async function prepareAgySandboxedLaunch(
     hardlinkScanLimit?: number;
   },
 ): Promise<AgySandboxLaunch & { hardlinkScan: HardlinkScanResult }> {
-  const probe = input.probe ?? probeAgySystemSandbox();
+  const probe = input.probe ?? await probeForLaunch(sandboxProbeSteps({}));
   if (!probe.ok) throw new AgySandboxUnavailableError(probe.reason, probe.detail);
   const hardlinkScan = await scanTaskDirForHardlinks(input.taskDir, input.hardlinkScanLimit);
   if (hardlinkScan.hardlinked) {
@@ -538,7 +641,9 @@ export async function prepareAgySandboxedLaunch(
   const resolvConfPath = dnsHost ? await writeSandboxResolvConf(input.stateRoot) : undefined;
   const launch = buildAgySandboxLaunch({ ...input, writableDirs: [...stateMounts, ...(input.writableDirs ?? [])],
     bwrapPath: probe.bwrapPath, pastaPath: probe.pastaPath, ipPath: probe.ipPath,
-    supportsDisableUserns: probe.supportsDisableUserns, dnsHost, resolvConfPath });
+    supportsDisableUserns: probe.supportsDisableUserns, pastaSupportsDnsHost: probe.pastaSupportsDnsHost,
+    setprivPath: probe.setprivPath,
+    dnsHost, resolvConfPath });
   return { ...launch, hardlinkScan };
 }
 
@@ -589,9 +694,9 @@ export function agySandboxDenialModelNote(denial: AgySandboxDenial): string {
  */
 export const AGY_SANDBOX_USER_COPY_DRAFT = {
   blocked: {
-    'zh-CN': 'Antigravity 想{action}任务文件夹外的「{path}」，Cindy 已拦下。Antigravity 只能用这个任务文件夹里的文件。如果需要这个文件，请把它复制到任务文件夹里，再让 Antigravity 继续。',
-    en: 'Antigravity tried to {action} "{path}", which is outside this task\'s folder. Cindy blocked it. Antigravity can only use files in the task folder. If it needs this file, copy it into the task folder and ask Antigravity to continue.',
-    action: { read: { 'zh-CN': '读取', en: 'read' }, write: { 'zh-CN': '修改', en: 'change' }, unknown: { 'zh-CN': '使用', en: 'use' } },
+    "zh-CN": "Antigravity 想{action}任务文件夹外的「{path}」，已被拦下。在这个权限档位下，Antigravity 不能使用任务文件夹外的这个文件。如果确实需要它，可以把它复制到任务文件夹里，再让 Antigravity 继续。",
+    "en": "Antigravity tried to {action} “{path}”, which is outside this task's folder, and was blocked. At this permission level, Antigravity can't use this file outside the task folder. If it really needs the file, copy it into the task folder and ask Antigravity to continue.",
+    action: { read: { 'zh-CN': '读取', en: 'read' }, write: { 'zh-CN': '修改', en: 'change' }, unknown: { 'zh-CN': '访问', en: 'access' } },
   },
   unavailable: {
     'zh-CN': '这台电脑上开不了 Antigravity 的文件隔离（{reason}）。为了不让它碰到任务文件夹以外的文件，这次没有启动 Antigravity。可以换用其他引擎，或请管理员安装并允许 bubblewrap 和 pasta 后再试。',
@@ -605,3 +710,43 @@ export const AGY_SANDBOX_USER_COPY_DRAFT = {
     },
   },
 } as const;
+
+/**
+ * Full access (permission mode `bypassPermissions`), Codex `danger-full-access` parity: no file
+ * or network isolation. agy sees the whole disk and the host network as the user does.
+ *
+ * bubblewrap is still used, only as a mount remapper: agy's own state stays in the private state
+ * root (so a task keeps one conversation store and can resume across access-mode switches), and
+ * with shareCliLogin the CLI's token file is shown read-only. No namespace other than the mount
+ * namespace is unshared. The environment is still filtered (issue #13).
+ */
+export function buildAgyFullAccessLaunch(input: {
+  bwrapPath: string; binaryPath: string; args: readonly string[]; taskDir: string; homeDir: string;
+  stateMounts: readonly { source: string; target: string }[]; shareCliLogin?: boolean;
+  env: NodeJS.ProcessEnv; passEnvKeys?: readonly string[]; fs?: AgySandboxFsView;
+}): AgySandboxLaunch {
+  const fs = input.fs ?? realFs;
+  const taskDir = fs.realpath(input.taskDir);
+  const homeDir = fs.realpath(input.homeDir);
+  const a: string[] = ['--die-with-parent', '--bind', '/', '/', '--dev-bind', '/dev', '/dev'];
+  for (const m of input.stateMounts) a.push('--bind', m.source, m.target);
+  if (input.shareCliLogin) {
+    const token = path.join(homeDir, ...AGY_CLI_LOGIN_FILE);
+    if (fs.isRegularFile(token) && fs.realpath(token) === token) {
+      a.push('--ro-bind', token, token);
+    }
+  }
+  a.push('--chdir', taskDir, '--', resolveAgyBinaryPath(input.binaryPath, fs), ...input.args);
+  return { command: input.bwrapPath, args: a, env: filterAgyUnsandboxedEnv(input.env, homeDir, taskDir, input.passEnvKeys) };
+}
+
+/** Probe, create the private state root, and build the full-access launch. Fails closed like the sandbox. */
+export async function prepareAgyFullAccessLaunch(input: {
+  binaryPath: string; args: readonly string[]; taskDir: string; homeDir: string; stateRoot: string;
+  env: NodeJS.ProcessEnv; passEnvKeys?: readonly string[]; probe?: BwrapProbe; shareCliLogin?: boolean;
+}): Promise<AgySandboxLaunch> {
+  const probe = input.probe ?? await probeForLaunch(fullAccessProbeSteps({}));
+  if (!probe.ok) throw new AgySandboxUnavailableError(probe.reason, probe.detail);
+  const stateMounts = await ensureAgyPrivateState(input.stateRoot, input.homeDir);
+  return buildAgyFullAccessLaunch({ ...input, bwrapPath: probe.bwrapPath, stateMounts });
+}

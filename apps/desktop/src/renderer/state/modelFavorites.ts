@@ -95,20 +95,29 @@ export const LOCAL_FAVORITE_PROVIDER_ID_MAX_LENGTH = PROVIDER_SHARE_FAVORITE_SOU
 
 
 /**
- * 收藏/跨设备收藏目前只覆盖三种既有引擎:device-link 的 wire 协议
- * (`RemoteModelFavorite.agent`) 也只认这三种,手机端旧版本收到未知引擎会整表拒绝。
- * agy 的模型选择随任务存,不在这套收藏里。
+ * Antigravity (agy) favorites are kept on this computer only. The device-link wire
+ * (`RemoteModelFavorite.agent`) knows three engines, and an older phone rejects the whole
+ * list when it meets an unknown one, so every path that leaves this window for another
+ * device goes through `WireModelFavoriteItem` / `isWireModelFavorite`
+ * (see accessHostModelFavorites), which leave agy entries out.
  */
-export type ModelFavoriteConfig = Omit<ModelConfigCopy, 'agent'> & {
-  agent: Exclude<ModelEngine, 'agy'>;
-};
+export type ModelFavoriteConfig = ModelConfigCopy;
 
 /** 落盘 / 消费的收藏条目:配置 + 独立锚点 uid。 */
 export interface ModelFavoriteItem extends ModelFavoriteConfig {
   uid: string;
 }
 
-/** 编辑一条已有收藏。**模型身份(providerId/modelId)由锚点固定,不可改**——换模型 = 另收藏一条。 */
+/** A favorite the device-link wire can carry: one of the three engines it knows. */
+export type WireModelFavoriteItem = ModelFavoriteItem & { agent: Exclude<ModelEngine, 'agy'> };
+
+export function isWireModelFavorite(item: ModelFavoriteItem): item is WireModelFavoriteItem {
+  return item.agent !== 'agy';
+}
+/**
+ * 编辑一条已有收藏。**模型身份(providerId/modelId)由锚点固定,不可改**——换模型 = 另收藏一条。
+ * The engine of a favorite never changes to or from Antigravity: its models exist under no other engine.
+ */
 export interface ModelFavoritePatch {
   agent?: Exclude<ModelEngine, 'agy'>;
   /** `null` = 清除该条深度(回落推荐档);`undefined`(不传该键)= 不改。 */
@@ -182,11 +191,7 @@ function sanitize(raw: unknown): FavoritesState {
       const seq = seqOfUid(uid);
       if (seq !== null && seq >= uidSeq) uidSeq = seq + 1;
     }
-    // 收藏表只覆盖三种既有引擎:agy 配置在解析阶段就被丢掉(不写回、不迁移)。
-    if (config.agent === 'agy') continue;
-    // agent 已被上面的守卫收窄到三种引擎;展开重建让类型也跟上(不写回、不迁移)。
-    const { agent, ...restConfig } = config;
-    parsed.push({ config: { ...restConfig, agent }, uid });
+    parsed.push({ config, uid });
   }
 
   const items: ModelFavoriteItem[] = parsed.map(({ config, uid }) => {
@@ -353,6 +358,8 @@ function patchConfig(
     // 引擎非法 → **整个 patch 放弃**(不是只忽略这一维):引擎是配置副本的骨架,
     // 只应用剩下的深度 / Fast 会得到一份用户没要过的混合配置。
     if (!isSelectableVendor(patch.agent)) return null;
+    // An Antigravity model exists under no other engine (and no other model under Antigravity).
+    if ((config.agent === 'agy') !== ((patch.agent as ModelEngine) === 'agy')) return null;
     next.agent = patch.agent;
   }
   if ('effort' in patch) {
@@ -589,10 +596,9 @@ export function getModelFavorite(uid: string): ModelFavoriteItem | undefined {
  */
 export function addModelFavorite(config: ModelFavoriteConfig): string {
   const normalizedRaw = normalizeModelConfigCopy(config);
-  if (!normalizedRaw || normalizedRaw.agent === 'agy') return '';
-  // 收藏只覆盖三种既有引擎(见 ModelFavoriteConfig);展开重建带上收窄后的 agent。
-  const { agent: favoriteAgent, ...favoriteRest } = normalizedRaw;
-  const normalized: ModelFavoriteConfig = { ...favoriteRest, agent: favoriteAgent };
+  if (!normalizedRaw) return '';
+  // Antigravity favorites are allowed here: this is the local store (see ModelFavoriteConfig).
+  const normalized: ModelFavoriteConfig = normalizedRaw;
   // 基底取**重读后的**持久化快照(见 freshState):另一窗口刚加的条目要一起带上,
   // 否则本次整表写回会把它抹掉。uidSeq 的单调性、modelConfigCopyIdentity 去重都在这份新鲜基底上判。
   const state = freshState();
@@ -697,17 +703,20 @@ export const __STORAGE_KEY = STORAGE_KEY;
 
 /** Narrow host RPC entry: preserve old data and use existing per-item operations.
  * Synchronous execution prevents an owner change between comparison and write. */
-export function accessHostModelFavorites(ownerId: string | null, mutation?: ModelFavoriteMutation): readonly ModelFavoriteItem[] {
+export function accessHostModelFavorites(ownerId: string | null, mutation?: ModelFavoriteMutation): readonly WireModelFavoriteItem[] {
   if (activeDataOwnerId !== ownerId) throw new Error('Favorites owner not ready');
   const readDurable = () => {
     const raw = window.localStorage.getItem(storageKey());
     return raw === null ? emptyState() : sanitize(JSON.parse(raw));
   };
+  // Everything returned here may be sent to another device (phone, controlling computer).
+  // Antigravity favorites stay on this computer: never listed, never changed from the wire.
+  const wireItems = (state: FavoritesState) => state.items.filter(isWireModelFavorite);
   const base = readDurable();
-  if (!mutation) return base.items;
+  if (!mutation) return wireItems(base);
   const op = parseModelFavoriteMutation(mutation, LOCAL_FAVORITE_PROVIDER_ID_MAX_LENGTH);
   if (op.kind !== 'add') {
-    const current = base.items.find(item => item.uid === op.expected.uid);
+    const current = wireItems(base).find(item => item.uid === op.expected.uid);
     if (!current || !sameModelFavorite(current, op.expected)) throw new Error('Favorite changed; refresh before retrying');
   }
   requireDurableWrite = true;
@@ -715,12 +724,11 @@ export function accessHostModelFavorites(ownerId: string | null, mutation?: Mode
     if (op.kind === 'add') {
       const configRaw = normalizeModelConfigCopy(op.item);
       if (!configRaw || configRaw.agent === 'agy') throw new Error('Invalid favorite');
-      const { agent: replayAgent, ...replayRest } = configRaw;
-      const config: ModelFavoriteConfig = { ...replayRest, agent: replayAgent };
+      const config: ModelFavoriteConfig = configRaw;
       if (base.items.length >= 4096 && !base.items.some(item => modelConfigCopyIdentity(item) === modelConfigCopyIdentity(config))) throw new Error('Favorites limit reached');
       commitOp({kind:'add',config,preferredUid:uidOfSeq(base.uidSeq)},base);
     } else if (op.kind === 'remove') commitOp({kind:'remove',uid:op.expected.uid},base);
     else commitOp({kind:'update',uid:op.expected.uid,patch:{agent:op.item.agent, effort:(op.item.effort as Effort | undefined) ?? null, fast:op.item.fast ?? false}},base);
-    return readDurable().items;
+    return wireItems(readDurable());
   } finally { requireDurableWrite = false; }
 }

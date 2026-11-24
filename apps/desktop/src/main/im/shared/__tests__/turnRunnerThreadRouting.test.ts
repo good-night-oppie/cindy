@@ -81,7 +81,7 @@ vi.mock('../../../localDb/schema', () => ({ sessions: {} }));
 vi.mock('../../../imageCacheStore.desktop', () => ({ resolveSafe: mocks.resolveXdtImageUrl }));
 vi.mock('../sessionRepo', () => ({
   touchUserSent: mocks.touchUserSent,
-  toCoreAgentKind: (kind: string) => (kind === 'codex' ? 'codex' : 'claude-code'),
+  toCoreAgentKind: (kind: string) => (kind === 'codex' || kind === 'agy' ? kind : 'claude-code'),
 }));
 vi.mock('../../messagePersistence', () => ({
   persistUserMessage: mocks.persistUserMessage,
@@ -479,6 +479,33 @@ describe('turnRunner thread = session 路由(slack threadScoped)', () => {
     expect(mocks.bindingGet).toHaveBeenCalledWith(
       expect.objectContaining({ channel: 'slack', scopeKey: '300.3' }),
     );
+  });
+
+  it('re-reads permissions after obtaining the attached agy session lease before wiring', async () => {
+    const row = { ...rowFor('attached-agy'), agentKind: 'agy', permissionMode: 'bypassPermissions' };
+    mocks.bindingGet.mockReturnValue(row.id);
+    mocks.dbSelect.mockReturnValue({
+      from: () => ({ where: () => ({ limit: async () => [{ ...row }] }) }),
+    });
+    const release = vi.fn();
+    let finishRestart!: () => void;
+    const restart = new Promise<void>(resolve => { finishRestart = resolve; });
+    const acquirePendingAgentSwitch = vi.fn(async () => {
+      await restart;
+      return release;
+    });
+    runner = createTurnRunner(fakeAdapter, fakeRepo, fakeCards, { acquirePendingAgentSwitch });
+    const prewire = runner.prewireAttachedSession('T1', 'U1', '300.3');
+    await vi.waitFor(() => expect(acquirePendingAgentSwitch).toHaveBeenCalledOnce());
+    const createSession = mocks.getMaker().createSession;
+    expect(createSession).not.toHaveBeenCalled();
+    row.permissionMode = 'default';
+    finishRestart();
+    await prewire;
+    expect(createSession).toHaveBeenCalledExactlyOnceWith(expect.objectContaining({
+      id: row.id, agentKind: 'agy', permissionMode: 'default',
+    }));
+    expect(release).toHaveBeenCalledOnce();
   });
 
   it('replacement detach keeps the old listener until its active turn drains', async () => {

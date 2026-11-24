@@ -3,6 +3,8 @@ import { act, cleanup, render, screen } from '@testing-library/react';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { i18n, SUPPORTED_LOCALES } from '@/i18n';
 import { SystemCard } from '../SystemCard';
+import { EMPTY_SESSION_STATE, handleStreamEvent, makerChatStore } from '@/lib/makerChatStore';
+import type { Message } from '@/lib/ccAgent.types';
 
 // Unrelated card variants have their own integration tests.
 vi.mock('@/features/bots/useRemoteBots', () => ({ useRemoteBots: () => [] }));
@@ -16,6 +18,47 @@ vi.mock('@/components/chat/MarkdownRenderer', () => ({ MarkdownRenderer: () => n
 afterEach(async () => {
   cleanup();
   await i18n.changeLanguage('en');
+});
+
+it.each([
+  ['Windows', 'Antigravity reported writing outside the task folder on this computer.'],
+  ['Linux', 'This step wrote to a place outside the task folder. It only happened inside the space Cindy sets aside for Antigravity, so nothing on your computer has changed. To change a file outside, copy it into the task folder first.'],
+])('shows the %s file-access notice in the task during and after the reply', (_, text) => {
+  const message: Message = {
+    id: 'row', clientId: 'notice', sessionId: 'file-access', role: 'assistant',
+    content: text, toolUseId: null, agentMeta: { agyFileAccessNotice: true },
+    createdAt: new Date().toISOString(),
+  };
+  const live = {
+    ...EMPTY_SESSION_STATE, agentStatus: { ...EMPTY_SESSION_STATE.agentStatus, isRunning: true },
+    messages: makerChatStore.__mapServerMessagesForTest([message]),
+  };
+  const cardFor = (state: typeof live) => {
+    const row = state.messages.find(row => row.clientId === 'notice');
+    if (!row?.systemCardType) throw new Error('Expected a standalone task notice');
+    return <SystemCard cardType={row.systemCardType} data={row.systemCardData} />;
+  };
+  const { rerender } = render(cardFor(live));
+  expect(screen.getByRole('note').textContent).toBe(text);
+  const done = handleStreamEvent(live, { sessionId: message.sessionId, source: 'agy', type: 'done', data: {} });
+  expect(done.agentStatus.isRunning).toBe(false);
+  rerender(cardFor(done));
+  expect(screen.getByRole('note').textContent).toBe(text);
+});
+
+it('renders a structured blocked read in the current language without its internal reason code', async () => {
+  await i18n.changeLanguage('zh-CN');
+  const path = '/test/<report>';
+  const [row] = makerChatStore.__mapServerMessagesForTest([{
+    id: 'row', clientId: 'blocked', sessionId: 'task', role: 'assistant', content: 'English fallback',
+    toolUseId: null, agentMeta: { agyFileAccessNotice: true, agySandboxDenial: { kind: 'read', path } },
+    createdAt: new Date().toISOString(),
+  }]);
+  render(<SystemCard cardType={row!.systemCardType!} data={row!.systemCardData} />);
+  const text = screen.getByRole('note').textContent;
+  expect(text).toContain(path);
+  expect(text).toContain('读取');
+  expect(text).not.toMatch(/agy_sandbox_blocked|English fallback/);
 });
 
 it('shows a model-only boundary without inventing a Harness change', () => {

@@ -1,3 +1,4 @@
+import { redactSensitiveText } from '@cindy/maker-shared/error-redaction';
 import { parseOutputLimitDetails } from '@cindy/maker-shared';
 import { NATIVE_SUBSCRIPTION_ACCOUNT } from '@cindy/maker-core';
 import { taskResultClientIdForInput } from '../../shared/botCollaboration.js';
@@ -191,13 +192,19 @@ export function prepareSessionEvent(
   }
   const taskCoordination = event.turnScope !== 'background'
     && (deps.agentInputCoordinatorHolder?.isActiveTaskCoordination?.(session.id, event.sessionTurnGeneration) ?? false);
-  if (event.type === 'text' && event.standaloneText === true) {
+  const notice = event.source === 'agy' && event.type === 'error'
+    ? event.data as { isTerminal?: boolean; reason?: string; message?: string } | null : null;
+  const agyFileAccess = notice?.isTerminal === false && typeof notice.message === 'string'
+    && (notice.reason === 'agy_host_write_notice' || notice.reason === 'agy_write_outside_task'
+      || notice.reason === 'agy_sandbox_blocked');
+  if ((event.type === 'text' && event.standaloneText === true) || agyFileAccess) {
     if (isQuietScheduledOutput(event) && !event.runtimeRecovery) return;
     // Deliver through the existing persisted-row channel only. Sending a text
     // event as well would let older renderers adopt the notice as their active
     // assistant stream and overwrite/misdate the next model reply.
     const redacted = deps.redactEventForRenderer(event);
-    const text = (redacted.data as { text?: unknown } | null)?.text;
+    const data = redacted.data as { text?: unknown; message?: unknown; denial?: AgentMeta['agySandboxDenial'] } | null;
+    const text = agyFileAccess ? data?.message : data?.text;
     const inputId = deps.agentInputCoordinatorHolder?.getActiveInputClientId(session.id, event.sessionTurnGeneration);
     // Private-message visibility is still owned by the accepted input, even
     // though the notice is independent of the model's reply/usage state.
@@ -208,8 +215,11 @@ export function prepareSessionEvent(
       ? isBotGroupClientId(inputId) || (!!replyInputId?.startsWith('bot-dm:') && !event.runtimeRecovery)
       : event.agentMeta?.botPrivateReply;
     if (typeof text === 'string') {
-      onStandaloneTextEvent(session.id, text,
-        typeof privateReply === 'boolean' ? { botPrivateReply: privateReply } : null);
+      const visibility = typeof privateReply === 'boolean' ? { botPrivateReply: privateReply } : null;
+      const denial = notice?.reason === 'agy_sandbox_blocked' ? data?.denial : undefined;
+      const blocked = denial && typeof denial.path === 'string' && ['read', 'write', 'unknown'].includes(denial.kind)
+        ? { agySandboxDenial: { kind: denial.kind, path: redactSensitiveText(denial.path) } } : {};
+      onStandaloneTextEvent(session.id, text, agyFileAccess ? { ...visibility, ...blocked, agyFileAccessNotice: true } : visibility);
     }
     return;
   }

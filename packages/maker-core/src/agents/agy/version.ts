@@ -31,15 +31,18 @@ export function compareVersions(a: readonly number[], b: readonly number[]): num
 
 export type AgyVersionReader = (binaryPath: string) => Promise<string>;
 
-const readVersionOutput: AgyVersionReader = binaryPath => new Promise((resolve, reject) => {
-  execFile(binaryPath, ['--version'], { timeout: 15_000, shell: false, windowsHide: true, maxBuffer: 64 * 1024 },
-    (error, stdout) => error ? reject(error) : resolve(String(stdout)));
-});
+export function readAgyVersionOutput(command: string, args: readonly string[] = ['--version'],
+  options: { cwd?: string; env?: NodeJS.ProcessEnv } = {}): Promise<string> {
+  return new Promise((resolve, reject) => {
+    execFile(command, args, { ...options, timeout: 15_000, shell: false, windowsHide: true, maxBuffer: 64 * 1024 },
+      (error, stdout) => error ? reject(error) : resolve(String(stdout)));
+  });
+}
 
 const cache = new Map<string, { mtimeMs: number; size: number; version: string }>();
 
 /** Resolve and gate the installed agy version. Cached per binary path + file identity. */
-export async function assertAgyBinaryUsable(binaryPath: string, reader: AgyVersionReader = readVersionOutput): Promise<string> {
+export async function assertAgyBinaryUsable(binaryPath: string, reader: AgyVersionReader, isolation: string): Promise<string> {
   let info;
   try {
     info = await stat(binaryPath);
@@ -49,10 +52,12 @@ export async function assertAgyBinaryUsable(binaryPath: string, reader: AgyVersi
       `Antigravity CLI (agy) was not found or is not executable at ${binaryPath}. Install it on this computer, then reopen the task.`,
       'agy_binary_missing');
   }
-  const cached = cache.get(binaryPath);
+  const key = JSON.stringify([binaryPath, isolation]);
+  const cached = cache.get(key);
   if (cached && cached.mtimeMs === info.mtimeMs && cached.size === info.size) return cached.version;
   let output: string;
-  try { output = await reader(binaryPath); } catch {
+  try { output = await reader(binaryPath); } catch (error) {
+    if (error instanceof AgyBinaryUnavailableError) throw error;
     throw new AgyBinaryUnavailableError(`Could not read the Antigravity CLI version from ${binaryPath}.`, 'agy_version_unknown');
   }
   const parsed = parseAgyVersion(output);
@@ -63,7 +68,7 @@ export async function assertAgyBinaryUsable(binaryPath: string, reader: AgyVersi
       `Antigravity CLI ${version} does not support ACP. Cindy needs agy ${AGY_MIN_VERSION} or newer; run "agy update" on this computer.`,
       'agy_binary_too_old');
   }
-  cache.set(binaryPath, { mtimeMs: info.mtimeMs, size: info.size, version });
+  cache.set(key, { mtimeMs: info.mtimeMs, size: info.size, version });
   return version;
 }
 

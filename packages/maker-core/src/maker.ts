@@ -1678,6 +1678,16 @@ export class Maker {
     return this.requireAgent(agentKind).capabilities;
   }
 
+  /**
+   * For runtimes whose model catalog only exists after a live ACP session (agy): lazily
+   * probe once so the picker can list models before a task exists. No-op for other agents.
+   */
+  async probeAgentModels(agentKind: AgentKind, cwd: string): Promise<void> {
+    if (agentKind !== 'agy') return;
+    const agent = this.agents[agentKind] as { probeModels?: (cwd: string) => Promise<void> } | undefined;
+    await agent?.probeModels?.(cwd);
+  }
+
   /** 列出已注册的 agent kind */
   listAvailableAgents(): AgentKind[] {
     return Object.keys(this.agents) as AgentKind[];

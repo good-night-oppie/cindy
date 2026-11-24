@@ -4269,6 +4269,13 @@
         "emptyList": "点击左下角「添加供应商」接入你的第一个模型来源",
         "emptyModelsConnected": "已连接，正在自动发现可用模型；若持续为空，请稍后重试。",
         "discoveryFailed": {
+          "sandboxBlocked": "Linux 阻止了 bubblewrap 启动。请允许它运行后重试。",
+          "networkIsolationUnavailable": "网络隔离无法启动。请检查是否已安装 pasta 和 iproute2 并允许它们运行，然后重试。",
+          "unsafeTaskDir": "无法安全隔离本机的任务文件夹或状态文件夹。请检查文件夹及其权限，然后重试。",
+          "sandboxUnsupported": "这台电脑不支持加载模型所需的隔离环境。",
+          "agyProbeFailed": "无法加载 Antigravity 模型列表，请重试。",
+          "agyCliUnavailable": "Cindy 无法运行受支持的 Antigravity CLI。请在本机安装或更新 agy 后重试。",
+          "bwrapMissing": "Antigravity 需要 bubblewrap 才能隔离加载模型。请在这台 Linux 电脑上安装或修复 bubblewrap，然后重试。",
           "network": "无法连接到该供应商，因此拿不到模型列表。请检查网络或 Proxy 设置后重试。",
           "timeout": "连接该供应商超时，因此拿不到模型列表。请检查网络后重试。",
           "upstream": "该供应商暂时无法返回模型列表。请稍后重试。",
@@ -4279,6 +4286,13 @@
           "empty": "该供应商没有返回任何可用模型。请确认账号权限后重试。"
         },
         "discoveryFailedStale": {
+          "sandboxBlocked": "Linux 阻止了 bubblewrap 启动。请允许它运行后重试。",
+          "networkIsolationUnavailable": "网络隔离无法启动。请检查是否已安装 pasta 和 iproute2 并允许它们运行，然后重试。",
+          "unsafeTaskDir": "无法安全隔离本机的任务文件夹或状态文件夹。请检查文件夹及其权限，然后重试。",
+          "sandboxUnsupported": "这台电脑不支持加载模型所需的隔离环境。",
+          "agyProbeFailed": "无法加载 Antigravity 模型列表，请重试。",
+          "agyCliUnavailable": "Cindy 无法运行受支持的 Antigravity CLI。请在本机安装或更新 agy 后重试。",
+          "bwrapMissing": "Antigravity 需要 bubblewrap 才能隔离加载模型。请在这台 Linux 电脑上安装或修复 bubblewrap，然后重试。",
           "network": "无法连接到该供应商，下面是上次获取的模型列表。请检查网络或 Proxy 设置后重试。",
           "timeout": "连接该供应商超时，下面是上次获取的模型列表。请检查网络后重试。",
           "upstream": "该供应商暂时无法返回模型列表，下面是上次获取的结果。请稍后重试。",
@@ -4340,6 +4354,8 @@
         "metaApiKey": "API key",
         "metaNoAuth": "本机 / 自托管 · 无需鉴权",
         "customAction": "没找到？添加自定义",
+        "antigravityDesc": "使用这台电脑上 Antigravity CLI 已登录的 Google 账号，无需 API key。",
+        "antigravityNotSignedIn": "这台电脑上的 Antigravity CLI 还没有登录。请在终端运行 agy 并用 Google 账号登录，然后重试。",
         "oauthDesc": "在浏览器中登录账号，无需 API key。",
         "deviceOAuthDesc": "使用一次性设备码，在供应商验证页面完成授权",
         "authorizeInBrowser": "在浏览器中授权",
@@ -13993,6 +14009,13 @@
       "listAria": "权限模式",
       "autoFallback": "自动审批暂时不可用，已切换为默认权限；需要时会询问你。",
       "modes": {
+        "agy": {
+          "isolated": "Antigravity 发来的审批请求由你决定。它能读写这个任务文件夹和它自己的设置与记录，能读取运行所需的系统文件，也能上网。你个人目录里的其他文件不会放进它的隔离环境。如果这台电脑上的 Antigravity 已经登录，并且登录文件在原来的位置、不是链接，它可以只读这份登录文件来连接你的 Google 账号，但不能修改它；不符合这两条时，它读不到登录信息，也就连不上你的账号。Cindy 的工具在你的电脑上运行，可能会请你允许使用别的文件。",
+          "host": "Antigravity 发来的审批请求由你决定。这台电脑上没有系统级的文件隔离：你的账户能访问的文件，它都能访问。它不发审批请求就做的事，Cindy 拦不住。任务文件夹以外的请求，允许前请先看清楚。",
+          "full": "不使用 Cindy 的文件隔离：你的账户能访问的文件，Antigravity 都能读写，包括任务文件夹以外的，也能联网执行命令。它发来的审批请求直接允许，不再问你。",
+          "autoIsolated": "Antigravity 发来的审批请求由 Cindy 自动审批，可能要多等一会儿。它能读写这个任务文件夹和它自己的设置与记录，能读取运行所需的系统文件，也能上网。你个人目录里的其他文件不会放进它的隔离环境。如果这台电脑上的 Antigravity 已经登录，并且登录文件在原来的位置、不是链接，它可以只读这份登录文件来连接你的 Google 账号，但不能修改它；不符合这两条时，它读不到登录信息，也就连不上你的账号。Cindy 的工具在你的电脑上运行，可能会请你允许使用别的文件。",
+          "autoHost": "Antigravity 发来的审批请求由 Cindy 自动审批，可能要多等一会儿。这台电脑上没有系统级的文件隔离：你的账户能访问的文件，它都能访问。它不发审批请求就做的事，Cindy 拦不住。"
+        },
         "claude-code": {
           "ask": {
             "label": "默认权限",
@@ -14617,6 +14640,13 @@
     "verificationFailed": "暂时无法确认 ChatGPT 登录是否已恢复，请重新检测。"
   },
   "chat": {
+    "agyBlocked": "Antigravity 想{{action}}任务文件夹外的「{{path}}」，已被拦下。在这个权限档位下，Antigravity 不能使用任务文件夹外的这个文件。如果确实需要它，可以把它复制到任务文件夹里，再让 Antigravity 继续。",
+    "agyFileActions": {
+      "read": "读取",
+      "write": "修改",
+      "unknown": "访问"
+    },
+    "agyIdleExit": "任务空闲时 Antigravity 已退出。在这里发送消息即可继续。",
     "pluginModelRoute": {
       "routed": "为这个任务选了",
       "kept": {

@@ -151,6 +151,7 @@ import {
   releaseSessionBindingsForOwnerBoundary,
 } from '../maker-ipc/register.js';
 import { MAKER_PUSH } from '../maker-ipc/channels.js';
+import { setAntigravityModelSource } from './antigravity-models.js';
 import { readProviderGroupBinding } from '../provider-group/bindings.desktop.js';
 import { createSubscriptionFastPolicy } from './subscription-fast-policy.js';
 import { getProviderGroupGuestSwitch } from '../provider-group/guestSwitch.js';
@@ -2094,12 +2095,26 @@ export function getMaker(): Maker {
       },
       runtimeConfig: {},
       logger: desktopMakerLogger,
+      // Without the reviewer every Auto-review request fell back to manual confirmation.
+      reviewAutoPermissionAction,
+      // Cindy's own tools reach agy through the same per-session loopback bridge Pi uses. The
+      // provider list is read at session start: Pi's is assembled after this agent is built.
+      get mcpProviders() { return _mcpProviders.pi ?? _mcpProviders.codex ?? []; },
+      preparePiExtraSpawnConfig: (providers, ctx) => getPiExtraSpawnConfig(providers, desktopMakerLogger, ctx),
       get binaryPath() { return resolveAgyBinary(); },
       uiLocale: () => { try { return app.getLocale(); } catch { return null; } },
       // Linux keeps the bwrap sandbox and still fails closed if it is unavailable. Windows and
       // macOS have no system sandbox; the owner chose to run agy there with a filtered env and a
       // visible notice instead of hiding the engine (cindy#1, 2026-11-17).
-      agySandbox: { allowWithoutSystemSandbox: process.platform !== 'linux' },
+      // shareCliLogin: the Google Gemini provider is connected through the CLI's own sign-in, so the
+      // sandboxed CLI is shown that one token file read-only (owner decision 2026-11-18, cindy#1).
+      agySandbox: { allowWithoutSystemSandbox: process.platform !== 'linux', shareCliLogin: true },
+    });
+
+    setAntigravityModelSource({
+      read: () => agyAgent.capabilities.availableModels,
+      probe: () => agyAgent.probeModels(),
+      changed: () => refreshSelectableModelsAndBroadcast({}),
     });
 
     const makerAgents: ConstructorParameters<typeof Maker>[0]['agents'] = {

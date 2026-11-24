@@ -123,6 +123,26 @@ describe('pickWizardRecommend', () => {
     ]);
   });
 
+  it('lists a signed-in CLI before one that is only installed', () => {
+    expect(
+      pickWizardRecommend({
+        ollamaAlreadyAdded: true,
+        ollamaAppInstalled: false,
+        installedLocalModelCount: 0,
+        memoryGb: 64,
+        cliCandidates: [
+          { providerId: 'anthropic', loggedIn: false, cli: 'claude-cli' },
+          { providerId: 'openai', loggedIn: true, cli: 'codex-cli' },
+          { providerId: 'antigravity', loggedIn: true, cli: 'agy-cli' },
+        ],
+      }),
+    ).toEqual([
+      { kind: 'oauth', providerId: 'openai', reason: 'cli-logged-in', cli: 'codex-cli' },
+      { kind: 'oauth', providerId: 'antigravity', reason: 'cli-logged-in', cli: 'agy-cli' },
+      { kind: 'oauth', providerId: 'anthropic', reason: 'cli-installed', cli: 'claude-cli' },
+    ]);
+  });
+
   it('caps the short list at three items', () => {
     expect(
       pickWizardRecommend({

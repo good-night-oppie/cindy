@@ -1,4 +1,5 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
+import { clearAgyVersionCache } from './version.js';
 import { AgyAgent, type AgyAgentDeps } from './index.js';
 import { AgentNotAuthenticatedError, AgentStartupStoppedError } from '../base-agent.js';
 import type { AcpTransport } from '../acp/transport.js';
@@ -32,6 +33,7 @@ class FakeAgy implements AcpTransport {
   receiptOverride?: (configId: string, value: string) => Record<string, string | undefined>;
   failSessionNew?: { code: number; message: string; data?: unknown };
   cancelResolves = true;
+  cancelWriteBlocked = false;
   stderr = '';
   configOptions() {
     return [MODEL_OPTION(this.config.model), ...(this.config.thought_level ? [EFFORT_OPTION(this.config.thought_level)] : []), MODE_OPTION(this.config.mode)];
@@ -63,6 +65,7 @@ class FakeAgy implements AcpTransport {
         return reply({ configOptions: this.configOptions() });
       }
       case 'session/cancel': {
+        if (this.cancelWriteBlocked) return new Promise<void>(() => {});
         if (!this.cancelResolves) return;
         const prompt = this.lastPrompt();
         if (prompt) queueMicrotask(() => this.emit({ jsonrpc: '2.0', id: prompt.id, result: { stopReason: 'cancelled' } }));
@@ -113,6 +116,79 @@ async function ticks(count = 5) { for (let index = 0; index < count; index++) aw
 afterEach(() => { vi.useRealTimers(); vi.restoreAllMocks(); delete process.env.CINDY_AGY_STALL_TIMEOUT_MS; });
 
 describe('AgyAgent startup and configuration receipts', () => {
+  it('only registers the local tool bridge for an identified task', async () => {
+    const local = 'http://127.0.0.1:9000/mcp';
+    const prepare = vi.fn(async () => ({
+      mcpBridge: { token: 'fixture', servers: [
+        { name: 'helper', url: local }, { name: 'alias', url: 'http://localhost:9000/mcp' },
+      ] },
+    }));
+    const anonymous = create(new FakeAgy(), { preparePiExtraSpawnConfig: prepare });
+    await (await anonymous.start()).close();
+    expect(prepare).not.toHaveBeenCalled();
+    const task = create(new FakeAgy(), { preparePiExtraSpawnConfig: prepare });
+    const handle = await task.start({ sessionId: 'fixture-task' });
+    expect(prepare).toHaveBeenCalledTimes(1);
+    expect(task.fake.written.find(frame => frame.method === 'session/new')?.params?.mcpServers).toEqual([
+      { type: 'http', name: 'helper', url: local, headers: [{ name: 'Authorization', value: 'Bearer fixture' }] },
+    ]);
+    await handle.close();
+  });
+
+  it('discovers and caches the catalog from an empty probe folder with no tool bridge', async () => {
+    const fs = await import('node:fs');
+    const fake = new FakeAgy();
+    const root = fs.mkdtempSync(joinPath(osTmpdir(), 'agy-probe-test-'));
+    const spawn = vi.fn((opts: { cwd: string; binaryPath: string }) => {
+      expect(fs.readdirSync(opts.cwd)).toEqual([]);
+      if (process.platform === 'linux') expect(opts.binaryPath).toBe('/usr/bin/pasta');
+      return fake;
+    });
+    try {
+      const { agent } = create(fake, {
+        binaryPath: fs.realpathSync(process.execPath), readAgyVersion: async () => '1.5.9',
+        agySandbox: { stateRoot: root, allowWithoutSystemSandbox: true, probe: {
+          ok: true, bwrapPath: '/usr/bin/bwrap', pastaPath: '/usr/bin/pasta', ipPath: '/usr/sbin/ip',
+          version: '0.6.1', supportsDisableUserns: false,
+        } },
+        createAgyTransport: spawn,
+      });
+      await Promise.all([agent.probeModels(), agent.probeModels()]);
+      await agent.probeModels();
+      expect(spawn).toHaveBeenCalledTimes(1);
+      const cwd = spawn.mock.calls[0]![0].cwd;
+      expect(fake.written.find(frame => frame.method === 'session/new')?.params).toEqual({ cwd, mcpServers: [] });
+      expect(fs.existsSync(cwd)).toBe(false);
+      expect(agent.capabilities.availableModels.length).toBeGreaterThan(0);
+    } finally {
+      clearAgyVersionCache();
+      fs.rmSync(root, { recursive: true, force: true });
+    }
+  });
+
+  it.each([true, false])('reports the first catalog failure when cleanup fails (session failed: %s)', async sessionFails => {
+    const fs = await import('node:fs');
+    const root = fs.mkdtempSync(joinPath(osTmpdir(), 'agy-probe-errors-'));
+    const fake = new FakeAgy();
+    if (sessionFails) fake.failSessionNew = { code: -32000, message: 'catalog unavailable for fixture' };
+    const close = vi.spyOn(fake, 'close').mockRejectedValue(new Error('fixture cleanup failed'));
+    const { agent } = create(fake, {
+      binaryPath: fs.realpathSync(process.execPath), readAgyVersion: async () => '1.5.9',
+      agySandbox: { stateRoot: root, allowWithoutSystemSandbox: true, probe: {
+        ok: true, bwrapPath: '/usr/bin/bwrap', pastaPath: '/usr/bin/pasta', ipPath: '/usr/sbin/ip',
+        version: '0.6.1', supportsDisableUserns: false,
+      } },
+    });
+    try {
+      await expect(agent.probeModels()).rejects.toThrow(sessionFails ? 'catalog unavailable for fixture' : 'fixture cleanup failed');
+      expect(close).toHaveBeenCalledTimes(1);
+      expect(agent.capabilities.availableModels).toHaveLength(0);
+    } finally {
+      clearAgyVersionCache();
+      fs.rmSync(root, { recursive: true, force: true });
+    }
+  });
+
   // Regression #25: startSession/setModel/send must not use an unspecified or
   // host-disallowed model. Existing tests only covered explicit receipt mismatch.
   // Unit tier: in-memory transport, no real CLI/auth/files. Minimal inputs are a
@@ -267,6 +343,33 @@ describe('AgyAgent startup and configuration receipts', () => {
 });
 
 describe('AgyAgent turns', () => {
+  it.skipIf(process.platform === 'linux')('preserves host tool results without claiming sandbox protection', async () => {
+    const { fake, start } = create(new FakeAgy(), { agySandbox: { allowWithoutSystemSandbox: true } });
+    const handle = await start();
+    const events: AgentEvent[] = [];
+    const drained = drain(handle, events);
+    await handle.send({ type: 'user', content: 'fixture tool results' });
+    const outside = joinPath(osTmpdir(), 'outside-task-fixture.txt');
+    fake.update('tool_call', { toolCallId: 'write', kind: 'edit', status: 'completed', rawInput: { TargetFile: outside } });
+    fake.update('tool_call', { toolCallId: 'failed-write', kind: 'edit', status: 'failed', rawInput: { TargetFile: outside } });
+    fake.update('tool_call', { toolCallId: 'read', kind: 'read', status: 'failed', rawInput: { AbsolutePath: outside },
+      content: [{ type: 'content', content: { type: 'text', text: 'No such file or directory' } }] });
+    fake.finish();
+    await ticks();
+    await handle.close();
+    await drained;
+    const notices = events.filter(e => e.type === 'error').map(e => e.data);
+    expect(notices).toContainEqual(expect.objectContaining({ reason: 'agy_host_write_notice', message: expect.stringContaining('reported writing outside') }));
+    expect(notices).toContainEqual(expect.objectContaining({ reason: 'agy_host_write_notice', message: expect.stringContaining('reported an error while writing outside') }));
+    expect(notices).not.toContainEqual(expect.objectContaining({ reason: 'agy_write_outside_task' }));
+    expect(notices).not.toContainEqual(expect.objectContaining({ reason: 'agy_sandbox_blocked' }));
+    expect(events.filter(e => e.type === 'tool_result_full').map(e => e.data)).toEqual([
+      expect.objectContaining({ toolUseId: 'write', isError: false }),
+      expect.objectContaining({ toolUseId: 'failed-write', isError: true }),
+      expect.objectContaining({ toolUseId: 'read', isError: true, fullText: 'No such file or directory' }),
+    ]);
+  });
+
   it('streams text, thoughts, tools and usage, then completes with prompt usage', async () => {
     const { fake, start } = create();
     const handle = await start();
@@ -306,10 +409,11 @@ describe('AgyAgent turns', () => {
     expect(events.find(event => event.type === 'done')?.data).toMatchObject({ stopReason: 'cancelled', cancelled: true });
   });
 
-  it('fences the process when agy does not confirm cancellation', async () => {
+  it.each([false, true])('fences the process when cancellation does not complete (blocked write: %s)', async blocked => {
     vi.useFakeTimers();
     const fake = new FakeAgy();
     fake.cancelResolves = false;
+    fake.cancelWriteBlocked = blocked;
     const { start } = create(fake);
     const handle = await start();
     await handle.send({ type: 'user', content: 'long task' });
@@ -334,6 +438,7 @@ describe('AgyAgent turns', () => {
     const error = events.find(event => event.type === 'error')!.data as Record<string, unknown>;
     expect(error).toMatchObject({ isTerminal: true, reason: 'agy_acp_disconnected' });
     expect(String(error.message)).toContain('panic: something broke');
+    expect(String(error.message)).toContain('Select Retry');
   });
 });
 

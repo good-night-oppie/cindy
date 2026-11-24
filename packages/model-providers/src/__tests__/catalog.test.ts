@@ -171,6 +171,7 @@ describe("bundled catalog validity (dynamic-first contract)", () => {
       "xai",
       "xd",
       "gemini",
+      "antigravity",
     ]);
     expect(BUNDLED_CATALOG.providers.every((p) => p.source === "builtin")).toBe(
       true,

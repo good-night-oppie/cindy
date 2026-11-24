@@ -760,8 +760,8 @@ export async function performSessionAgentSwitch(
   if (typeof sessionId !== 'string' || sessionId.length === 0) {
     throwIpcError('INVALID_PARAMS', 'sessionId required');
   }
-  if (targetAgentKind !== 'claude-code' && targetAgentKind !== 'codex' && targetAgentKind !== 'pi') {
-    throwIpcError('INVALID_PARAMS', 'targetAgentKind must be claude-code | codex | pi');
+  if (targetAgentKind !== 'claude-code' && targetAgentKind !== 'codex' && targetAgentKind !== 'pi' && targetAgentKind !== 'agy') {
+    throwIpcError('INVALID_PARAMS', 'targetAgentKind must be claude-code | codex | pi | agy');
   }
   if (typeof model !== 'string' || model.length === 0) {
     throwIpcError('INVALID_PARAMS', 'model required');
@@ -786,7 +786,9 @@ export async function performSessionAgentSwitch(
   // 停用轴准入(PR #744 review):意图登记与 applyNow 提交都要过裁决(applyNow 重入
   // 本函数时按最新目录再判一次)。目标路由被停用 → 抛错;隐式默认落点被停用而有
   // 启用替代拷贝 → 直接以显式来源落地(后续意图/提交/内存路由全部用改后的值)。
-  if (deps.assertModelRouteUsable) {
+  // Antigravity has no provider route to judge here: its model is checked against the CLI's own
+  // list when the runtime starts (sessionExecutionSelection).
+  if (deps.assertModelRouteUsable && targetAgentKind !== 'agy') {
     const reroute = await deps.assertModelRouteUsable(
       targetAgentKind,
       model,
@@ -847,6 +849,7 @@ export async function performSessionAgentSwitch(
     params.applyNow === true &&
     params.providerGroupRelocation !== true &&
     targetAgentDeviceId !== currentAgentDeviceId &&
+    targetAgentKind !== 'agy' &&
     deps.resolveProviderGroupTarget
   ) {
     const chosen = await deps.resolveProviderGroupTarget(sessionId, {
@@ -882,7 +885,10 @@ export async function performSessionAgentSwitch(
   const orcaGroupReturnRebuild = groupResolvedToCurrentPosition && (!!row.orcaRole || !!parseOrcaRemoteLead(row.orcaRemoteLead)) && fromDbKind === toDbKind;
   // 落到另一台电脑的完整切换(换引擎或换电脑)：登记与落地前都按那台的目录裁决。同引擎同位置
   // 的模型选择走 selectSameAgentModel，在 SET_MODEL 链路里裁决。
-  if (targetAgentDeviceId && (relocating || orcaGroupReturnRebuild || fromDbKind !== toDbKind)) {
+  if (targetAgentKind === 'agy' && targetAgentDeviceId) {
+    throwIpcError('UNSUPPORTED_CAPABILITY', 'Antigravity runs only on this computer');
+  }
+  if (targetAgentKind !== 'agy' && targetAgentDeviceId && (relocating || orcaGroupReturnRebuild || fromDbKind !== toDbKind)) {
     await deps.assertAgentDeviceRouteUsable?.(
       targetAgentDeviceId,
       targetAgentKind,
@@ -1147,7 +1153,7 @@ export async function performSessionAgentSwitch(
       assertTransferCurrent();
       if (!fresh) throw new Error('Session no longer exists');
       sourceNativeId = fresh.sdkSessionId;
-      if (fresh.sdkSessionId && fresh.workingDir) {
+      if (fresh.sdkSessionId && fresh.workingDir && targetAgentKind !== 'agy') {
         try {
           relocatedNativeId = await deps.relocateNativeHistory({
             sessionId, kind: targetAgentKind, nativeId: fresh.sdkSessionId, workingDir: fresh.workingDir,
@@ -1169,7 +1175,7 @@ export async function performSessionAgentSwitch(
 
     // Revalidate before probing and after any user confirmation, which may take time.
     const revalidateRoute = async () => {
-      if (!deps.assertModelRouteUsable) return;
+      if (!deps.assertModelRouteUsable || targetAgentKind === 'agy') return;
       const rerouteAtCommit = await deps.assertModelRouteUsable(
         targetAgentKind, model, typeof normalizedProviderId === 'string' ? normalizedProviderId : null,
         sessionId, requestedAgentDeviceId,
