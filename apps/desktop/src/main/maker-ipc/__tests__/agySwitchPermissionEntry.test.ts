@@ -405,13 +405,13 @@ describe('switching a task into Antigravity from the model picker, with permissi
     expect(h.row).toMatchObject({ agentKind: 'cc', permissionMode: 'bypassPermissions' });
     expect(h.log).toEqual([]);
 
-    // A pick from the other computer is a registration of its own: it starts with no agreement,
-    // so this computer is asked again; it grants nothing.
+    // This computer agrees. The other computer then registers the same switch again (the same
+    // engine, model and provider), sending along an agreement of its own about something else.
+    // What it sends counts for nothing, and it does not take away what this computer agreed to:
+    // the host keeps its own record for the same switch (the owner's decision on "A2").
     await h.pickGeminiModel();
     await h.pickGeminiModelFromRemote('acceptEdits');
-    await expect(h.send()).rejects.toMatchObject({ code: 'AGENT_SWITCH_PERMISSION_UNCONFIRMED' });
-    expect(h.log).toEqual([]);
-    await h.pickGeminiModel();
+    await expect(h.pendingSwitch()).resolves.toMatchObject({ agyPermissionAgreement: { change: 'fromFullAccess', mode: 'auto' } });
     await h.send();
     expect(h.log).toEqual(['switched agy auto', 'launch agy auto isolated']);
   });
@@ -863,8 +863,10 @@ describe('switching a task into Antigravity from the model picker, with permissi
   // registered the switch again with what the window remembered as agreed, and the host took
   // that as "agreed with this pick": it marked the agreement as given for a send and let a held
   // message go. An agreement is taken with a registration only when the caller says it was given
-  // in that pick's dialog; otherwise the host carries its own record over, as what it was.
-  it('does not take an agreement that merely travels with a later pick, starts that registration with none, and wakes nothing', async () => {
+  // in that pick's dialog. What travels with a later pick is never taken. For the same switch
+  // (only the effort, Fast or thinking changed) the host keeps its own record, as an agreement
+  // about the permissions and not as one given for a send; another model starts with none.
+  it('does not take an agreement that merely travels with a later pick: keeps its own record for the same switch, starts another model with none, and wakes nothing', async () => {
     const h = fixture('bypassPermissions');
     await h.pickGeminiModel(null);
     await expect(h.agreeOnly('bypassPermissions')).resolves.toMatchObject({ agyPermissionAgreementRecorded: true });
@@ -872,7 +874,10 @@ describe('switching a task into Antigravity from the model picker, with permissi
 
     // Another effort, then another model, each with what the window remembers as agreed.
     await h.pickAgainCarrying('bypassPermissions');
-    await expect(h.pendingSwitch()).resolves.toMatchObject({ model: 'gemini-test', agyPermissionAgreement: null });
+    const same = await h.pendingSwitch();
+    expect(same).toMatchObject({ model: 'gemini-test', agyPermissionAgreement: { change: 'fromFullAccess', mode: 'auto' } });
+    expect(same).not.toHaveProperty('agyPermissionAgreementForSend');
+    expect(h.agreedSignals()).toBe(0);
     await h.pickAgainCarrying('bypassPermissions', 'gemini-other');
     const later = await h.pendingSwitch();
     expect(later).toMatchObject({ model: 'gemini-other', agyPermissionAgreement: null });
@@ -977,16 +982,38 @@ describe('switching a task into Antigravity from the model picker, with permissi
     expect(h.row).toMatchObject({ agentKind: 'cc', permissionMode: 'acceptEdits' });
   });
 
-  // QQ, 2026-11-23: an agreement is reused only within the task and the registration it was
-  // given for. Picking again (another model, an effort) is a new registration and starts with
-  // none; the user is asked again before anything is applied.
-  it('starts a later registration with no agreement: what was agreed for the earlier pick is not carried over', async () => {
+  // The owner's decision of 2026-11-24 on "A2", replacing "every later registration starts with
+  // none". An agreement is about one pending switch and one permission conversion. Registering
+  // again for the same engine, model and provider (changing only the effort, Fast or thinking)
+  // is the same switch and keeps it; the user is not asked again. It is kept only while it is
+  // still the conversion the stored mode would get, and never as given for a send.
+  it('keeps the agreement when the same switch is registered again (effort, Fast or thinking changed), and applies it on the next send', async () => {
     const h = fixture('bypassPermissions');
     await h.pickGeminiModel();
     await h.pickGeminiModel(null);
-    await expect(h.send()).rejects.toMatchObject({ code: 'AGENT_SWITCH_PERMISSION_UNCONFIRMED' });
-    expect(h.row).toMatchObject({ agentKind: 'cc', permissionMode: 'bypassPermissions' });
-    expect(h.log).toEqual([]);
+    const kept = await h.pendingSwitch();
+    expect(kept).toMatchObject({ model: 'gemini-test', agyPermissionAgreement: { change: 'fromFullAccess', mode: 'auto' } });
+    expect(kept).not.toHaveProperty('agyPermissionAgreementForSend');
+    expect(h.agreedSignals()).toBe(0);
+    await h.send();
+    expect(h.log).toEqual(['switched agy auto', 'launch agy auto isolated']);
+  });
+
+  it('does not keep it for another model, nor once the task\u2019s mode would be converted differently', async () => {
+    const other = fixture('bypassPermissions');
+    await other.pickGeminiModel();
+    await other.pickAgainCarrying('bypassPermissions', 'gemini-other');
+    await expect(other.pendingSwitch()).resolves.toMatchObject({ model: 'gemini-other', agyPermissionAgreement: null });
+    await expect(other.send()).rejects.toMatchObject({ code: 'AGENT_SWITCH_PERMISSION_UNCONFIRMED' });
+    expect(other.log).toEqual([]);
+
+    const moved = fixture('bypassPermissions');
+    await moved.pickGeminiModel();
+    await moved.setPermission('acceptEdits');
+    await moved.pickGeminiModel(null);
+    await expect(moved.pendingSwitch()).resolves.toMatchObject({ model: 'gemini-test', agyPermissionAgreement: null });
+    await expect(moved.send()).rejects.toMatchObject({ code: 'AGENT_SWITCH_PERMISSION_UNCONFIRMED' });
+    expect(moved.row).toMatchObject({ agentKind: 'cc', permissionMode: 'acceptEdits' });
   });
 
   // The other side of the same ruling: within one registration an agreement is about a kind of

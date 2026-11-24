@@ -112,12 +112,16 @@ How this differs from switching a task to Codex, and what the user is told (cind
   the registration that is still pending, and is about the conversion the task's stored
   mode would get now. An answer about a switch that was withdrawn or replaced, or about
   another conversion, records nothing.
-- A new registration does not inherit an earlier agreement, an earlier dialog's answer
-  or a permission to send. The one exception is the conversion the user has just agreed
-  to in the dialog of that very pick, which is written with the registration it led to.
-  Changing the model, effort, Fast or thinking afterwards registers anew without it.
-  Not every entry that sends the next message can ask; one that cannot is refused as
-  above.
+- An agreement is about one pending switch and one permission conversion, and the host
+  keeps it. Changing only the effort, Fast or thinking registers the same switch again
+  (the same engine, model and provider): the agreement on record stays, as long as it
+  is still the conversion the task's stored mode would get, and the user is not asked
+  again. Another model, provider or engine, or a switch withdrawn and made again, starts
+  with none, except for the conversion the user has just agreed to in the dialog of
+  that very pick, which is written with the registration it led to. What a window sends
+  along with a later pick is never taken. Keeping an agreement never keeps a permission
+  to send: changing a setting sends nothing. Not every entry that sends the next message
+  can ask; one that cannot is refused as above.
 - A held message cannot be interjected into the running turn: that would deliver it to
   the engine it was not written for, without the send step that applies the switch.
 - The mark on a held message is stored with the queue, the pending switch is not. After

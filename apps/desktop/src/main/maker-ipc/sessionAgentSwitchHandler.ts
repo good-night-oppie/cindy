@@ -1244,10 +1244,21 @@ export async function performSessionAgentSwitch(
     //    conversion and to nothing else: it is recorded, never as given for a send, and no held
     //    message goes on it. A held message goes when the user confirms on its banner or
     //    continues the queue.
-    //  - An agreement belongs to the registration it was given for. A later registration
-    //    (another model, an effort, Fast, thinking) is a new one and starts with none: an old
-    //    answer is not carried over to it.
-    if (targetAgentKind === 'agy' && agreedWithThisPick) intent.agyPermissionAgreement = agreedWithThisPick;
+    //  - An agreement is about one pending switch and one permission conversion. Registering
+    //    again for the same engine, model and provider, which is what changing only the effort,
+    //    Fast or thinking does, is the same switch: the agreement on record is kept, as long as
+    //    it is still the conversion the task's stored mode would get now (the owner's decision,
+    //    2026-11-24, on "A2"). Another model, provider or engine is another switch and starts
+    //    with none; so does a switch that was withdrawn and registered again.
+    //  - Keeping the agreement keeps the answer about the permissions only. It is never kept as
+    //    given for a send: changing a setting sends nothing and lets no held message go.
+    const onRecord = sameTarget && targetAgentKind === 'agy' ? existingIntent?.agyPermissionAgreement : undefined;
+    const keptAgreement = onRecord && typeof row?.permissionMode === 'string'
+      && onRecord.change === agySwitchPermissionChange(row.permissionMode)
+      && onRecord.mode === permissionModeAfterSwitchToAgy(row.permissionMode)
+      ? onRecord : undefined;
+    const agreement = agreedWithThisPick ?? keptAgreement;
+    if (targetAgentKind === 'agy' && agreement) intent.agyPermissionAgreement = agreement;
     deps.pendingSwitches.set(sessionId, intent);
     deps.onPendingSwitchChanged?.(sessionId, projectPendingAgentSwitchIntent(intent));
     deps.log.info('agent-switch: intent registered (applies on next send)', {

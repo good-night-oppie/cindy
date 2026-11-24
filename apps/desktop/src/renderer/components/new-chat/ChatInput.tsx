@@ -7711,9 +7711,10 @@ export function ChatInput({
         // The host applies the switch from any entry and checks the stored mode against this.
         // Sent only with the registration that the pick's own dialog led to. Picking another
         // Gemini model, an effort, Fast or thinking afterwards shows no dialog and sends none:
-        // what this window remembers may come from the task's entry or the permission menu, and
-        // a new registration starts with no agreement on the host either: the next message that
-        // needs one asks.
+        // what this window remembers may come from the task's entry or the permission menu. The
+        // host decides what stands: for the same switch (only the effort, Fast or thinking
+        // changed) it keeps its own record; for another model it starts with none and the next
+        // message that needs an agreement asks.
         const agreedInThisPick = targetAgentKind === 'agy' && !deviceLinkDeviceId && agreedInPickDialog;
         const agyPermissionAgreement = agreedInThisPick ? readAgySwitchPermissionAgreed(sourceSessionId) : undefined;
         const switchOptions = {
