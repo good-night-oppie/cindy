@@ -8,7 +8,7 @@ import os from 'node:os';
 import path from 'node:path';
 import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it } from 'vitest';
 import {
-  AGY_HOST_PATH_USER_COPY, AgyLinkOutsideTaskError, agyWriteOutsideTask, checkAgyTaskPath, isInsideDir,
+  AGY_HOST_PATH_USER_COPY, AgyLinkOutsideTaskError, agyLocalPath, agyWriteOutsideTask, checkAgyTaskPath, isInsideDir,
   listAgyTaskDir, openAgyTaskFile, readAgyTaskFile, registerAgyTaskDir, setAgyTaskDirStoreFile, walkAgyTaskDir,
 } from './host-path-guard.js';
 import { AgyTranslator } from './translator.js';
@@ -374,5 +374,34 @@ describe('AgyAgent wiring', () => {
         .rejects.toThrow(AGY_HOST_PATH_USER_COPY.linkOutside['zh-CN']);
       expect(written.some(frame => frame.method === 'session/prompt')).toBe(false);
     } finally { await handle.close(); }
+  });
+});
+
+// Bug: on Windows every write inside the task folder was reported as "written outside the task
+// folder" (Windows acceptance run on 2026-11-24, CLI 1.5.15). agy names the target as `C:\...` when
+// the call starts and as `/C:/...` in the `completed` update; the second was read as a path on
+// another root. No existing case has a Windows drive path. Unit tier: the production check, the
+// update as agy sent it, a real temporary folder. Minimal failing input: one completed write_file.
+describe('Windows drive paths in agy write updates', () => {
+  it('reads only the URL-style drive shape back as a drive path, and only on Windows', () => {
+    expect(agyLocalPath('/C:/Users/u/t.txt', 'win32')).toBe('C:/Users/u/t.txt');
+    expect(agyLocalPath('/C:\\Users\\u\\t.txt', 'win32')).toBe('C:\\Users\\u\\t.txt');
+    for (const unchanged of ['/C:', '/CC:/x', '/home/u/t.txt', 'C:\\x', '//server/share/x'])
+      expect(agyLocalPath(unchanged, 'win32')).toBe(unchanged);
+    expect(agyLocalPath('/C:/Users/u/t.txt', 'linux')).toBe('/C:/Users/u/t.txt');
+  });
+
+  it.runIf(process.platform === 'win32')('a completed write inside the task folder is not reported as outside; one outside still is', () => {
+    const work = realpathSync(mkdtempSync(path.join(os.tmpdir(), 'agy-drive-')));
+    try {
+      const completed = (target: string) => ({
+        name: 'write_file', kind: 'edit', status: 'completed',
+        args: { Content: 'x', Path: target }, rawInput: { Content: 'x', Path: target },
+        locations: [{ path: '/' + target.replaceAll('\\', '/') }],
+      });
+      expect(agyWriteOutsideTask(completed(path.join(work, 't.txt')), work, os.homedir())).toBeNull();
+      const outside = path.join(path.dirname(work), 'elsewhere.txt');
+      expect(agyWriteOutsideTask(completed(outside), work, os.homedir())).not.toBeNull();
+    } finally { rmSync(work, { recursive: true, force: true }); }
   });
 });
