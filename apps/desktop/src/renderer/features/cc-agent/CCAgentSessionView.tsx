@@ -5637,6 +5637,7 @@ function CCAgentSessionContent({
                 deviceLinkDeviceName={controlledDeviceName}
                 agySwitchPending={agentSwitchIntent?.target === 'agy'}
                 agySwitchKeepsPermissions={agySwitchPermissionChange(session?.permissionMode) === null}
+                agyTaskRunsAntigravity={!!session && dbToMakerAgentKind(session.agentKind) === 'agy'}
                 agentDeviceId={session?.agentDeviceId}
                 modelId={session?.model}
                 providerId={session?.providerId}

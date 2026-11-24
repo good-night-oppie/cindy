@@ -15002,6 +15002,8 @@
       "agentSwitchPermissionUnconfirmedRemoteNamed": "This message hasn't been sent. Switching to Antigravity will change this task's permissions, and that change has to be confirmed on “{{device}}”, the computer the task runs on, before Cindy switches and sends it. Once it's confirmed there, select Retry if this message still hasn't been sent.",
       "agentSwitchPermissionKept": "This message hasn't been sent. Switching to Antigravity won't change this task's permissions; select Send to send this message.",
       "agentSwitchPermissionKeptSend": "Send",
+      "agentSwitchPermissionAlreadySwitched": "This message hasn't been sent. This task has already switched to Antigravity; select Send to send this message.",
+      "agentSwitchPermissionAlreadySwitchedRemote": "This message hasn't been sent. This task has already switched to Antigravity; select Retry to send this message.",
       "agentSwitchPermissionSwitchGone": "This message hasn't been sent. It was waiting for the task to switch to Antigravity, but that switch is no longer pending. To switch, pick an Antigravity model again, select Switch Agent, then confirm sending when prompted; only then is this message sent. If you don't want to switch, select Queued next to this message and choose Cancel send; the message is removed, so type it again and send it.",
       "agentSwitchPermissionReview": "Review and confirm",
       "credentialSwitchBusy": "Another Codex task is still running, so the provider for this session can't be applied yet (the shared Codex process needs a restart). Retry after those tasks finish.",

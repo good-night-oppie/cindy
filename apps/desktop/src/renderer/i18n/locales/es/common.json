@@ -15098,6 +15098,8 @@
       "agentSwitchPermissionUnconfirmedRemoteNamed": "Este mensaje aún no se ha enviado. Cambiar a Antigravity cambiará los permisos de esta tarea, y ese cambio debe confirmarse en «{{device}}», el ordenador donde se ejecuta la tarea, antes de que Cindy cambie y lo envíe. Cuando se haya confirmado allí, selecciona «Reintentar» si este mensaje sigue sin enviarse.",
       "agentSwitchPermissionKept": "Este mensaje aún no se ha enviado. Cambiar a Antigravity no cambia los permisos de esta tarea; selecciona «Enviar» para que este mensaje se envíe.",
       "agentSwitchPermissionKeptSend": "Enviar",
+      "agentSwitchPermissionAlreadySwitched": "Este mensaje aún no se ha enviado. Esta tarea ya ha cambiado a Antigravity; selecciona «Enviar» para que este mensaje se envíe.",
+      "agentSwitchPermissionAlreadySwitchedRemote": "Este mensaje aún no se ha enviado. Esta tarea ya ha cambiado a Antigravity; selecciona «Reintentar» para que este mensaje se envíe.",
       "agentSwitchPermissionSwitchGone": "Este mensaje aún no se ha enviado. Estaba esperando a que la tarea cambiara a Antigravity, pero ese cambio ya no está pendiente. Para cambiar, vuelve a elegir un modelo de Antigravity, selecciona «Cambiar de Agent» y, a continuación, confirma el envío cuando se te pida; solo entonces se envía este mensaje. Si no quieres cambiar, selecciona «En cola» junto a este mensaje y elige «Cancelar envío»; el mensaje se elimina, así que escríbelo de nuevo y envíalo.",
       "agentSwitchPermissionReview": "Revisar y confirmar",
       "credentialSwitchBusy": "Otra tarea de Codex sigue en ejecución, por lo que aún no se puede aplicar el proveedor de esta sesión (el proceso compartido de Codex necesita reiniciarse). Reintenta cuando terminen esas tareas.",

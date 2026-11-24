@@ -14937,6 +14937,8 @@
       "agentSwitchPermissionUnconfirmedRemoteNamed": "这条消息还没有发出。切换到 Antigravity 会改变这个任务的权限，这次改变要在任务所在的电脑「{{device}}」上确认，确认后才会切换并发送。那边确认后，如果这条消息还没发出，点「重试」。",
       "agentSwitchPermissionKept": "这条消息还没有发出。切换到 Antigravity 不会改变这个任务的权限；点「发送」，这条消息才会发出。",
       "agentSwitchPermissionKeptSend": "发送",
+      "agentSwitchPermissionAlreadySwitched": "这条消息还没有发出。这个任务已经切换到 Antigravity 了；点「发送」，这条消息才会发出。",
+      "agentSwitchPermissionAlreadySwitchedRemote": "这条消息还没有发出。这个任务已经切换到 Antigravity 了；点「重试」，这条消息才会发出。",
       "agentSwitchPermissionSwitchGone": "这条消息还没有发出。它在等任务切换到 Antigravity，但那次切换已经失效了。要切换的话，重新选一个 Antigravity 的模型，在弹窗里点「切换 Agent」，再按接下来的提示确认发送，这条消息才会发出。不想切换的话，点这条消息旁的「排队中」，选「取消发送」，这条消息会被移除，再重新输入并发送。",
       "agentSwitchPermissionReview": "查看并确认",
       "credentialSwitchBusy": "其他 Codex 任务仍在运行，暂时无法应用本任务选择的供应商（共享的 Codex 进程需要重启）。等这些任务结束后再点「重试」。",
