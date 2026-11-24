@@ -6979,11 +6979,17 @@ describe('AgentInputCoordinator send transaction', () => {
       expect(host.dispatched).toEqual([]);
       const now = host.h.coordinator.getProjection(sid);
       expect(now.pendingQueue.map((q) => q.clientId)).toEqual(['q-2']);
-      expect(now.pendingQueue[0]?.awaitsAgySwitchConfirmation).toBe(true);
       expect(now.recovery).toEqual({ kind: 'queue-head', clientId: 'q-2' });
       expect(now.error).toMatch(/^AGENT_SWITCH_PERMISSION_UNCONFIRMED: /);
+      // Stopped once, on account of the answer about the other message; not marked as held for
+      // the switch, which would keep it from going at all if the switch were withdrawn later
+      // (DD 7107111403, 3). Its own retry sends it.
+      expect(now.pendingQueue[0]?.awaitsAgySwitchConfirmation).toBeUndefined();
+      expect(host.heldMessage()).toBeUndefined();
 
-      await host.confirmToSend();
+      // Even with the switch withdrawn since: the engine stand-in sends on the engine the task has.
+      host.pendingSwitches.clear(sid);
+      await host.h.coordinator.retryLastError(sid);
       await host.settle();
       expect(host.dispatched).toEqual(['second']);
       await host.turnEnds();

@@ -821,6 +821,13 @@ interface SessionInputState {
    * set is emptied when the queue is paused.
    */
   agySwitchHoldsLetGo?: Set<string>;
+  /**
+   * The message that was stopped at the dispatch only because an answer about another message
+   * was still outstanding (agySwitchLetGo). It is stopped once, with the banner, and is not
+   * marked as held for the switch: it was never refused for the switch itself, and the mark
+   * would keep it from ever going if the switch were withdrawn afterwards (DD 7107111403, 3).
+   */
+  agySwitchAnswerLapsedOn?: string | null;
   /** Queue head whose steer delivery is unknown; its protective pause needs an explicit user decision. */
   uncertainDeliveryClientId: string | null;
   queueExpanded: boolean;
@@ -5947,6 +5954,7 @@ export class AgentInputCoordinator {
       const holdLetGo = !!head.agySwitchHoldId && dispatching.agySwitchHoldsLetGo?.has(head.agySwitchHoldId) === true;
       const notTheOneLetGo = !head.autoResume && (heldRow ? !holdLetGo : letGo !== null);
       if (!head.autoResume) dispatching.agySwitchLetGo = null;
+      dispatching.agySwitchAnswerLapsedOn = notTheOneLetGo && !heldRow ? head.clientId : null;
       const heldInstead = (): AgentInputSendResult => {
         const refusal = new AgentSwitchPermissionUnconfirmedError();
         return { kind: 'host-send', accepted: false, code: refusal.code, message: refusal.message };
@@ -6357,8 +6365,11 @@ export class AgentInputCoordinator {
         latest.pendingQueue = [item, ...latest.pendingQueue];
         this.prependPendingCompactWaitClientId(latest, item.clientId);
       }
-      // Outlives the pending switch it waits for (see the field).
-      if (heldForAgySwitch) {
+      // Outlives the pending switch it waits for (see the field). Not for a message stopped
+      // only on account of an answer about another one: its ordinary retry sends it.
+      const stoppedForAnotherAnswer = latest.agySwitchAnswerLapsedOn === item.clientId;
+      latest.agySwitchAnswerLapsedOn = null;
+      if (heldForAgySwitch && !stoppedForAnotherAnswer) {
         for (const queued of latest.pendingQueue) {
           if (queued.clientId === item.clientId) {
             queued.awaitsAgySwitchConfirmation = true;
