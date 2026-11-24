@@ -639,6 +639,17 @@ function scanShell(line: string, startBase: string | null, homeDir: string, dept
 }
 
 /** Target paths of a write-type agy tool call, as written by the call. Empty for anything else. */
+/**
+ * On Windows, agy reports some locations of a finished call as `/C:/dir/file` (a URL-style path;
+ * observed on CLI 1.5.15 in the `completed` update of write_file, while the call itself names
+ * `C:\dir\file`). Read as a Windows path that is `\C:\dir\file` on the current drive,
+ * which is never inside the task folder, so every write was reported as outside it. Only this exact
+ * shape is changed, and only on Windows; every other path is returned as it is.
+ */
+export function agyLocalPath(raw: string, platform: NodeJS.Platform = process.platform): string {
+  return platform === 'win32' && /^\/[A-Za-z]:[\\/]/.test(raw) ? raw.slice(1) : raw;
+}
+
 export function agyWriteTargets(tool: AcpRecord): { paths: string[]; cwd?: string; command?: string } {
   const input = { ...record(tool.args), ...record(tool.rawInput) };
   const cwd = [input.Cwd, input.cwd].find((v): v is string => typeof v === 'string' && v.length > 0);
@@ -651,12 +662,12 @@ export function agyWriteTargets(tool: AcpRecord): { paths: string[]; cwd?: strin
   if (!isWrite) return { paths: [] };
   const paths: string[] = [];
   for (const [key, value] of Object.entries(input)) {
-    if (typeof value === 'string' && value && PATH_KEY_RE.test(key)) paths.push(value);
+    if (typeof value === 'string' && value && PATH_KEY_RE.test(key)) paths.push(agyLocalPath(value));
   }
   if (Array.isArray(tool.locations)) {
     for (const location of tool.locations) {
       const p = record(location).path;
-      if (typeof p === 'string' && p) paths.push(p);
+      if (typeof p === 'string' && p) paths.push(agyLocalPath(p));
     }
   }
   return { paths, cwd };
